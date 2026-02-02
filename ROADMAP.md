@@ -38,7 +38,7 @@ VaisDB solves the fundamental problem of RAG systems: **4 databases for 1 use ca
 
 | Phase | Name | Status | Progress |
 |-------|------|--------|----------|
-| 0 | Architecture & Design Decisions | ⏳ Planned | 0/24 (0%) |
+| 0 | Architecture & Design Decisions | ✅ Complete | 24/24 (100%) |
 | 1 | Storage Engine | ⏳ Planned | 0/38 (0%) |
 | 2 | SQL Engine | ⏳ Planned | 0/42 (0%) |
 | 3 | Vector Engine | ⏳ Planned | 0/24 (0%) |
@@ -54,16 +54,17 @@ VaisDB solves the fundamental problem of RAG systems: **4 databases for 1 use ca
 
 ## Phase 0: Architecture & Design Decisions
 
-> **Status**: ⏳ Planned
+> **Status**: ✅ Complete
 > **Dependency**: None
 > **Goal**: Lock in all decisions that are impossible/painful to change after implementation begins
 > **Model**: Opus (fixed - architecture decisions)
+> **Design Documents**: `docs/architecture/stage1-6*.md`
 
 These decisions affect ALL subsequent phases. Getting them wrong means rewriting from scratch.
 
 ### Stage 1 - On-Disk Format Decisions (IMMUTABLE after first user)
 
-- [ ] **Unified page header format (48 bytes)** - All 4 engines share this header:
+- [x] **Unified page header format (48 bytes)** - All 4 engines share this header:
   ```
   page_id: u32, page_type: u8 (256 types), engine_tag: u8,
   page_lsn: u64, txn_id: u64, checksum: u32 (CRC32C),
@@ -71,10 +72,10 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
   prev_page: u32, next_page: u32, overflow_page: u32,
   compression_algo: u8, format_version: u8, reserved: u16
   ```
-- [ ] **Page type registry** - Define all page types upfront: DATA, BTREE_INTERNAL, BTREE_LEAF, HNSW_NODE, HNSW_LAYER, GRAPH_ADJ, GRAPH_NODE, INVERTED_POSTING, INVERTED_DICT, FREELIST, OVERFLOW, META, WAL_SEGMENT, CATALOG
-- [ ] **Default page size decision** - 8KB default, 16KB for vector-heavy workloads. Document that this is **IMMUTABLE** after database creation
-- [ ] **File layout strategy** - Bundle directory (`.vaisdb/`): `data.vdb`, `wal.vdb`, `vectors.vdb`, `fulltext.vdb`, `meta.vdb`. Appears as single unit, internal separation for I/O parallelism
-- [ ] **MVCC tuple metadata format (28 bytes)** - Every row carries:
+- [x] **Page type registry** - Define all page types upfront: DATA, BTREE_INTERNAL, BTREE_LEAF, HNSW_NODE, HNSW_LAYER, GRAPH_ADJ, GRAPH_NODE, INVERTED_POSTING, INVERTED_DICT, FREELIST, OVERFLOW, META, WAL_SEGMENT, CATALOG
+- [x] **Default page size decision** - 8KB default, 16KB for vector-heavy workloads. Document that this is **IMMUTABLE** after database creation
+- [x] **File layout strategy** - Bundle directory (`.vaisdb/`): `data.vdb`, `wal.vdb`, `vectors.vdb`, `fulltext.vdb`, `meta.vdb`. Appears as single unit, internal separation for I/O parallelism
+- [x] **MVCC tuple metadata format (28 bytes)** - Every row carries:
   ```
   txn_id_create: u64, txn_id_expire: u64,
   undo_ptr: u64, cmd_id: u32
@@ -83,47 +84,47 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ### Stage 2 - WAL Design (Affects crash recovery of ALL engines)
 
-- [ ] **Unified WAL record header** - `lsn: u64, txn_id: u64, prev_lsn: u64, record_type: u8, engine_type: u8, record_length: u32, timestamp: u64`
-- [ ] **Relational WAL records** - PAGE_WRITE, TUPLE_INSERT/DELETE/UPDATE, BTREE_SPLIT/MERGE
-- [ ] **Vector WAL records** - HNSW_INSERT_NODE (all layer edges), HNSW_DELETE_NODE, HNSW_UPDATE_EDGES, HNSW_LAYER_PROMOTE, VECTOR_DATA_WRITE, QUANTIZATION_UPDATE
-- [ ] **Graph WAL records** - GRAPH_NODE_INSERT/DELETE, GRAPH_EDGE_INSERT/DELETE (both adjacency lists!), GRAPH_PROPERTY_UPDATE, ADJ_LIST_PAGE_SPLIT
-- [ ] **Full-text WAL records** - POSTING_LIST_APPEND/DELETE, DICTIONARY_INSERT/DELETE, TERM_FREQ_UPDATE
-- [ ] **Meta WAL records** - TXN_BEGIN/COMMIT/ABORT, CHECKPOINT_BEGIN/END, SCHEMA_CHANGE
-- [ ] **Physiological logging strategy** - Page-level physical + intra-page logical. Vector data uses logical logging (operation + params) since HNSW insertion is non-deterministic
+- [x] **Unified WAL record header** - `lsn: u64, txn_id: u64, prev_lsn: u64, record_type: u8, engine_type: u8, record_length: u32, timestamp: u64`
+- [x] **Relational WAL records** - PAGE_WRITE, TUPLE_INSERT/DELETE/UPDATE, BTREE_SPLIT/MERGE
+- [x] **Vector WAL records** - HNSW_INSERT_NODE (all layer edges), HNSW_DELETE_NODE, HNSW_UPDATE_EDGES, HNSW_LAYER_PROMOTE, VECTOR_DATA_WRITE, QUANTIZATION_UPDATE
+- [x] **Graph WAL records** - GRAPH_NODE_INSERT/DELETE, GRAPH_EDGE_INSERT/DELETE (both adjacency lists!), GRAPH_PROPERTY_UPDATE, ADJ_LIST_PAGE_SPLIT
+- [x] **Full-text WAL records** - POSTING_LIST_APPEND/DELETE, DICTIONARY_INSERT/DELETE, TERM_FREQ_UPDATE
+- [x] **Meta WAL records** - TXN_BEGIN/COMMIT/ABORT, CHECKPOINT_BEGIN/END, SCHEMA_CHANGE
+- [x] **Physiological logging strategy** - Page-level physical + intra-page logical. Vector data uses logical logging (operation + params) since HNSW insertion is non-deterministic
 
 ### Stage 3 - MVCC Strategy Decisions
 
-- [ ] **In-place update + undo log** (InnoDB style) - Chosen over append-only because vector data is large (6KB/vector at 1536dim), bloat would be severe
-- [ ] **MVCC for vector indexes: post-filter strategy** - HNSW searches top_k * oversample_factor, then filters by MVCC visibility. Oversample ratio adapts based on uncommitted_ratio
-- [ ] **MVCC for graph adjacency lists** - Each AdjEntry carries `txn_id_create`/`txn_id_expire`. Traversal checks visibility per edge. Bitmap cache for hot snapshots
-- [ ] **Garbage collection design** - Low water mark from Active Transaction Table. Per-engine GC: undo log cleanup, HNSW soft-delete compaction, adjacency list compaction, posting list compaction. GC I/O throttling to avoid query impact
-- [ ] **Transaction timeout default** - 5 minutes. Long-running txns block GC and accumulate undo
+- [x] **In-place update + undo log** (InnoDB style) - Chosen over append-only because vector data is large (6KB/vector at 1536dim), bloat would be severe
+- [x] **MVCC for vector indexes: post-filter strategy** - HNSW searches top_k * oversample_factor, then filters by MVCC visibility. Oversample ratio adapts based on uncommitted_ratio
+- [x] **MVCC for graph adjacency lists** - Each AdjEntry carries `txn_id_create`/`txn_id_expire`. Traversal checks visibility per edge. Bitmap cache for hot snapshots
+- [x] **Garbage collection design** - Low water mark from Active Transaction Table. Per-engine GC: undo log cleanup, HNSW soft-delete compaction, adjacency list compaction, posting list compaction. GC I/O throttling to avoid query impact
+- [x] **Transaction timeout default** - 5 minutes. Long-running txns block GC and accumulate undo
 
 ### Stage 4 - Memory Architecture
 
-- [ ] **Memory budget allocation system** - Configurable split:
+- [x] **Memory budget allocation system** - Configurable split:
   - Buffer Pool: 40-60% (relational pages, B+Tree, graph adj, posting lists)
   - HNSW Cache: 20-30% (Layer 1+ pinned, Layer 0 via buffer pool)
   - Full-text Dictionary Cache: 5-10%
   - Query Execution Memory: 10-15% (sort buffers, hash join, intermediates)
   - System Overhead: 5% (connections, WAL buffer, metadata)
-- [ ] **Adaptive memory rebalancing** - Shift budget based on workload (no vector queries → shrink HNSW cache)
-- [ ] **Memory pressure handling** - Eviction priority: data pages < B+Tree internal < HNSW Layer 0 < HNSW Layer 1+ (never evict)
-- [ ] **Per-query memory limit** - Default 256MB. Spill to disk for large sorts/joins
+- [x] **Adaptive memory rebalancing** - Shift budget based on workload (no vector queries → shrink HNSW cache)
+- [x] **Memory pressure handling** - Eviction priority: data pages < B+Tree internal < HNSW Layer 0 < HNSW Layer 1+ (never evict)
+- [x] **Per-query memory limit** - Default 256MB. Spill to disk for large sorts/joins
 
 ### Stage 5 - Error Code System (IMMUTABLE after first client)
 
-- [ ] **Error code format** - `VAIS-EECCNNN` (EE=engine, CC=category, NNN=number)
-- [ ] **Engine codes** - 00=common, 01=SQL, 02=vector, 03=graph, 04=fulltext, 05=storage
-- [ ] **Category codes** - 01=syntax, 02=constraint, 03=resource, 04=concurrency, 05=internal
-- [ ] **Initial error catalog** - Define all error codes for Phase 1-2 before implementation
+- [x] **Error code format** - `VAIS-EECCNNN` (EE=engine, CC=category, NNN=number)
+- [x] **Engine codes** - 00=common, 01=SQL, 02=vector, 03=graph, 04=fulltext, 05=storage
+- [x] **Category codes** - 01=syntax, 02=constraint, 03=resource, 04=concurrency, 05=internal
+- [x] **Initial error catalog** - Define all error codes for Phase 1-2 before implementation
 
 ### Stage 6 - Configuration System Design
 
-- [ ] **Configuration hierarchy** - CLI args > env vars > config file > defaults
-- [ ] **Session vs global scope** - `SET SESSION` vs `SET GLOBAL`
-- [ ] **Immutable settings documentation** - page_size, hnsw_m, hnsw_m_max_0 cannot change after creation
-- [ ] **Runtime-changeable settings** - buffer_pool_size, hnsw_ef_search, query_timeout, slow_query_threshold
+- [x] **Configuration hierarchy** - CLI args > env vars > config file > defaults
+- [x] **Session vs global scope** - `SET SESSION` vs `SET GLOBAL`
+- [x] **Immutable settings documentation** - page_size, hnsw_m, hnsw_m_max_0 cannot change after creation
+- [x] **Runtime-changeable settings** - buffer_pool_size, hnsw_ef_search, query_timeout, slow_query_threshold
 
 ### Verification
 
