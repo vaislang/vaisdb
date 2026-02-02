@@ -1,0 +1,7 @@
+# VaisDB - RAG-Native Hybrid Database
+# Entry point
+
+F main() -> i64 {
+    println("VaisDB v0.1.0")
+    0
+}
