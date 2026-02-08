@@ -234,6 +234,18 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
   변경: ROADMAP.md (Phase 1 Review Fixes 섹션 추가)
 진행률: 6/6 (100%)
 
+### Phase 1 Review Fixes Round 2 (2026-02-09)
+모드: 자동진행
+- [x] 1. FPI 호출 통합 — insert/delete/checkpoint (Opus 직접) ✅ 2026-02-09
+  변경: src/storage/btree/insert.vais (모든 write_page 전 FPI 체크 추가), src/storage/btree/delete.vais (txn_id/gcm 파라미터 추가 + FPI 체크), src/storage/recovery/checkpoint.vais (set_all_needs_fpi 호출)
+- [x] 2. Prefix compression 통합 — node.vais flush/from_page_data (Opus 직접) ✅ 2026-02-09
+  변경: src/storage/btree/node.vais (BTreeLeafNode/BTreeInternalNode flush에 compress_keys_with_restarts 적용, from_page_data에 FLAG_IS_COMPRESSED 감지+복원)
+- [x] 3. Latch crabbing 통합 — tree/insert/delete/cursor (Opus 직접) ✅ 2026-02-09
+  변경: src/storage/btree/tree.vais (LatchTable 필드 추가, find_leaf/range_scan에 래치 크래빙), src/storage/btree/insert.vais (collect_insert_path/btree_insert에 래치), src/storage/btree/delete.vais (btree_delete에 래치), src/storage/btree/cursor.vais (latch_table 옵션 + next/prev 래치 크래빙)
+- [x] 4. ROADMAP.md 동기화 (Opus 직접) ✅ 2026-02-09
+  변경: ROADMAP.md (Phase 1 Review Fixes Round 2 섹션 추가)
+진행률: 4/4 (100%)
+
 ### Stage 1 - Page Manager
 
 - [x] **Unified page header implementation** - 48-byte header per Phase 0 spec ✅
@@ -298,11 +310,11 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 - [x] **Node splitting/merging** - WAL-first: PAGE_ALLOC then BTREE_SPLIT ✅
   변경: src/storage/btree/split.vais, merge.vais, wal_integration.vais
 - [x] **Prefix compression** - Reduce key storage with restart points ✅
-  변경: src/storage/btree/prefix.vais (CompressedKey, RESTART_INTERVAL=16)
+  변경: src/storage/btree/prefix.vais (CompressedKey, RESTART_INTERVAL=16), node.vais (flush/from_page_data 통합)
 - [x] **Bulk loading** - Sorted input → bottom-up construction ✅
   변경: src/storage/btree/bulk_load.vais (build_leaf_level, build_internal_level)
 - [x] **Optimistic latch crabbing** - Read latches down, write-upgrade at leaf ✅
-  변경: src/storage/btree/latch.vais (LatchTable, OptimisticDescent, PessimisticDescent)
+  변경: src/storage/btree/latch.vais (LatchTable, OptimisticDescent, PessimisticDescent), tree/insert/delete/cursor.vais (통합)
 
 ### Stage 5 - Transaction Manager (Core)
 

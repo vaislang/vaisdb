@@ -9,6 +9,9 @@ use storage/btree/tree.{BTree};
 use storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
 use storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry, compare_keys, KeyCmp, key_equal};
 use storage/btree/insert.{PathEntry, collect_insert_path, find_child_index};
+use storage/wal/group_commit.{GroupCommitManager};
+use storage/recovery/checkpoint.{write_fpi};
+use storage/btree/latch.{LatchGuard};
 
 # Merge threshold: if utilization drops below 40%, consider merge
 L MERGE_THRESHOLD: f64 = 0.40;
@@ -23,6 +26,8 @@ L DeleteResult =
 F btree_delete(
     tree: &~BTree,
     key: &[u8],
+    txn_id: u64,
+    gcm: &~GroupCommitManager,
     pool: &~BufferPool,
 ) -> Result<Option<u32>, VaisError> {
     # Collect path to leaf
@@ -34,13 +39,24 @@ F btree_delete(
     ~page_data = pool.get_page(leaf_frame);
     ~leaf = BTreeLeafNode.from_page_data(page_data, tree.page_size)?;
 
+    # Acquire write latch on leaf before modification
+    ~leaf_latch = LatchGuard.new_write(tree.get_latch_table(), leaf_info.page_id);
+
     ~removed_tid = leaf.delete(key);
     M removed_tid {
         None => {
+            leaf_latch.release();
             pool.unpin_page(leaf_frame, false);
             return Ok(None);
         },
         Some(_) => {},
+    }
+
+    # FPI: leaf page being modified
+    if pool.needs_fpi(leaf_frame) {
+        ~fpi_data = pool.get_page(leaf_frame);
+        write_fpi(gcm.writer(), txn_id, tree.file_id, leaf_info.page_id, fpi_data)?;
+        pool.clear_fpi(leaf_frame);
     }
 
     # Write the modified leaf
@@ -50,12 +66,13 @@ F btree_delete(
     # Check for underflow (skip if root)
     ~needs_merge = !leaf.is_root() && leaf.utilization() < MERGE_THRESHOLD;
 
+    leaf_latch.release();
     pool.unpin_page(leaf_frame, true);
     tree.dec_entries();
 
     # Handle underflow by attempting merge or redistribution
     if needs_merge && path.len() > 1 {
-        handle_leaf_underflow(tree, &path, pool)?;
+        handle_leaf_underflow(tree, &path, txn_id, gcm, pool)?;
     }
 
     Ok(removed_tid)
@@ -65,6 +82,8 @@ F btree_delete(
 F handle_leaf_underflow(
     tree: &~BTree,
     path: &[PathEntry],
+    txn_id: u64,
+    gcm: &~GroupCommitManager,
     pool: &~BufferPool,
 ) -> Result<(), VaisError> {
     ~leaf_info = &path[path.len() - 1];
@@ -97,10 +116,10 @@ F handle_leaf_underflow(
 
         if can_merge_leaves(&left_leaf, &leaf, tree.page_size) {
             # Merge: move all entries from right into left
-            merge_leaves(&left_leaf, &leaf, left_frame, leaf_frame2, tree, pool)?;
+            merge_leaves(&left_leaf, &leaf, left_frame, leaf_frame2, tree, txn_id, gcm, pool)?;
 
             # Remove separator from parent
-            remove_from_parent(tree, &parent, child_idx, parent_frame, path, pool)?;
+            remove_from_parent(tree, &parent, child_idx, parent_frame, path, txn_id, gcm, pool)?;
 
             pool.unpin_page(left_frame, true);
             pool.unpin_page(leaf_frame2, true);
@@ -109,7 +128,7 @@ F handle_leaf_underflow(
         } else if left_leaf.entry_count() > 1 {
             # Redistribute: move entries from left to right
             redistribute_from_left(&left_leaf, &leaf, &parent, child_idx,
-                left_frame, leaf_frame2, parent_frame, pool)?;
+                left_frame, leaf_frame2, parent_frame, txn_id, gcm, pool, tree.file_id)?;
 
             pool.unpin_page(left_frame, true);
             pool.unpin_page(leaf_frame2, true);
@@ -128,11 +147,11 @@ F handle_leaf_underflow(
 
         if can_merge_leaves(&leaf, &right_leaf, tree.page_size) {
             # Merge: move all entries from right into left (our leaf)
-            merge_leaves(&leaf, &right_leaf, leaf_frame2, right_frame, tree, pool)?;
+            merge_leaves(&leaf, &right_leaf, leaf_frame2, right_frame, tree, txn_id, gcm, pool)?;
 
             # Remove separator from parent (right sibling's entry)
             ~right_child_idx = child_idx + 1;
-            remove_from_parent(tree, &parent, right_child_idx, parent_frame, path, pool)?;
+            remove_from_parent(tree, &parent, right_child_idx, parent_frame, path, txn_id, gcm, pool)?;
 
             pool.unpin_page(right_frame, true);
             pool.unpin_page(leaf_frame2, true);
@@ -141,7 +160,7 @@ F handle_leaf_underflow(
         } else if right_leaf.entry_count() > 1 {
             # Redistribute: move entries from right to left
             redistribute_from_right(&leaf, &right_leaf, &parent, child_idx,
-                leaf_frame2, right_frame, parent_frame, pool)?;
+                leaf_frame2, right_frame, parent_frame, txn_id, gcm, pool, tree.file_id)?;
 
             pool.unpin_page(right_frame, true);
             pool.unpin_page(leaf_frame2, true);
@@ -195,6 +214,8 @@ F merge_leaves(
     left_frame: u32,
     right_frame: u32,
     tree: &BTree,
+    txn_id: u64,
+    gcm: &~GroupCommitManager,
     pool: &~BufferPool,
 ) -> Result<(), VaisError> {
     # Move all entries from right to left
@@ -211,12 +232,25 @@ F merge_leaves(
     # Update the next leaf's prev pointer
     if right_next != NULL_PAGE {
         ~next_frame = pool.fetch_page(tree.file_id, right_next)?;
+        # FPI: next leaf's prev pointer is being modified
+        if pool.needs_fpi(next_frame) {
+            ~fpi_data = pool.get_page(next_frame);
+            write_fpi(gcm.writer(), txn_id, tree.file_id, right_next, fpi_data)?;
+            pool.clear_fpi(next_frame);
+        }
         ~next_data = pool.get_page(next_frame);
         ~next_leaf = BTreeLeafNode.from_page_data(next_data, tree.page_size)?;
         next_leaf.set_prev_leaf(left.header.page_id);
         ~next_flushed = next_leaf.flush();
         pool.write_page(next_frame, next_flushed)?;
         pool.unpin_page(next_frame, true);
+    }
+
+    # FPI: left leaf is being rewritten with merged data
+    if pool.needs_fpi(left_frame) {
+        ~fpi_data = pool.get_page(left_frame);
+        write_fpi(gcm.writer(), txn_id, tree.file_id, left.header.page_id, fpi_data)?;
+        pool.clear_fpi(left_frame);
     }
 
     # Flush left leaf
@@ -238,7 +272,10 @@ F redistribute_from_left(
     left_frame: u32,
     right_frame: u32,
     parent_frame: u32,
+    txn_id: u64,
+    gcm: &~GroupCommitManager,
     pool: &~BufferPool,
+    file_id: u8,
 ) -> Result<(), VaisError> {
     # Move last entry from left to beginning of right
     ~last_idx = (left.entry_count() - 1) as usize;
@@ -256,6 +293,23 @@ F redistribute_from_left(
         parent.entries.remove(sep_idx);
         parent.insert_entry(&new_sep, child_page)?;
         parent.header.item_count = parent.entries.len() as u16;
+    }
+
+    # FPI: all three pages are being modified
+    if pool.needs_fpi(left_frame) {
+        ~fpi_data = pool.get_page(left_frame);
+        write_fpi(gcm.writer(), txn_id, file_id, left.header.page_id, fpi_data)?;
+        pool.clear_fpi(left_frame);
+    }
+    if pool.needs_fpi(right_frame) {
+        ~fpi_data = pool.get_page(right_frame);
+        write_fpi(gcm.writer(), txn_id, file_id, right.header.page_id, fpi_data)?;
+        pool.clear_fpi(right_frame);
+    }
+    if pool.needs_fpi(parent_frame) {
+        ~fpi_data = pool.get_page(parent_frame);
+        write_fpi(gcm.writer(), txn_id, file_id, parent.header.page_id, fpi_data)?;
+        pool.clear_fpi(parent_frame);
     }
 
     # Flush all modified pages
@@ -278,7 +332,10 @@ F redistribute_from_right(
     left_frame: u32,
     right_frame: u32,
     parent_frame: u32,
+    txn_id: u64,
+    gcm: &~GroupCommitManager,
     pool: &~BufferPool,
+    file_id: u8,
 ) -> Result<(), VaisError> {
     # Move first entry from right to end of left
     ~move_key = right.get_key(0).to_vec();
@@ -299,6 +356,23 @@ F redistribute_from_right(
         }
     }
 
+    # FPI: all three pages are being modified
+    if pool.needs_fpi(left_frame) {
+        ~fpi_data = pool.get_page(left_frame);
+        write_fpi(gcm.writer(), txn_id, file_id, left.header.page_id, fpi_data)?;
+        pool.clear_fpi(left_frame);
+    }
+    if pool.needs_fpi(right_frame) {
+        ~fpi_data = pool.get_page(right_frame);
+        write_fpi(gcm.writer(), txn_id, file_id, right.header.page_id, fpi_data)?;
+        pool.clear_fpi(right_frame);
+    }
+    if pool.needs_fpi(parent_frame) {
+        ~fpi_data = pool.get_page(parent_frame);
+        write_fpi(gcm.writer(), txn_id, file_id, parent.header.page_id, fpi_data)?;
+        pool.clear_fpi(parent_frame);
+    }
+
     # Flush all modified pages
     ~left_flushed = left.flush();
     pool.write_page(left_frame, left_flushed)?;
@@ -317,6 +391,8 @@ F remove_from_parent(
     child_idx: usize,
     parent_frame: u32,
     path: &[PathEntry],
+    txn_id: u64,
+    gcm: &~GroupCommitManager,
     pool: &~BufferPool,
 ) -> Result<(), VaisError> {
     # Remove the entry at child_idx - 1 (separator between merged children)
@@ -333,6 +409,13 @@ F remove_from_parent(
         tree.height -= 1;
         pool.deallocate_page(tree.file_id, parent.header.page_id)?;
     } else {
+        # FPI: parent page is being modified
+        if pool.needs_fpi(parent_frame) {
+            ~fpi_data = pool.get_page(parent_frame);
+            write_fpi(gcm.writer(), txn_id, tree.file_id, parent.header.page_id, fpi_data)?;
+            pool.clear_fpi(parent_frame);
+        }
+
         # Flush parent
         ~flushed = parent.flush();
         pool.write_page(parent_frame, flushed)?;

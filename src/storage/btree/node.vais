@@ -7,13 +7,14 @@ use std/bytes.{ByteBuffer};
 use storage/constants.{
     PAGE_HEADER_SIZE, BTREE_INTERNAL_ENTRY_SIZE, BTREE_LEAF_ENTRY_SIZE,
     BTREE_LEFTMOST_CHILD_SIZE, FLAG_IS_LEAF, FLAG_IS_ROOT,
-    NULL_PAGE,
+    FLAG_IS_COMPRESSED, NULL_PAGE,
 };
 use storage/error.{VaisError, err_internal, err_page_full};
 use storage/page/header.{PageHeader};
 use storage/page/types.{PAGE_TYPE_BTREE_INTERNAL, PAGE_TYPE_BTREE_LEAF, ENGINE_TAG_SQL};
 use storage/page/flags.{PageFlags};
 use storage/btree/entry.{BTreeInternalEntry, BTreeLeafEntry, compare_keys, KeyCmp, key_less_than};
+use storage/btree/prefix.{CompressedKey, compress_keys_with_restarts, decompress_keys};
 use storage/checksum.{calculate_page_checksum};
 
 # B+Tree Internal Node
@@ -49,6 +50,7 @@ I BTreeInternalNode {
     }
 
     # Load from page data
+    # Handles both compressed and uncompressed pages transparently
     F from_page_data(page_data: &[u8], page_size: u32) -> Result<BTreeInternalNode, VaisError> {
         ~header = PageHeader.read_from_page(page_data)?;
         ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as usize..]);
@@ -62,13 +64,64 @@ I BTreeInternalNode {
             entries.push(BTreeInternalEntry.deserialize(&buf)?);
         }
 
+        ~is_compressed = header.get_flags().is_compressed();
+
+        if !is_compressed || header.item_count == 0 {
+            return Ok(BTreeInternalNode {
+                page_size,
+                header,
+                leftmost_child,
+                entries,
+                key_data: Vec.new(),
+                data: page_data.to_vec(),
+            });
+        }
+
+        # Compressed page: decompress keys and rebuild data buffer
+        ~compressed_keys = Vec.with_capacity(entries.len());
+        for entry in &entries {
+            ~ck_buf = ByteBuffer.wrap_readonly(&page_data[entry.key_off as usize..]);
+            ~ck = CompressedKey.deserialize(&ck_buf)?;
+            compressed_keys.push(ck);
+        }
+
+        ~full_keys = decompress_keys(&compressed_keys);
+
+        # Rebuild page data with decompressed keys
+        ~new_data = Vec.with_capacity(page_size as usize);
+        new_data.resize(page_size as usize, 0u8);
+
+        # Copy header + leftmost_child + entry directory region
+        ~dir_end = (PAGE_HEADER_SIZE + BTREE_LEFTMOST_CHILD_SIZE
+            + (entries.len() as u32) * BTREE_INTERNAL_ENTRY_SIZE) as usize;
+        for i in 0..dir_end {
+            new_data[i] = page_data[i];
+        }
+
+        # Write decompressed keys from bottom of page
+        ~write_off = page_size;
+        for i in 0..entries.len() {
+            ~key = &full_keys[i];
+            write_off -= key.len() as u32;
+            for j in 0..key.len() {
+                new_data[write_off as usize + j] = key[j];
+            }
+            entries[i].key_off = write_off as u16;
+            entries[i].key_len = key.len() as u16;
+        }
+
+        # Clear compressed flag in-memory
+        ~flags = header.get_flags();
+        flags.set_compressed(false);
+        header.set_flags(flags);
+
         Ok(BTreeInternalNode {
             page_size,
             header,
             leftmost_child,
             entries,
-            key_data: Vec.new(),  # Keys read from page_data on demand
-            data: page_data.to_vec(),
+            key_data: Vec.new(),
+            data: new_data,
         })
     }
 
@@ -159,14 +212,109 @@ I BTreeInternalNode {
         self.leftmost_child = page_id;
     }
 
-    # Serialize to page buffer
+    # Serialize to page buffer with prefix compression
     F flush(~self) -> &[u8] {
+        # Clear and rebuild page buffer
+        self.data.fill(0u8);
+
+        if self.entries.is_empty() {
+            # No entries: just write header + leftmost_child
+            ~buf = ByteBuffer.wrap(&self.data);
+            self.header.serialize(&buf);
+            buf.put_u32_le(self.leftmost_child);
+            PageHeader.update_checksum(&self.data);
+            return &self.data;
+        }
+
+        # Extract sorted keys for compression
+        ~keys_owned = Vec.with_capacity(self.entries.len());
+        for i in 0..self.entries.len() {
+            keys_owned.push(self.get_key(i).to_vec());
+        }
+
+        ~key_refs: Vec<&[u8]> = Vec.with_capacity(keys_owned.len());
+        for k in &keys_owned {
+            key_refs.push(k.as_slice());
+        }
+
+        # Compress keys with restart points
+        ~(compressed, restart_points) = compress_keys_with_restarts(&key_refs);
+
+        ~compressed_data_size: u32 = 0;
+        for ck in &compressed {
+            compressed_data_size += ck.serialized_size();
+        }
+        ~restart_header_size: u32 = 2 + (restart_points.len() as u32) * 2;
+
+        ~dir_end = PAGE_HEADER_SIZE + BTREE_LEFTMOST_CHILD_SIZE
+            + (self.entries.len() as u32) * BTREE_INTERNAL_ENTRY_SIZE;
+        ~bottom_region = restart_header_size + compressed_data_size;
+
+        if dir_end + bottom_region > self.page_size {
+            # Fall back to uncompressed
+            ~buf = ByteBuffer.wrap(&self.data);
+            ~flags = self.header.get_flags();
+            flags.set_compressed(false);
+            self.header.set_flags(flags);
+            self.header.serialize(&buf);
+            buf.put_u32_le(self.leftmost_child);
+            ~write_off = self.page_size;
+            for i in 0..self.entries.len() {
+                ~key = &keys_owned[i];
+                write_off -= key.len() as u32;
+                for j in 0..key.len() {
+                    self.data[write_off as usize + j] = key[j];
+                }
+                self.entries[i].key_off = write_off as u16;
+                self.entries[i].key_len = key.len() as u16;
+            }
+            for entry in &self.entries {
+                entry.serialize(&buf);
+            }
+            PageHeader.update_checksum(&self.data);
+            return &self.data;
+        }
+
+        # Set compressed flag
+        ~flags = self.header.get_flags();
+        flags.set_compressed(true);
+        self.header.set_flags(flags);
+
+        # Write compressed key data from bottom
+        ~write_off = self.page_size;
+        ~compressed_offsets = Vec.with_capacity(compressed.len());
+        for i in (0..compressed.len()).rev() {
+            ~ck = &compressed[i];
+            ~ck_size = ck.serialized_size();
+            write_off -= ck_size;
+            compressed_offsets.push(write_off);
+            ~ck_buf = ByteBuffer.wrap(&self.data[write_off as usize..]);
+            ck.serialize(&ck_buf);
+        }
+        compressed_offsets.reverse();
+
+        # Write restart points
+        write_off -= restart_header_size;
+        ~rp_buf = ByteBuffer.wrap(&self.data[write_off as usize..]);
+        rp_buf.put_u16_le(restart_points.len() as u16);
+        for rp in &restart_points {
+            rp_buf.put_u16_le(*rp);
+        }
+
+        # Update entry directory
+        for i in 0..self.entries.len() {
+            self.entries[i].key_off = compressed_offsets[i] as u16;
+            self.entries[i].key_len = compressed[i].serialized_size() as u16;
+        }
+
+        # Write header, leftmost_child, and entry directory
         ~buf = ByteBuffer.wrap(&self.data);
         self.header.serialize(&buf);
         buf.put_u32_le(self.leftmost_child);
         for entry in &self.entries {
             entry.serialize(&buf);
         }
+
         PageHeader.update_checksum(&self.data);
         &self.data
     }
@@ -217,6 +365,7 @@ I BTreeLeafNode {
     }
 
     # Load from page data
+    # Handles both compressed and uncompressed pages transparently
     F from_page_data(page_data: &[u8], page_size: u32) -> Result<BTreeLeafNode, VaisError> {
         ~header = PageHeader.read_from_page(page_data)?;
         ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as usize..]);
@@ -226,11 +375,62 @@ I BTreeLeafNode {
             entries.push(BTreeLeafEntry.deserialize(&buf)?);
         }
 
+        ~is_compressed = header.get_flags().is_compressed();
+
+        if !is_compressed || header.item_count == 0 {
+            # Uncompressed: entries already have correct key_off/key_len
+            return Ok(BTreeLeafNode {
+                page_size,
+                header,
+                entries,
+                data: page_data.to_vec(),
+            });
+        }
+
+        # Compressed page: decompress keys and rebuild data buffer
+        # Read compressed keys from the entry offsets
+        ~compressed_keys = Vec.with_capacity(entries.len());
+        for entry in &entries {
+            ~ck_buf = ByteBuffer.wrap_readonly(&page_data[entry.key_off as usize..]);
+            ~ck = CompressedKey.deserialize(&ck_buf)?;
+            compressed_keys.push(ck);
+        }
+
+        # Decompress all keys
+        ~full_keys = decompress_keys(&compressed_keys);
+
+        # Rebuild page data with decompressed keys (bottom-up layout)
+        ~new_data = Vec.with_capacity(page_size as usize);
+        new_data.resize(page_size as usize, 0u8);
+
+        # Copy original data up to entry directory end
+        ~dir_end = (PAGE_HEADER_SIZE + (entries.len() as u32) * BTREE_LEAF_ENTRY_SIZE) as usize;
+        for i in 0..dir_end {
+            new_data[i] = page_data[i];
+        }
+
+        # Write decompressed keys from bottom of page, update entries
+        ~write_off = page_size;
+        for i in 0..entries.len() {
+            ~key = &full_keys[i];
+            write_off -= key.len() as u32;
+            for j in 0..key.len() {
+                new_data[write_off as usize + j] = key[j];
+            }
+            entries[i].key_off = write_off as u16;
+            entries[i].key_len = key.len() as u16;
+        }
+
+        # Clear compressed flag in the in-memory header
+        ~flags = header.get_flags();
+        flags.set_compressed(false);
+        header.set_flags(flags);
+
         Ok(BTreeLeafNode {
             page_size,
             header,
             entries,
-            data: page_data.to_vec(),
+            data: new_data,
         })
     }
 
@@ -346,13 +546,116 @@ I BTreeLeafNode {
         (used as f64) / (total as f64)
     }
 
-    # Serialize to page buffer
+    # Serialize to page buffer with prefix compression
     F flush(~self) -> &[u8] {
+        # Clear and rebuild page buffer
+        self.data.fill(0u8);
+
+        if self.entries.is_empty() {
+            # No entries: just write header, no compression needed
+            ~buf = ByteBuffer.wrap(&self.data);
+            self.header.serialize(&buf);
+            PageHeader.update_checksum(&self.data);
+            return &self.data;
+        }
+
+        # Extract sorted keys for compression
+        ~keys_owned = Vec.with_capacity(self.entries.len());
+        for i in 0..self.entries.len() {
+            keys_owned.push(self.get_key(i).to_vec());
+        }
+
+        # Build key reference slice
+        ~key_refs: Vec<&[u8]> = Vec.with_capacity(keys_owned.len());
+        for k in &keys_owned {
+            key_refs.push(k.as_slice());
+        }
+
+        # Compress keys with restart points
+        ~(compressed, restart_points) = compress_keys_with_restarts(&key_refs);
+
+        # Calculate compressed key data size
+        ~compressed_data_size: u32 = 0;
+        for ck in &compressed {
+            compressed_data_size += ck.serialized_size();
+        }
+        # Restart points header: 2B count + N × 2B
+        ~restart_header_size: u32 = 2 + (restart_points.len() as u32) * 2;
+
+        # Layout: [Header][Entry Dir][...free space...][Restart Header][Compressed Keys (bottom-up)]
+        ~dir_end = PAGE_HEADER_SIZE + (self.entries.len() as u32) * BTREE_LEAF_ENTRY_SIZE;
+        ~bottom_region = restart_header_size + compressed_data_size;
+
+        # Check if compression fits
+        if dir_end + bottom_region > self.page_size {
+            # Compression doesn't save space — fall back to uncompressed
+            ~buf = ByteBuffer.wrap(&self.data);
+            ~flags = self.header.get_flags();
+            flags.set_compressed(false);
+            self.header.set_flags(flags);
+            self.header.serialize(&buf);
+            # Write key data from bottom of page, update entries
+            ~write_off = self.page_size;
+            for i in 0..self.entries.len() {
+                ~key = &keys_owned[i];
+                write_off -= key.len() as u32;
+                for j in 0..key.len() {
+                    self.data[write_off as usize + j] = key[j];
+                }
+                self.entries[i].key_off = write_off as u16;
+                self.entries[i].key_len = key.len() as u16;
+            }
+            for entry in &self.entries {
+                entry.serialize(&buf);
+            }
+            PageHeader.update_checksum(&self.data);
+            return &self.data;
+        }
+
+        # Set compressed flag
+        ~flags = self.header.get_flags();
+        flags.set_compressed(true);
+        self.header.set_flags(flags);
+
+        # Write compressed key data from bottom of page
+        ~write_off = self.page_size;
+
+        # Write compressed keys bottom-up (last compressed key at highest offset)
+        # We iterate forward but write from bottom
+        ~compressed_offsets = Vec.with_capacity(compressed.len());
+        for i in (0..compressed.len()).rev() {
+            ~ck = &compressed[i];
+            ~ck_size = ck.serialized_size();
+            write_off -= ck_size;
+            compressed_offsets.push(write_off);
+            # Serialize CompressedKey directly into data buffer
+            ~ck_buf = ByteBuffer.wrap(&self.data[write_off as usize..]);
+            ck.serialize(&ck_buf);
+        }
+        compressed_offsets.reverse();
+
+        # Write restart points above compressed keys
+        write_off -= restart_header_size;
+        ~rp_buf = ByteBuffer.wrap(&self.data[write_off as usize..]);
+        rp_buf.put_u16_le(restart_points.len() as u16);
+        for rp in &restart_points {
+            rp_buf.put_u16_le(*rp);
+        }
+
+        # Update entry directory: key_off/key_len point into compressed region
+        # For compressed pages, key_off points to the CompressedKey, key_len = serialized size
+        for i in 0..self.entries.len() {
+            self.entries[i].key_off = compressed_offsets[i] as u16;
+            self.entries[i].key_len = compressed[i].serialized_size() as u16;
+        }
+
+        # Write header and entry directory
         ~buf = ByteBuffer.wrap(&self.data);
         self.header.serialize(&buf);
         for entry in &self.entries {
             entry.serialize(&buf);
         }
+
         PageHeader.update_checksum(&self.data);
         &self.data
     }

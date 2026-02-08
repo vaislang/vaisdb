@@ -147,6 +147,9 @@ I CheckpointManager {
         # Step 5: fsync WAL
         writer.sync()?;
 
+        # Step 5.5: Mark all buffer pool pages as needing FPI on next modification
+        pool.set_all_needs_fpi();
+
         # Step 6: Update checkpoint state
         ~guard2 = self.lock.lock();
         self.state.last_checkpoint_lsn = end_lsn;

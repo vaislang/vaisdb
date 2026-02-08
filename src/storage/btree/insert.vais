@@ -10,6 +10,8 @@ use storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
 use storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry, compare_keys, key_equal, KeyCmp};
 use storage/wal/group_commit.{GroupCommitManager};
 use storage/btree/wal_integration.{wal_btree_insert, wal_btree_split};
+use storage/recovery/checkpoint.{write_fpi};
+use storage/btree/latch.{LatchGuard};
 use storage/page/header.{PageHeader};
 use storage/page/flags.{PageFlags};
 
@@ -43,14 +45,24 @@ F btree_insert(
     ~page_data = pool.get_page(leaf_frame);
     ~leaf = BTreeLeafNode.from_page_data(page_data, tree.page_size)?;
 
+    # Acquire write latch on the leaf before modification
+    ~leaf_latch = LatchGuard.new_write(tree.get_latch_table(), leaf_info.page_id);
+
     if leaf.can_fit(key.len() as u32) {
         # Simple case: leaf has space
         # WAL-first: write WAL record before modifying page
         ~tid_bytes = tid.to_le_bytes();
         wal_btree_insert(gcm, txn_id, tree.file_id, leaf_info.page_id, key, &tid_bytes)?;
+        # FPI: capture page image before first modification after checkpoint
+        if pool.needs_fpi(leaf_frame) {
+            ~fpi_data = pool.get_page(leaf_frame);
+            write_fpi(gcm.writer(), txn_id, tree.file_id, leaf_info.page_id, fpi_data)?;
+            pool.clear_fpi(leaf_frame);
+        }
         leaf.insert(key, tid)?;
         ~flushed = leaf.flush();
         pool.write_page(leaf_frame, flushed)?;
+        leaf_latch.release();
         pool.unpin_page(leaf_frame, true);
         tree.inc_entries();
         return Ok(true);
@@ -68,6 +80,7 @@ F btree_insert(
         },
     }
 
+    leaf_latch.release();
     pool.unpin_page(leaf_frame, true);
     tree.inc_entries();
     Ok(true)
@@ -80,6 +93,7 @@ S PathEntry {
 }
 
 # Collect the path from root to the target leaf
+# Uses read latch crabbing: acquire child latch, then release parent
 F collect_insert_path(
     tree: &BTree,
     key: &[u8],
@@ -87,8 +101,12 @@ F collect_insert_path(
 ) -> Result<Vec<PathEntry>, VaisError> {
     ~path = Vec.with_capacity(tree.height as usize);
     ~current_page = tree.root_page_id;
+    ~parent_guard: Option<LatchGuard> = None;
 
     for level in 0..(tree.height - 1) {
+        # Acquire read latch on current internal node
+        ~guard = LatchGuard.new_read(tree.get_latch_table(), current_page);
+
         ~frame_id = pool.fetch_page(tree.file_id, current_page)?;
         ~page_data = pool.get_page(frame_id);
         ~internal = BTreeInternalNode.from_page_data(page_data, tree.page_size)?;
@@ -103,7 +121,21 @@ F collect_insert_path(
 
         path.push(PathEntry { page_id: current_page, index: child_index });
         pool.unpin_page(frame_id, false);
+
+        # Release parent latch — child is safe once we descend
+        M parent_guard {
+            Some(~pg) => { pg.release(); },
+            None => {},
+        }
+
+        parent_guard = Some(guard);
         current_page = next_page;
+    }
+
+    # Release the last internal node latch before latching the leaf
+    M parent_guard {
+        Some(~pg) => { pg.release(); },
+        None => {},
     }
 
     # Add leaf to path
@@ -203,6 +235,12 @@ F split_leaf(
     # Update the next leaf's prev pointer
     if old_next != NULL_PAGE {
         ~next_frame = pool.fetch_page(tree.file_id, old_next)?;
+        # FPI: next leaf is an existing page being modified
+        if pool.needs_fpi(next_frame) {
+            ~fpi_data = pool.get_page(next_frame);
+            write_fpi(gcm.writer(), txn_id, tree.file_id, old_next, fpi_data)?;
+            pool.clear_fpi(next_frame);
+        }
         ~next_data = pool.get_page(next_frame);
         ~next_leaf = BTreeLeafNode.from_page_data(next_data, tree.page_size)?;
         next_leaf.set_prev_leaf(new_page_id);
@@ -211,10 +249,18 @@ F split_leaf(
         pool.unpin_page(next_frame, true);
     }
 
+    # FPI: original leaf page is being rewritten with left half
+    if pool.needs_fpi(leaf_frame) {
+        ~fpi_data = pool.get_page(leaf_frame);
+        write_fpi(gcm.writer(), txn_id, tree.file_id, leaf.header.page_id, fpi_data)?;
+        pool.clear_fpi(leaf_frame);
+    }
+
     # Write both leaves
     ~left_flushed = left_leaf.flush();
     pool.write_page(leaf_frame, left_flushed)?;
 
+    # new_frame is a freshly allocated page — no FPI needed
     ~new_flushed = new_leaf.flush();
     pool.write_page(new_frame, new_flushed)?;
     pool.unpin_page(new_frame, true);
@@ -247,11 +293,21 @@ F propagate_split(
         ~parent_data = pool.get_page(parent_frame);
         ~internal = BTreeInternalNode.from_page_data(parent_data, tree.page_size)?;
 
+        # Acquire write latch on parent before modification
+        ~parent_latch = LatchGuard.new_write(tree.get_latch_table(), parent_info.page_id);
+
         if internal.can_fit(current_sep.len() as u32) {
             # Parent has space, insert separator
+            # FPI: parent page being modified
+            if pool.needs_fpi(parent_frame) {
+                ~fpi_data = pool.get_page(parent_frame);
+                write_fpi(gcm.writer(), txn_id, tree.file_id, parent_info.page_id, fpi_data)?;
+                pool.clear_fpi(parent_frame);
+            }
             internal.insert_entry(&current_sep, current_child)?;
             ~flushed = internal.flush();
             pool.write_page(parent_frame, flushed)?;
+            parent_latch.release();
             pool.unpin_page(parent_frame, true);
             return Ok(());
         }
@@ -260,6 +316,7 @@ F propagate_split(
         ~(new_sep, new_internal_page) = split_internal(
             tree, &internal, &current_sep, current_child, txn_id, gcm, parent_frame, pool
         )?;
+        parent_latch.release();
         pool.unpin_page(parent_frame, true);
 
         current_sep = new_sep;
@@ -337,10 +394,18 @@ F split_internal(
         right.insert_entry(&all_keys[i], all_children[i + 1])?;
     }
 
+    # FPI: original internal page is being rewritten with left half
+    if pool.needs_fpi(internal_frame) {
+        ~fpi_data = pool.get_page(internal_frame);
+        write_fpi(gcm.writer(), txn_id, tree.file_id, internal.header.page_id, fpi_data)?;
+        pool.clear_fpi(internal_frame);
+    }
+
     # Write both nodes
     ~left_flushed = left.flush();
     pool.write_page(internal_frame, left_flushed)?;
 
+    # new_frame is a freshly allocated page — no FPI needed
     ~right_flushed = right.flush();
     pool.write_page(new_frame, right_flushed)?;
     pool.unpin_page(new_frame, true);
@@ -378,6 +443,12 @@ F create_new_root(
 
     # Clear IS_ROOT flag on the old root node
     ~old_root_frame = pool.fetch_page(tree.file_id, left_child)?;
+    # FPI: old root page is being modified (flag change)
+    if pool.needs_fpi(old_root_frame) {
+        ~fpi_data = pool.get_page(old_root_frame);
+        write_fpi(gcm.writer(), txn_id, tree.file_id, left_child, fpi_data)?;
+        pool.clear_fpi(old_root_frame);
+    }
     ~old_root_data = pool.get_page(old_root_frame);
     ~old_header = PageHeader.from_bytes(old_root_data)?;
     ~old_flags = old_header.get_flags();

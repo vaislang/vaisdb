@@ -7,6 +7,7 @@ use storage/error.{VaisError};
 use storage/buffer/pool.{BufferPool};
 use storage/btree/node.{BTreeLeafNode};
 use storage/btree/entry.{BTreeLeafEntry, compare_keys, KeyCmp};
+use storage/btree/latch.{LatchTable, LatchGuard};
 
 # Cursor position within the B+Tree
 S BTreeCursor {
@@ -17,6 +18,7 @@ S BTreeCursor {
     current_frame: u32,       # Buffer pool frame_id (-1 if not loaded)
     is_valid: bool,           # Whether cursor points to a valid entry
     direction: ScanDirection,
+    latch_table: Option<&LatchTable>,  # Latch table for leaf latch management
 }
 
 L ScanDirection = Forward | Backward;
@@ -32,6 +34,22 @@ I BTreeCursor {
             current_frame: frame_id,
             is_valid: true,
             direction: ScanDirection.Forward,
+            latch_table: None,
+        }
+    }
+
+    # Create a cursor with latch table for concurrent leaf chain traversal
+    F with_latches(file_id: u8, page_size: u32, page_id: u32, index: usize,
+                   frame_id: u32, latch_table: &LatchTable) -> BTreeCursor {
+        BTreeCursor {
+            file_id,
+            page_size,
+            current_page_id: page_id,
+            current_index: index,
+            current_frame: frame_id,
+            is_valid: true,
+            direction: ScanDirection.Forward,
+            latch_table: Some(latch_table),
         }
     }
 
@@ -45,6 +63,7 @@ I BTreeCursor {
             current_frame: 0,
             is_valid: false,
             direction: ScanDirection.Forward,
+            latch_table: None,
         }
     }
 
@@ -68,6 +87,8 @@ I BTreeCursor {
     }
 
     # Advance cursor to next entry (forward scan)
+    # Uses latch crabbing when moving to next leaf: acquire next leaf read latch
+    # before releasing current leaf
     F next(~self, pool: &~BufferPool) -> Result<bool, VaisError> {
         if !self.is_valid {
             return Ok(false);
@@ -79,13 +100,26 @@ I BTreeCursor {
         self.current_index += 1;
 
         if self.current_index >= leaf.entry_count() as usize {
-            # Move to next leaf page
+            # Move to next leaf page with latch crabbing
             ~next_page = leaf.next_leaf();
-            pool.unpin_page(self.current_frame, false);
 
             if next_page == NULL_PAGE {
+                pool.unpin_page(self.current_frame, false);
                 self.is_valid = false;
                 return Ok(false);
+            }
+
+            # Acquire read latch on next leaf before releasing current (if latch table available)
+            M &self.latch_table {
+                Some(lt) => {
+                    ~next_guard = LatchGuard.new_read(*lt, next_page);
+                    pool.unpin_page(self.current_frame, false);
+                    # Next guard is released immediately — the buffer pin provides protection
+                    next_guard.release();
+                },
+                None => {
+                    pool.unpin_page(self.current_frame, false);
+                },
             }
 
             self.current_frame = pool.fetch_page(self.file_id, next_page)?;
@@ -106,6 +140,7 @@ I BTreeCursor {
     }
 
     # Move cursor to previous entry (backward scan)
+    # Uses latch crabbing when moving to previous leaf
     F prev(~self, pool: &~BufferPool) -> Result<bool, VaisError> {
         if !self.is_valid {
             return Ok(false);
@@ -116,15 +151,27 @@ I BTreeCursor {
             return Ok(true);
         }
 
-        # Move to previous leaf page
+        # Move to previous leaf page with latch crabbing
         ~page_data = pool.get_page(self.current_frame);
         ~leaf = BTreeLeafNode.from_page_data(page_data, self.page_size)?;
         ~prev_page = leaf.prev_leaf();
-        pool.unpin_page(self.current_frame, false);
 
         if prev_page == NULL_PAGE {
+            pool.unpin_page(self.current_frame, false);
             self.is_valid = false;
             return Ok(false);
+        }
+
+        # Acquire read latch on prev leaf before releasing current (if latch table available)
+        M &self.latch_table {
+            Some(lt) => {
+                ~prev_guard = LatchGuard.new_read(*lt, prev_page);
+                pool.unpin_page(self.current_frame, false);
+                prev_guard.release();
+            },
+            None => {
+                pool.unpin_page(self.current_frame, false);
+            },
         }
 
         self.current_frame = pool.fetch_page(self.file_id, prev_page)?;
