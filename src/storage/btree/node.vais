@@ -1,0 +1,379 @@
+# B+Tree Node Page Format
+# Internal nodes (BTREE_INTERNAL 0x11) and leaf nodes (BTREE_LEAF 0x12)
+# Slotted structure with sorted key order
+# Based on Stage 1 Section 9
+
+use std/bytes.{ByteBuffer};
+use storage/constants.{
+    PAGE_HEADER_SIZE, BTREE_INTERNAL_ENTRY_SIZE, BTREE_LEAF_ENTRY_SIZE,
+    BTREE_LEFTMOST_CHILD_SIZE, FLAG_IS_LEAF, FLAG_IS_ROOT,
+    NULL_PAGE,
+};
+use storage/error.{VaisError, err_internal, err_page_full};
+use storage/page/header.{PageHeader};
+use storage/page/types.{PAGE_TYPE_BTREE_INTERNAL, PAGE_TYPE_BTREE_LEAF, ENGINE_TAG_SQL};
+use storage/page/flags.{PageFlags};
+use storage/btree/entry.{BTreeInternalEntry, BTreeLeafEntry, compare_keys, KeyCmp, key_less_than};
+use storage/checksum.{calculate_page_checksum};
+
+# B+Tree Internal Node
+S BTreeInternalNode {
+    page_size: u32,
+    header: PageHeader,
+    leftmost_child: u32,                # Page ID of leftmost child
+    entries: Vec<BTreeInternalEntry>,   # Sorted key directory entries
+    key_data: Vec<u8>,                  # Key data area (variable length keys)
+    data: Vec<u8>,                      # Full page buffer
+}
+
+I BTreeInternalNode {
+    # Create a new empty internal node
+    F new(page_id: u32, page_size: u32, is_root: bool) -> BTreeInternalNode {
+        ~header = PageHeader.new(page_id, PAGE_TYPE_BTREE_INTERNAL, ENGINE_TAG_SQL);
+        ~flags = PageFlags.new();
+        if is_root { flags.set_root(true); }
+        header.set_flags(flags);
+        header.free_space_offset = (PAGE_HEADER_SIZE + BTREE_LEFTMOST_CHILD_SIZE) as u16;
+
+        ~data = Vec.with_capacity(page_size as usize);
+        data.resize(page_size as usize, 0u8);
+
+        BTreeInternalNode {
+            page_size,
+            header,
+            leftmost_child: NULL_PAGE,
+            entries: Vec.new(),
+            key_data: Vec.new(),
+            data,
+        }
+    }
+
+    # Load from page data
+    F from_page_data(page_data: &[u8], page_size: u32) -> Result<BTreeInternalNode, VaisError> {
+        ~header = PageHeader.read_from_page(page_data)?;
+        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as usize..]);
+
+        # Read leftmost_child (first 4 bytes of body)
+        ~leftmost_child = buf.get_u32_le()?;
+
+        # Read entry directory
+        ~entries = Vec.with_capacity(header.item_count as usize);
+        for _ in 0..header.item_count {
+            entries.push(BTreeInternalEntry.deserialize(&buf)?);
+        }
+
+        Ok(BTreeInternalNode {
+            page_size,
+            header,
+            leftmost_child,
+            entries,
+            key_data: Vec.new(),  # Keys read from page_data on demand
+            data: page_data.to_vec(),
+        })
+    }
+
+    # Get key data for an entry from the page buffer
+    F get_key(self, entry_index: usize) -> &[u8] {
+        ~entry = &self.entries[entry_index];
+        &self.data[entry.key_off as usize..(entry.key_off + entry.key_len) as usize]
+    }
+
+    # Binary search for child page containing the given key
+    # Returns the child page_id to descend to
+    F find_child(self, key: &[u8]) -> u32 {
+        if self.entries.is_empty() {
+            return self.leftmost_child;
+        }
+
+        # Binary search for smallest key_i where key < key_i
+        ~lo: usize = 0;
+        ~hi: usize = self.entries.len();
+
+        while lo < hi {
+            ~mid = lo + (hi - lo) / 2;
+            ~mid_key = self.get_key(mid);
+            M compare_keys(key, mid_key) {
+                KeyCmp.Less => { hi = mid; },
+                KeyCmp.Equal | KeyCmp.Greater => { lo = mid + 1; },
+            }
+        }
+
+        # lo is now the index of first key > search_key
+        if lo == 0 {
+            self.leftmost_child
+        } else {
+            self.entries[lo - 1].child_page
+        }
+    }
+
+    # Calculate available space for new entries
+    F available_space(self) -> u32 {
+        ~dir_end = PAGE_HEADER_SIZE + BTREE_LEFTMOST_CHILD_SIZE
+            + (self.entries.len() as u32) * BTREE_INTERNAL_ENTRY_SIZE;
+        ~key_data_start = self.find_key_data_start();
+        if key_data_start <= dir_end { 0 }
+        else { key_data_start - dir_end }
+    }
+
+    # Check if node can fit a new key
+    F can_fit(self, key_len: u32) -> bool {
+        self.available_space() >= BTREE_INTERNAL_ENTRY_SIZE + key_len
+    }
+
+    # Insert a separator key and child pointer
+    F insert_entry(~self, key: &[u8], child_page: u32) -> Result<(), VaisError> {
+        ~needed = BTREE_INTERNAL_ENTRY_SIZE + key.len() as u32;
+        if !self.can_fit(key.len() as u32) {
+            return Err(err_page_full(self.header.page_id, needed));
+        }
+
+        # Find insertion position (maintain sorted order)
+        ~pos: usize = 0;
+        for i in 0..self.entries.len() {
+            if key_less_than(key, self.get_key(i)) {
+                break;
+            }
+            pos = i + 1;
+        }
+
+        # Write key data at the end of page (growing from bottom)
+        ~key_offset = self.find_key_data_start() - key.len() as u32;
+        for i in 0..key.len() {
+            self.data[key_offset as usize + i] = key[i];
+        }
+
+        ~entry = BTreeInternalEntry.new(key_offset as u16, key.len() as u16, child_page);
+        self.entries.insert(pos, entry);
+        self.header.item_count = self.entries.len() as u16;
+
+        Ok(())
+    }
+
+    # Get entry count
+    F entry_count(self) -> u16 {
+        self.entries.len() as u16
+    }
+
+    # Set leftmost child
+    F set_leftmost_child(~self, page_id: u32) {
+        self.leftmost_child = page_id;
+    }
+
+    # Serialize to page buffer
+    F flush(~self) -> &[u8] {
+        ~buf = ByteBuffer.wrap(&self.data);
+        self.header.serialize(&buf);
+        buf.put_u32_le(self.leftmost_child);
+        for entry in &self.entries {
+            entry.serialize(&buf);
+        }
+        PageHeader.update_checksum(&self.data);
+        &self.data
+    }
+
+    # Helper: find start of key data area (lowest key offset)
+    F find_key_data_start(self) -> u32 {
+        ~min_off = self.page_size;
+        for entry in &self.entries {
+            if (entry.key_off as u32) < min_off {
+                min_off = entry.key_off as u32;
+            }
+        }
+        min_off
+    }
+
+    F is_root(self) -> bool {
+        self.header.get_flags().is_root()
+    }
+}
+
+# B+Tree Leaf Node
+S BTreeLeafNode {
+    page_size: u32,
+    header: PageHeader,
+    entries: Vec<BTreeLeafEntry>,       # Sorted entry directory
+    data: Vec<u8>,                      # Full page buffer
+}
+
+I BTreeLeafNode {
+    # Create a new empty leaf node
+    F new(page_id: u32, page_size: u32, is_root: bool) -> BTreeLeafNode {
+        ~header = PageHeader.new(page_id, PAGE_TYPE_BTREE_LEAF, ENGINE_TAG_SQL);
+        ~flags = PageFlags.new();
+        flags.set_leaf(true);
+        if is_root { flags.set_root(true); }
+        header.set_flags(flags);
+        header.free_space_offset = PAGE_HEADER_SIZE as u16;
+
+        ~data = Vec.with_capacity(page_size as usize);
+        data.resize(page_size as usize, 0u8);
+
+        BTreeLeafNode {
+            page_size,
+            header,
+            entries: Vec.new(),
+            data,
+        }
+    }
+
+    # Load from page data
+    F from_page_data(page_data: &[u8], page_size: u32) -> Result<BTreeLeafNode, VaisError> {
+        ~header = PageHeader.read_from_page(page_data)?;
+        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as usize..]);
+
+        ~entries = Vec.with_capacity(header.item_count as usize);
+        for _ in 0..header.item_count {
+            entries.push(BTreeLeafEntry.deserialize(&buf)?);
+        }
+
+        Ok(BTreeLeafNode {
+            page_size,
+            header,
+            entries,
+            data: page_data.to_vec(),
+        })
+    }
+
+    # Get key data for an entry
+    F get_key(self, entry_index: usize) -> &[u8] {
+        ~entry = &self.entries[entry_index];
+        &self.data[entry.key_off as usize..(entry.key_off + entry.key_len) as usize]
+    }
+
+    # Search for key, returns entry index or None
+    F search(self, key: &[u8]) -> Option<usize> {
+        ~lo: usize = 0;
+        ~hi: usize = self.entries.len();
+
+        while lo < hi {
+            ~mid = lo + (hi - lo) / 2;
+            ~mid_key = self.get_key(mid);
+            M compare_keys(key, mid_key) {
+                KeyCmp.Less => { hi = mid; },
+                KeyCmp.Equal => { return Some(mid); },
+                KeyCmp.Greater => { lo = mid + 1; },
+            }
+        }
+        None
+    }
+
+    # Find first entry >= key (for range scan start)
+    F lower_bound(self, key: &[u8]) -> usize {
+        ~lo: usize = 0;
+        ~hi: usize = self.entries.len();
+
+        while lo < hi {
+            ~mid = lo + (hi - lo) / 2;
+            ~mid_key = self.get_key(mid);
+            M compare_keys(key, mid_key) {
+                KeyCmp.Less | KeyCmp.Equal => { hi = mid; },
+                KeyCmp.Greater => { lo = mid + 1; },
+            }
+        }
+        lo  # First entry >= key
+    }
+
+    # Calculate available space
+    F available_space(self) -> u32 {
+        ~dir_end = PAGE_HEADER_SIZE + (self.entries.len() as u32) * BTREE_LEAF_ENTRY_SIZE;
+        ~key_data_start = self.find_key_data_start();
+        if key_data_start <= dir_end { 0 }
+        else { key_data_start - dir_end }
+    }
+
+    # Check if leaf can fit a new key
+    F can_fit(self, key_len: u32) -> bool {
+        self.available_space() >= BTREE_LEAF_ENTRY_SIZE + key_len
+    }
+
+    # Insert a key-TID pair
+    F insert(~self, key: &[u8], tid: u32) -> Result<(), VaisError> {
+        if !self.can_fit(key.len() as u32) {
+            return Err(err_page_full(self.header.page_id, BTREE_LEAF_ENTRY_SIZE + key.len() as u32));
+        }
+
+        # Find insertion position
+        ~pos = self.lower_bound(key);
+
+        # Write key data from bottom of page
+        ~key_offset = self.find_key_data_start() - key.len() as u32;
+        for i in 0..key.len() {
+            self.data[key_offset as usize + i] = key[i];
+        }
+
+        ~entry = BTreeLeafEntry.new(key_offset as u16, key.len() as u16, tid);
+        self.entries.insert(pos, entry);
+        self.header.item_count = self.entries.len() as u16;
+
+        Ok(())
+    }
+
+    # Delete a key, returns the removed TID if found
+    F delete(~self, key: &[u8]) -> Option<u32> {
+        M self.search(key) {
+            Some(idx) => {
+                ~entry = self.entries.remove(idx);
+                self.header.item_count = self.entries.len() as u16;
+                Some(entry.tid)
+            },
+            None => None,
+        }
+    }
+
+    # Get TID for a key
+    F get_tid(self, key: &[u8]) -> Option<u32> {
+        M self.search(key) {
+            Some(idx) => Some(self.entries[idx].tid),
+            None => None,
+        }
+    }
+
+    # Leaf chain navigation
+    F next_leaf(self) -> u32 { self.header.next_page }
+    F prev_leaf(self) -> u32 { self.header.prev_page }
+    F set_next_leaf(~self, page_id: u32) { self.header.next_page = page_id; }
+    F set_prev_leaf(~self, page_id: u32) { self.header.prev_page = page_id; }
+    F has_next_leaf(self) -> bool { self.header.next_page != NULL_PAGE }
+    F has_prev_leaf(self) -> bool { self.header.prev_page != NULL_PAGE }
+
+    # Entry count
+    F entry_count(self) -> u16 { self.entries.len() as u16 }
+
+    # Utilization (0.0 - 1.0)
+    F utilization(self) -> f64 {
+        ~used = (self.entries.len() as u32) * BTREE_LEAF_ENTRY_SIZE;
+        ~total = self.page_size - PAGE_HEADER_SIZE;
+        (used as f64) / (total as f64)
+    }
+
+    # Serialize to page buffer
+    F flush(~self) -> &[u8] {
+        ~buf = ByteBuffer.wrap(&self.data);
+        self.header.serialize(&buf);
+        for entry in &self.entries {
+            entry.serialize(&buf);
+        }
+        PageHeader.update_checksum(&self.data);
+        &self.data
+    }
+
+    # Get median entry index (for split point)
+    F median_index(self) -> usize {
+        self.entries.len() / 2
+    }
+
+    # Helper: find start of key data
+    F find_key_data_start(self) -> u32 {
+        ~min_off = self.page_size;
+        for entry in &self.entries {
+            if (entry.key_off as u32) < min_off {
+                min_off = entry.key_off as u32;
+            }
+        }
+        min_off
+    }
+
+    F is_root(self) -> bool {
+        self.header.get_flags().is_root()
+    }
+}

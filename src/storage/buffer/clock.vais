@@ -1,0 +1,75 @@
+# Clock Replacement Algorithm
+# Second-chance / clock replacement for buffer pool eviction
+# Based on Stage 4: Memory Architecture eviction priority
+
+use storage/buffer/frame.{BufferFrame, FrameState};
+
+# Clock hand for the replacement algorithm
+S ClockReplacer {
+    hand: u32,          # Current position of the clock hand
+    capacity: u32,      # Total number of frames
+}
+
+I ClockReplacer {
+    F new(capacity: u32) -> ClockReplacer {
+        ClockReplacer {
+            hand: 0,
+            capacity,
+        }
+    }
+
+    # Find a frame to evict using clock algorithm
+    # Returns frame_id of victim, or None if all frames are pinned
+    F find_victim(~self, frames: &~Vec<BufferFrame>) -> Option<u32> {
+        # Two passes: first pass clears reference bits, second pass finds victim
+        ~scanned: u32 = 0;
+        ~max_scans = self.capacity * 2;  # At most 2 full rotations
+
+        while scanned < max_scans {
+            ~frame = &frames[self.hand as usize];
+
+            if frame.is_evictable() {
+                if !frame.clock_ref {
+                    # Found victim: evictable and reference bit cleared
+                    ~victim = self.hand;
+                    self.advance();
+                    return Some(victim);
+                } else {
+                    # Clear reference bit (second chance)
+                    frames[self.hand as usize].clock_ref = false;
+                }
+            }
+
+            self.advance();
+            scanned += 1;
+        }
+
+        # All frames are pinned - no eviction possible
+        None
+    }
+
+    # Advance clock hand
+    F advance(~self) {
+        self.hand = (self.hand + 1) % self.capacity;
+    }
+
+    # Reset the replacer (e.g., after pool resize)
+    F reset(~self) {
+        self.hand = 0;
+    }
+
+    # Pin a frame (inform replacer it shouldn't be evicted)
+    F pin(frames: &~Vec<BufferFrame>, frame_id: u32) {
+        frames[frame_id as usize].pin();
+    }
+
+    # Unpin a frame (it becomes eviction candidate)
+    F unpin(frames: &~Vec<BufferFrame>, frame_id: u32) {
+        frames[frame_id as usize].unpin();
+    }
+
+    # Get current hand position
+    F current_hand(self) -> u32 {
+        self.hand
+    }
+}

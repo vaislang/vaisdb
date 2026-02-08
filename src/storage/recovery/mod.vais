@@ -1,0 +1,89 @@
+# Recovery Module
+# ARIES-style crash recovery with 3 phases: Analysis, Redo, Undo
+# Based on Stage 2 Section 7
+
+pub mod checkpoint;    # Fuzzy checkpoint manager + FPI tracking
+pub mod redo;          # Analysis + Redo phases, WAL record iterator
+pub mod undo;          # Undo phase with CLR support
+pub mod truncation;    # WAL segment truncation and archiving
+
+use storage/error.{VaisError};
+use storage/wal/writer.{WalWriter};
+use storage/wal/lsn.{NULL_LSN};
+use storage/buffer/pool.{BufferPool};
+use storage/recovery/redo.{recovery_analysis, recovery_redo, AnalysisResult};
+use storage/recovery/undo.{recovery_undo, UndoResult};
+
+# Full crash recovery result
+S RecoveryResult {
+    analysis_txns: u32,        # Transactions found in analysis
+    active_txns: u32,          # Uncommitted transactions requiring undo
+    records_redone: u64,       # WAL records replayed in redo phase
+    txns_undone: u32,          # Transactions rolled back in undo phase
+    records_undone: u64,       # CLR records written in undo phase
+}
+
+# Perform full ARIES crash recovery
+# Called on database startup after unclean shutdown
+F perform_recovery(
+    wal_dir: &str,
+    checkpoint_lsn: u64,
+    writer: &~WalWriter,
+    pool: &~BufferPool,
+) -> Result<RecoveryResult, VaisError> {
+    # Phase 1: ANALYSIS
+    # Scan WAL from last checkpoint, rebuild ATT and dirty page table
+    ~analysis = recovery_analysis(wal_dir, checkpoint_lsn)?;
+
+    ~total_txns = analysis.txn_table.len() as u32;
+    ~active_count: u32 = 0;
+    for (_, entry) in &analysis.txn_table {
+        M entry.state {
+            redo.RecoveryTxnState.Active => { active_count += 1; },
+            _ => {},
+        }
+    }
+
+    # Phase 2: REDO
+    # Replay all WAL records from checkpoint forward
+    # Restores both committed and uncommitted changes
+    ~records_redone = recovery_redo(wal_dir, &analysis, pool)?;
+
+    # Phase 3: UNDO
+    # Roll back all uncommitted transactions
+    # Write CLR records to WAL for idempotent recovery
+    ~undo_result = recovery_undo(wal_dir, &analysis, writer, pool)?;
+
+    Ok(RecoveryResult {
+        analysis_txns: total_txns,
+        active_txns: active_count,
+        records_redone,
+        txns_undone: undo_result.txns_undone,
+        records_undone: undo_result.records_undone,
+    })
+}
+
+# Quick check: does the database need recovery?
+# Returns true if WAL contains records after the last checkpoint
+F needs_recovery(
+    wal_dir: &str,
+    checkpoint_lsn: u64,
+) -> Result<bool, VaisError> {
+    if checkpoint_lsn == NULL_LSN {
+        # No checkpoint ever taken, need recovery if WAL exists
+        ~iter = redo.WalRecordIterator.from_lsn(wal_dir.to_string(), NULL_LSN)?;
+        M iter.next()? {
+            Some(_) => Ok(true),
+            None => Ok(false),
+        }
+    } else {
+        # Check if there are records after the checkpoint
+        ~iter = redo.WalRecordIterator.from_lsn(wal_dir.to_string(), checkpoint_lsn)?;
+        # Skip past the checkpoint record itself
+        ~first = iter.next()?;
+        M iter.next()? {
+            Some(_) => Ok(true),
+            None => Ok(false),
+        }
+    }
+}

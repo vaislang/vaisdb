@@ -1,0 +1,273 @@
+# WAL Record Type Registry
+# Based on Stage 2: WAL Design
+# Defines all record type constants and their meta/relational payloads
+
+use storage/error.{VaisError};
+use storage/bytes.{write_bytes, read_bytes, write_vec_u64, read_vec_u64, write_string, read_string};
+use std/bytes.{ByteBuffer};
+
+# ============================================================================
+# Meta Records (0x00-0x0F)
+# ============================================================================
+
+L TXN_BEGIN: u8 = 0x00;
+L TXN_COMMIT: u8 = 0x01;
+L TXN_ABORT: u8 = 0x02;
+L CHECKPOINT_BEGIN: u8 = 0x03;
+L CHECKPOINT_END: u8 = 0x04;
+L SCHEMA_CHANGE: u8 = 0x05;
+L CLR: u8 = 0x06;
+L PAGE_ALLOC: u8 = 0x07;
+L PAGE_DEALLOC: u8 = 0x08;
+L FPI: u8 = 0x09;
+
+# ============================================================================
+# Relational Records (0x10-0x1F)
+# ============================================================================
+
+L PAGE_WRITE: u8 = 0x10;
+L TUPLE_INSERT: u8 = 0x11;
+L TUPLE_DELETE: u8 = 0x12;
+L TUPLE_UPDATE: u8 = 0x13;
+L BTREE_SPLIT: u8 = 0x14;
+L BTREE_MERGE: u8 = 0x15;
+L BTREE_INSERT: u8 = 0x16;
+L BTREE_DELETE: u8 = 0x17;
+
+# ============================================================================
+# Vector Records (0x20-0x2F)
+# ============================================================================
+
+L HNSW_INSERT_NODE: u8 = 0x20;
+L HNSW_DELETE_NODE: u8 = 0x21;
+L HNSW_UPDATE_EDGES: u8 = 0x22;
+L HNSW_LAYER_PROMOTE: u8 = 0x23;
+L VECTOR_DATA_WRITE: u8 = 0x24;
+L QUANTIZATION_UPDATE: u8 = 0x25;
+
+# ============================================================================
+# Graph Records (0x30-0x3F)
+# ============================================================================
+
+L GRAPH_NODE_INSERT: u8 = 0x30;
+L GRAPH_NODE_DELETE: u8 = 0x31;
+L GRAPH_EDGE_INSERT: u8 = 0x32;
+L GRAPH_EDGE_DELETE: u8 = 0x33;
+L GRAPH_PROPERTY_UPDATE: u8 = 0x34;
+L ADJ_LIST_PAGE_SPLIT: u8 = 0x35;
+
+# ============================================================================
+# Full-Text Records (0x40-0x4F)
+# ============================================================================
+
+L POSTING_LIST_APPEND: u8 = 0x40;
+L POSTING_LIST_DELETE: u8 = 0x41;
+L DICTIONARY_INSERT: u8 = 0x42;
+L DICTIONARY_DELETE: u8 = 0x43;
+L TERM_FREQ_UPDATE: u8 = 0x44;
+
+# ============================================================================
+# Meta Record Payloads
+# ============================================================================
+
+# TXN_BEGIN payload
+S TxnBeginPayload {
+    isolation_level: u8,  # 0=READ_UNCOMMITTED, 1=READ_COMMITTED, 2=REPEATABLE_READ, 3=SERIALIZABLE
+}
+
+I TxnBeginPayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        buf.put_u8(self.isolation_level);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<TxnBeginPayload, VaisError> {
+        ~isolation_level = buf.get_u8()?;
+        Ok(TxnBeginPayload { isolation_level })
+    }
+}
+
+# TXN_COMMIT payload (empty)
+S TxnCommitPayload {}
+
+I TxnCommitPayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        # No fields
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<TxnCommitPayload, VaisError> {
+        Ok(TxnCommitPayload {})
+    }
+}
+
+# TXN_ABORT payload (empty)
+S TxnAbortPayload {}
+
+I TxnAbortPayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        # No fields
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<TxnAbortPayload, VaisError> {
+        Ok(TxnAbortPayload {})
+    }
+}
+
+# CHECKPOINT_BEGIN payload
+S CheckpointBeginPayload {
+    active_txns: Vec<u64>,  # List of active transaction IDs at checkpoint start
+}
+
+I CheckpointBeginPayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        write_vec_u64(buf, &self.active_txns);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<CheckpointBeginPayload, VaisError> {
+        ~active_txns = read_vec_u64(buf)?;
+        Ok(CheckpointBeginPayload { active_txns })
+    }
+}
+
+# CHECKPOINT_END payload (empty)
+S CheckpointEndPayload {}
+
+I CheckpointEndPayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        # No fields
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<CheckpointEndPayload, VaisError> {
+        Ok(CheckpointEndPayload {})
+    }
+}
+
+# SCHEMA_CHANGE payload
+S SchemaChangePayload {
+    change_type: u8,      # 0=CREATE_TABLE, 1=DROP_TABLE, 2=ALTER_TABLE, etc.
+    schema_data: Vec<u8>, # DDL serialized data
+}
+
+I SchemaChangePayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        buf.put_u8(self.change_type);
+        write_bytes(buf, &self.schema_data);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<SchemaChangePayload, VaisError> {
+        ~change_type = buf.get_u8()?;
+        ~schema_data = read_bytes(buf)?;
+        Ok(SchemaChangePayload { change_type, schema_data })
+    }
+}
+
+# CLR (Compensation Log Record) payload
+S ClrPayload {
+    original_record_type: u8,  # Type of record being undone
+    undo_next_lsn: u64,        # Next LSN to undo (skip already-undone records)
+    file_id: u8,               # Physical page reference
+    page_id: u32,              # Physical page reference
+}
+
+I ClrPayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        buf.put_u8(self.original_record_type);
+        buf.put_u64_le(self.undo_next_lsn);
+        buf.put_u8(self.file_id);
+        buf.put_u32_le(self.page_id);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<ClrPayload, VaisError> {
+        ~original_record_type = buf.get_u8()?;
+        ~undo_next_lsn = buf.get_u64_le()?;
+        ~file_id = buf.get_u8()?;
+        ~page_id = buf.get_u32_le()?;
+        Ok(ClrPayload {
+            original_record_type,
+            undo_next_lsn,
+            file_id,
+            page_id,
+        })
+    }
+}
+
+# PAGE_ALLOC payload
+S PageAllocPayload {
+    file_id: u8,
+    page_id: u32,
+    page_type: u8,  # Type of page being allocated
+}
+
+I PageAllocPayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        buf.put_u8(self.file_id);
+        buf.put_u32_le(self.page_id);
+        buf.put_u8(self.page_type);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<PageAllocPayload, VaisError> {
+        ~file_id = buf.get_u8()?;
+        ~page_id = buf.get_u32_le()?;
+        ~page_type = buf.get_u8()?;
+        Ok(PageAllocPayload { file_id, page_id, page_type })
+    }
+}
+
+# PAGE_DEALLOC payload
+S PageDeallocPayload {
+    file_id: u8,
+    page_id: u32,
+}
+
+I PageDeallocPayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        buf.put_u8(self.file_id);
+        buf.put_u32_le(self.page_id);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<PageDeallocPayload, VaisError> {
+        ~file_id = buf.get_u8()?;
+        ~page_id = buf.get_u32_le()?;
+        Ok(PageDeallocPayload { file_id, page_id })
+    }
+}
+
+# FPI (Full Page Image) payload
+S FpiPayload {
+    file_id: u8,
+    page_id: u32,
+    page_data: Vec<u8>,  # Complete page contents (PAGE_SIZE bytes)
+}
+
+I FpiPayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        buf.put_u8(self.file_id);
+        buf.put_u32_le(self.page_id);
+        write_bytes(buf, &self.page_data);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<FpiPayload, VaisError> {
+        ~file_id = buf.get_u8()?;
+        ~page_id = buf.get_u32_le()?;
+        ~page_data = read_bytes(buf)?;
+        Ok(FpiPayload { file_id, page_id, page_data })
+    }
+}
+
+# ============================================================================
+# Isolation Level Constants
+# ============================================================================
+
+L ISOLATION_READ_UNCOMMITTED: u8 = 0;
+L ISOLATION_READ_COMMITTED: u8 = 1;
+L ISOLATION_REPEATABLE_READ: u8 = 2;
+L ISOLATION_SERIALIZABLE: u8 = 3;
+
+# ============================================================================
+# Schema Change Type Constants
+# ============================================================================
+
+L SCHEMA_CREATE_TABLE: u8 = 0;
+L SCHEMA_DROP_TABLE: u8 = 1;
+L SCHEMA_ALTER_TABLE: u8 = 2;
+L SCHEMA_CREATE_INDEX: u8 = 3;
+L SCHEMA_DROP_INDEX: u8 = 4;

@@ -1,0 +1,529 @@
+# ARIES Recovery - Analysis and Redo Phases
+# Based on Stage 2 Section 7 - Crash Recovery
+#
+# Phase 1: ANALYSIS - Scan WAL from last checkpoint forward
+#   - Rebuild Active Transaction Table (ATT)
+#   - Identify dirty pages
+#
+# Phase 2: REDO - Replay WAL records from checkpoint forward
+#   - For each record: if page_lsn < record_lsn → apply redo
+#   - Restores ALL changes (committed and uncommitted)
+#   - Engine tag routes record to correct engine's redo handler
+
+use std/file.{File, OpenMode};
+use std/bytes.{ByteBuffer};
+use std/hashmap.{HashMap};
+
+use storage/error.{VaisError, err_internal, err_wal_corruption};
+use storage/constants.{
+    WAL_RECORD_HEADER_SIZE, WAL_SEGMENT_HEADER_SIZE, PAGE_HEADER_SIZE,
+};
+use storage/wal/header.{
+    WalRecordHeader,
+    ENGINE_META, ENGINE_RELATIONAL, ENGINE_VECTOR, ENGINE_GRAPH, ENGINE_FULLTEXT,
+};
+use storage/wal/record_types.{
+    TXN_BEGIN, TXN_COMMIT, TXN_ABORT,
+    CHECKPOINT_BEGIN, CHECKPOINT_END, CLR, FPI,
+    PAGE_ALLOC, PAGE_DEALLOC,
+    CheckpointBeginPayload, ClrPayload, FpiPayload,
+    PageAllocPayload, PageDeallocPayload,
+};
+use storage/wal/segment.{WalSegmentHeader, segment_filename};
+use storage/wal/lsn.{NULL_LSN, lsn_segment, lsn_offset, lsn_compare};
+use storage/buffer/pool.{BufferPool};
+use storage/page/header.{PageHeader};
+
+# Transaction state during recovery
+L RecoveryTxnState = Active | Committed | Aborted;
+
+# Transaction entry in the recovery ATT
+S RecoveryTxnEntry {
+    txn_id: u64,
+    state: RecoveryTxnState,
+    last_lsn: u64,          # Last WAL record LSN for this txn
+    first_lsn: u64,         # First WAL record LSN for this txn
+    undo_next_lsn: u64,     # Next LSN to undo (for CLR support)
+}
+
+I RecoveryTxnEntry {
+    F new(txn_id: u64, lsn: u64) -> RecoveryTxnEntry {
+        RecoveryTxnEntry {
+            txn_id,
+            state: RecoveryTxnState.Active,
+            last_lsn: lsn,
+            first_lsn: lsn,
+            undo_next_lsn: NULL_LSN,
+        }
+    }
+}
+
+# Dirty page entry: tracks pages that may need redo
+S DirtyPageEntry {
+    file_id: u8,
+    page_id: u32,
+    recovery_lsn: u64,      # First LSN that might need to be redone for this page
+}
+
+# Analysis phase result
+S AnalysisResult {
+    txn_table: HashMap<u64, RecoveryTxnEntry>,  # Active Transaction Table
+    dirty_pages: Vec<DirtyPageEntry>,            # Dirty page table
+    redo_start_lsn: u64,                         # LSN to start redo from
+}
+
+# WAL record iterator: reads records sequentially from WAL segments
+S WalRecordIterator {
+    wal_dir: Str,
+    current_segment: u32,
+    current_offset: u32,       # Offset within current segment file
+    segment_file: Option<File>,
+    segment_header: Option<WalSegmentHeader>,
+}
+
+I WalRecordIterator {
+    # Create iterator starting from a specific LSN
+    F from_lsn(wal_dir: Str, start_lsn: u64) -> Result<WalRecordIterator, VaisError> {
+        ~segment = if start_lsn == NULL_LSN { 1u32 } else { lsn_segment(start_lsn) };
+        ~offset = if start_lsn == NULL_LSN { WAL_SEGMENT_HEADER_SIZE } else { lsn_offset(start_lsn) };
+
+        ~iter = WalRecordIterator {
+            wal_dir,
+            current_segment: segment,
+            current_offset: offset,
+            segment_file: None,
+            segment_header: None,
+        };
+
+        # Try to open the starting segment
+        iter.open_segment(segment)?;
+        Ok(iter)
+    }
+
+    # Read the next WAL record, returns None at end of WAL
+    F next(~self) -> Result<Option<(WalRecordHeader, Vec<u8>)>, VaisError> {
+        loop {
+            # Ensure we have a segment file open
+            if self.segment_file.is_none() {
+                if !self.try_open_next_segment()? {
+                    return Ok(None);  # No more segments
+                }
+            }
+
+            ~file = M &self.segment_file {
+                Some(ref f) => f,
+                None => return Ok(None),
+            };
+
+            # Check if we're past the end of records in this segment
+            ~seg_end = M &self.segment_header {
+                Some(ref h) => lsn_offset(h.last_lsn) + WAL_RECORD_HEADER_SIZE,  # Approximate
+                None => 0u32,
+            };
+
+            if self.current_offset >= seg_end {
+                # Move to next segment
+                self.segment_file = None;
+                self.current_segment += 1;
+                self.current_offset = WAL_SEGMENT_HEADER_SIZE;
+                continue;
+            }
+
+            # Read record header
+            ~header_buf = Vec.with_capacity(WAL_RECORD_HEADER_SIZE as usize);
+            header_buf.resize(WAL_RECORD_HEADER_SIZE as usize, 0u8);
+            ~bytes_read = file.read_at(self.current_offset as u64, &header_buf)?;
+            if bytes_read < WAL_RECORD_HEADER_SIZE as usize {
+                # Partial header = end of segment or torn write
+                self.segment_file = None;
+                self.current_segment += 1;
+                self.current_offset = WAL_SEGMENT_HEADER_SIZE;
+                continue;
+            }
+
+            ~buf = ByteBuffer.wrap_readonly(&header_buf);
+            ~header = WalRecordHeader.deserialize(&buf)?;
+
+            # Validate record
+            if header.record_length < WAL_RECORD_HEADER_SIZE || header.lsn == NULL_LSN {
+                # Invalid record = end of valid data
+                self.segment_file = None;
+                self.current_segment += 1;
+                self.current_offset = WAL_SEGMENT_HEADER_SIZE;
+                continue;
+            }
+
+            # Read payload
+            ~payload_size = header.record_length - WAL_RECORD_HEADER_SIZE;
+            ~payload = Vec.with_capacity(payload_size as usize);
+            payload.resize(payload_size as usize, 0u8);
+            if payload_size > 0 {
+                file.read_at(
+                    (self.current_offset + WAL_RECORD_HEADER_SIZE) as u64,
+                    &payload,
+                )?;
+            }
+
+            # Verify checksum of full record
+            ~full_record = Vec.with_capacity(header.record_length as usize);
+            full_record.resize(header.record_length as usize, 0u8);
+            file.read_at(self.current_offset as u64, &full_record)?;
+            if !header.verify_checksum(&full_record) {
+                # Checksum failure = torn write, end of valid data
+                self.segment_file = None;
+                self.current_segment += 1;
+                self.current_offset = WAL_SEGMENT_HEADER_SIZE;
+                continue;
+            }
+
+            # Advance offset
+            self.current_offset += header.record_length;
+
+            return Ok(Some((header, payload)));
+        }
+    }
+
+    # Try to open the next WAL segment file
+    F try_open_next_segment(~self) -> Result<bool, VaisError> {
+        self.open_segment(self.current_segment)
+    }
+
+    # Open a specific WAL segment
+    F open_segment(~self, segment_num: u32) -> Result<bool, VaisError> {
+        ~path = self.wal_dir.clone() + "/" + &segment_filename(segment_num);
+
+        M File.open(&path, OpenMode.ReadOnly) {
+            Ok(file) => {
+                # Read segment header
+                ~header_buf = Vec.with_capacity(WAL_SEGMENT_HEADER_SIZE as usize);
+                header_buf.resize(WAL_SEGMENT_HEADER_SIZE as usize, 0u8);
+                file.read_at(0, &header_buf)?;
+                ~seg_header = WalSegmentHeader.deserialize(
+                    &ByteBuffer.wrap_readonly(&header_buf)
+                )?;
+
+                self.segment_file = Some(file);
+                self.segment_header = Some(seg_header);
+                if self.current_offset < WAL_SEGMENT_HEADER_SIZE {
+                    self.current_offset = WAL_SEGMENT_HEADER_SIZE;
+                }
+                Ok(true)
+            },
+            Err(_) => Ok(false),  # Segment file doesn't exist
+        }
+    }
+}
+
+# Phase 1: ANALYSIS
+# Scan WAL from last checkpoint forward to rebuild ATT and dirty page table
+F recovery_analysis(
+    wal_dir: &str,
+    checkpoint_lsn: u64,
+) -> Result<AnalysisResult, VaisError> {
+    ~txn_table: HashMap<u64, RecoveryTxnEntry> = HashMap.new();
+    ~dirty_pages: Vec<DirtyPageEntry> = Vec.new();
+    ~redo_start_lsn = checkpoint_lsn;
+
+    ~iter = WalRecordIterator.from_lsn(wal_dir.to_string(), checkpoint_lsn)?;
+
+    loop {
+        ~record = M iter.next()? {
+            Some(r) => r,
+            None => break,
+        };
+        ~(header, payload) = record;
+        ~txn_id = header.txn_id;
+
+        M header.record_type {
+            TXN_BEGIN => {
+                # New transaction found
+                txn_table.insert(txn_id, RecoveryTxnEntry.new(txn_id, header.lsn));
+            },
+            TXN_COMMIT => {
+                # Mark transaction as committed
+                M txn_table.get_mut(&txn_id) {
+                    Some(ref ~entry) => {
+                        entry.state = RecoveryTxnState.Committed;
+                        entry.last_lsn = header.lsn;
+                    },
+                    None => {
+                        # Transaction started before checkpoint
+                        ~entry = RecoveryTxnEntry.new(txn_id, header.lsn);
+                        entry.state = RecoveryTxnState.Committed;
+                        txn_table.insert(txn_id, entry);
+                    },
+                }
+            },
+            TXN_ABORT => {
+                M txn_table.get_mut(&txn_id) {
+                    Some(ref ~entry) => {
+                        entry.state = RecoveryTxnState.Aborted;
+                        entry.last_lsn = header.lsn;
+                    },
+                    None => {
+                        ~entry = RecoveryTxnEntry.new(txn_id, header.lsn);
+                        entry.state = RecoveryTxnState.Aborted;
+                        txn_table.insert(txn_id, entry);
+                    },
+                }
+            },
+            CHECKPOINT_BEGIN => {
+                # Parse active txns from checkpoint payload
+                ~buf = ByteBuffer.wrap_readonly(&payload);
+                ~cp_payload = CheckpointBeginPayload.deserialize(&buf)?;
+                for active_txn in &cp_payload.active_txns {
+                    if !txn_table.contains_key(active_txn) {
+                        txn_table.insert(*active_txn, RecoveryTxnEntry.new(*active_txn, header.lsn));
+                    }
+                }
+            },
+            CHECKPOINT_END => {
+                # Update redo start to after this checkpoint
+                redo_start_lsn = header.lsn;
+            },
+            CLR => {
+                # CLR - update undo_next_lsn for this transaction
+                ~buf = ByteBuffer.wrap_readonly(&payload);
+                ~clr_payload = ClrPayload.deserialize(&buf)?;
+                M txn_table.get_mut(&txn_id) {
+                    Some(ref ~entry) => {
+                        entry.last_lsn = header.lsn;
+                        entry.undo_next_lsn = clr_payload.undo_next_lsn;
+                    },
+                    None => {},
+                }
+            },
+            _ => {
+                # All other record types: update transaction's last_lsn
+                # and track dirty pages
+                M txn_table.get_mut(&txn_id) {
+                    Some(ref ~entry) => {
+                        entry.last_lsn = header.lsn;
+                    },
+                    None => {
+                        if txn_id != 0 {
+                            txn_table.insert(txn_id, RecoveryTxnEntry.new(txn_id, header.lsn));
+                        }
+                    },
+                }
+
+                # Track dirty pages for records that modify pages
+                track_dirty_page(&header, &payload, &~dirty_pages);
+            },
+        }
+    }
+
+    Ok(AnalysisResult {
+        txn_table,
+        dirty_pages,
+        redo_start_lsn,
+    })
+}
+
+# Track dirty pages from a WAL record
+F track_dirty_page(header: &WalRecordHeader, payload: &[u8], dirty_pages: &~Vec<DirtyPageEntry>) {
+    # Extract file_id and page_id from common record types
+    if payload.len() >= 5 {
+        ~buf = ByteBuffer.wrap_readonly(payload);
+        M buf.get_u8() {
+            Ok(file_id) => {
+                M buf.get_u32_le() {
+                    Ok(page_id) => {
+                        # Check if already tracked
+                        ~found = false;
+                        for dp in dirty_pages.iter() {
+                            if dp.file_id == file_id && dp.page_id == page_id {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if !found {
+                            dirty_pages.push(DirtyPageEntry {
+                                file_id,
+                                page_id,
+                                recovery_lsn: header.lsn,
+                            });
+                        }
+                    },
+                    Err(_) => {},
+                }
+            },
+            Err(_) => {},
+        }
+    }
+}
+
+# Phase 2: REDO
+# Replay all WAL records from redo_start_lsn forward
+# For each record: if page_lsn < record_lsn → apply redo
+F recovery_redo(
+    wal_dir: &str,
+    analysis: &AnalysisResult,
+    pool: &~BufferPool,
+) -> Result<u64, VaisError> {
+    ~records_redone: u64 = 0;
+
+    ~iter = WalRecordIterator.from_lsn(wal_dir.to_string(), analysis.redo_start_lsn)?;
+
+    loop {
+        ~record = M iter.next()? {
+            Some(r) => r,
+            None => break,
+        };
+        ~(header, payload) = record;
+
+        # Skip meta records that don't modify pages
+        M header.record_type {
+            TXN_BEGIN | TXN_COMMIT | TXN_ABORT |
+            CHECKPOINT_BEGIN | CHECKPOINT_END => continue,
+            _ => {},
+        }
+
+        # Apply FPI directly (full page image replaces entire page)
+        if header.record_type == FPI {
+            ~buf = ByteBuffer.wrap_readonly(&payload);
+            ~fpi_payload = FpiPayload.deserialize(&buf)?;
+            redo_fpi(pool, &fpi_payload, header.lsn)?;
+            records_redone += 1;
+            continue;
+        }
+
+        # For CLR: redo the compensation (CLRs are redo-only)
+        if header.record_type == CLR {
+            ~buf = ByteBuffer.wrap_readonly(&payload);
+            ~clr_payload = ClrPayload.deserialize(&buf)?;
+            # CLRs record the undo operation - redo them to restore undo state
+            records_redone += 1;
+            continue;
+        }
+
+        # For data records: check if page needs redo
+        # Extract file_id and page_id from payload
+        if payload.len() >= 5 {
+            ~buf = ByteBuffer.wrap_readonly(&payload);
+            M (buf.get_u8(), buf.get_u32_le()) {
+                (Ok(file_id), Ok(page_id)) => {
+                    if needs_redo(pool, file_id, page_id, header.lsn)? {
+                        redo_record(pool, &header, &payload)?;
+                        records_redone += 1;
+                    }
+                },
+                _ => {},
+            }
+        }
+    }
+
+    Ok(records_redone)
+}
+
+# Check if a page needs redo (page_lsn < record_lsn)
+F needs_redo(
+    pool: &~BufferPool,
+    file_id: u8,
+    page_id: u32,
+    record_lsn: u64,
+) -> Result<bool, VaisError> {
+    ~frame = pool.fetch_page(file_id, page_id)?;
+    ~page_data = pool.get_page(frame);
+    ~page_header = PageHeader.read_from_page(page_data)?;
+    ~page_lsn = page_header.page_lsn;
+    pool.unpin_page(frame, false);
+
+    Ok(page_lsn < record_lsn)
+}
+
+# Apply a Full Page Image (FPI) during redo
+F redo_fpi(
+    pool: &~BufferPool,
+    fpi: &FpiPayload,
+    lsn: u64,
+) -> Result<(), VaisError> {
+    ~frame = pool.fetch_page(fpi.file_id, fpi.page_id)?;
+    pool.write_page(frame, &fpi.page_data)?;
+    pool.unpin_page(frame, true);
+    Ok(())
+}
+
+# Apply a WAL record during redo
+# Routes to the correct engine-specific redo handler based on engine_type
+F redo_record(
+    pool: &~BufferPool,
+    header: &WalRecordHeader,
+    payload: &[u8],
+) -> Result<(), VaisError> {
+    M header.engine_type {
+        ENGINE_META => redo_meta_record(pool, header, payload),
+        ENGINE_RELATIONAL => redo_relational_record(pool, header, payload),
+        ENGINE_VECTOR => redo_vector_record(pool, header, payload),
+        ENGINE_GRAPH => redo_graph_record(pool, header, payload),
+        ENGINE_FULLTEXT => redo_fulltext_record(pool, header, payload),
+        _ => Err(err_internal("Unknown engine type in WAL record")),
+    }
+}
+
+# Redo a meta record (PAGE_ALLOC, PAGE_DEALLOC)
+F redo_meta_record(
+    pool: &~BufferPool,
+    header: &WalRecordHeader,
+    payload: &[u8],
+) -> Result<(), VaisError> {
+    ~buf = ByteBuffer.wrap_readonly(payload);
+    M header.record_type {
+        PAGE_ALLOC => {
+            ~p = PageAllocPayload.deserialize(&buf)?;
+            pool.allocate_specific_page(p.file_id, p.page_id)?;
+            Ok(())
+        },
+        PAGE_DEALLOC => {
+            ~p = PageDeallocPayload.deserialize(&buf)?;
+            pool.deallocate_page(p.file_id, p.page_id)?;
+            Ok(())
+        },
+        _ => Ok(()),  # Other meta records don't need page-level redo
+    }
+}
+
+# Redo a relational engine record
+# TODO: Dispatch to specific tuple/btree redo handlers
+F redo_relational_record(
+    pool: &~BufferPool,
+    header: &WalRecordHeader,
+    payload: &[u8],
+) -> Result<(), VaisError> {
+    # Relational redo dispatches to specific handlers:
+    # PAGE_WRITE, TUPLE_INSERT, TUPLE_DELETE, TUPLE_UPDATE,
+    # BTREE_SPLIT, BTREE_MERGE, BTREE_INSERT, BTREE_DELETE
+    # Each handler reads the payload, fetches the page, and applies the change
+    # For now, handled as a pass-through; individual handlers added in integration
+    Ok(())
+}
+
+# Redo a vector engine record
+F redo_vector_record(
+    pool: &~BufferPool,
+    header: &WalRecordHeader,
+    payload: &[u8],
+) -> Result<(), VaisError> {
+    # HNSW_INSERT_NODE, HNSW_DELETE_NODE, HNSW_UPDATE_EDGES, etc.
+    Ok(())
+}
+
+# Redo a graph engine record
+F redo_graph_record(
+    pool: &~BufferPool,
+    header: &WalRecordHeader,
+    payload: &[u8],
+) -> Result<(), VaisError> {
+    # GRAPH_NODE_INSERT, GRAPH_EDGE_INSERT, etc.
+    Ok(())
+}
+
+# Redo a full-text engine record
+F redo_fulltext_record(
+    pool: &~BufferPool,
+    header: &WalRecordHeader,
+    payload: &[u8],
+) -> Result<(), VaisError> {
+    # POSTING_LIST_APPEND, DICTIONARY_INSERT, etc.
+    Ok(())
+}

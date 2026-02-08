@@ -1,0 +1,155 @@
+# B+Tree Cursor
+# Provides iteration over leaf entries for range scans and sequential access
+# Follows the doubly-linked leaf chain
+
+use storage/constants.{NULL_PAGE};
+use storage/error.{VaisError};
+use storage/buffer/pool.{BufferPool};
+use storage/btree/node.{BTreeLeafNode};
+use storage/btree/entry.{BTreeLeafEntry, compare_keys, KeyCmp};
+
+# Cursor position within the B+Tree
+S BTreeCursor {
+    file_id: u8,
+    page_size: u32,
+    current_page_id: u32,     # Current leaf page
+    current_index: usize,     # Current entry index within leaf
+    current_frame: u32,       # Buffer pool frame_id (-1 if not loaded)
+    is_valid: bool,           # Whether cursor points to a valid entry
+    direction: ScanDirection,
+}
+
+L ScanDirection = Forward | Backward;
+
+I BTreeCursor {
+    # Create a cursor positioned at a specific leaf entry
+    F new(file_id: u8, page_size: u32, page_id: u32, index: usize, frame_id: u32) -> BTreeCursor {
+        BTreeCursor {
+            file_id,
+            page_size,
+            current_page_id: page_id,
+            current_index: index,
+            current_frame: frame_id,
+            is_valid: true,
+            direction: ScanDirection.Forward,
+        }
+    }
+
+    # Create an invalid/exhausted cursor
+    F invalid() -> BTreeCursor {
+        BTreeCursor {
+            file_id: 0,
+            page_size: 0,
+            current_page_id: NULL_PAGE,
+            current_index: 0,
+            current_frame: 0,
+            is_valid: false,
+            direction: ScanDirection.Forward,
+        }
+    }
+
+    # Check if cursor is valid
+    F valid(self) -> bool {
+        self.is_valid
+    }
+
+    # Get current entry's key and TID
+    F current(self, pool: &BufferPool) -> Result<(Vec<u8>, u32), VaisError> {
+        if !self.is_valid {
+            return Err(err_internal("Cursor is not valid"));
+        }
+
+        ~page_data = pool.get_page(self.current_frame);
+        ~leaf = BTreeLeafNode.from_page_data(page_data, self.page_size)?;
+        ~key = leaf.get_key(self.current_index).to_vec();
+        ~tid = leaf.entries[self.current_index].tid;
+
+        Ok((key, tid))
+    }
+
+    # Advance cursor to next entry (forward scan)
+    F next(~self, pool: &~BufferPool) -> Result<bool, VaisError> {
+        if !self.is_valid {
+            return Ok(false);
+        }
+
+        ~page_data = pool.get_page(self.current_frame);
+        ~leaf = BTreeLeafNode.from_page_data(page_data, self.page_size)?;
+
+        self.current_index += 1;
+
+        if self.current_index >= leaf.entry_count() as usize {
+            # Move to next leaf page
+            ~next_page = leaf.next_leaf();
+            pool.unpin_page(self.current_frame, false);
+
+            if next_page == NULL_PAGE {
+                self.is_valid = false;
+                return Ok(false);
+            }
+
+            self.current_frame = pool.fetch_page(self.file_id, next_page)?;
+            self.current_page_id = next_page;
+            self.current_index = 0;
+
+            # Check if new leaf has entries
+            ~new_page_data = pool.get_page(self.current_frame);
+            ~new_leaf = BTreeLeafNode.from_page_data(new_page_data, self.page_size)?;
+            if new_leaf.entry_count() == 0 {
+                pool.unpin_page(self.current_frame, false);
+                self.is_valid = false;
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    # Move cursor to previous entry (backward scan)
+    F prev(~self, pool: &~BufferPool) -> Result<bool, VaisError> {
+        if !self.is_valid {
+            return Ok(false);
+        }
+
+        if self.current_index > 0 {
+            self.current_index -= 1;
+            return Ok(true);
+        }
+
+        # Move to previous leaf page
+        ~page_data = pool.get_page(self.current_frame);
+        ~leaf = BTreeLeafNode.from_page_data(page_data, self.page_size)?;
+        ~prev_page = leaf.prev_leaf();
+        pool.unpin_page(self.current_frame, false);
+
+        if prev_page == NULL_PAGE {
+            self.is_valid = false;
+            return Ok(false);
+        }
+
+        self.current_frame = pool.fetch_page(self.file_id, prev_page)?;
+        self.current_page_id = prev_page;
+
+        # Position at last entry of previous leaf
+        ~prev_page_data = pool.get_page(self.current_frame);
+        ~prev_leaf = BTreeLeafNode.from_page_data(prev_page_data, self.page_size)?;
+        if prev_leaf.entry_count() == 0 {
+            pool.unpin_page(self.current_frame, false);
+            self.is_valid = false;
+            return Ok(false);
+        }
+        self.current_index = (prev_leaf.entry_count() - 1) as usize;
+
+        Ok(true)
+    }
+
+    # Release cursor resources
+    F close(~self, pool: &~BufferPool) {
+        if self.is_valid {
+            pool.unpin_page(self.current_frame, false);
+            self.is_valid = false;
+        }
+    }
+}
+
+use storage/error.{err_internal};

@@ -1,0 +1,216 @@
+# Read-ahead Prefetcher
+# Detects sequential access patterns and prefetches pages
+# Improves performance for sequential scans (table scans, index scans)
+
+use std/sync.{Mutex};
+use std/hashmap.{HashMap};
+
+# Access history for a single file
+S FileAccessHistory {
+    file_id: u8,
+    recent_pages: Vec<u32>,      # Last N page accesses (in order)
+    history_size: usize,          # How many accesses to track (default: 4)
+    prefetch_distance: u32,       # How many pages to prefetch ahead (default: 8)
+}
+
+I FileAccessHistory {
+    F new(file_id: u8) -> FileAccessHistory {
+        FileAccessHistory {
+            file_id,
+            recent_pages: Vec.new(),
+            history_size: 4,
+            prefetch_distance: 8,
+        }
+    }
+
+    # Record a page access
+    F record(~self, page_id: u32) {
+        self.recent_pages.push(page_id);
+
+        # Keep only the last N accesses
+        if self.recent_pages.len() > self.history_size {
+            self.recent_pages.remove(0);
+        }
+    }
+
+    # Check if recent accesses form a sequential pattern
+    # Returns Some(stride) if sequential, None otherwise
+    F detect_sequential(self) -> Option<i32> {
+        if self.recent_pages.len() < 3 {
+            return None;  # Need at least 3 accesses to detect pattern
+        }
+
+        # Check if all consecutive pairs have the same stride
+        ~first_stride = (self.recent_pages[1] as i32) - (self.recent_pages[0] as i32);
+
+        for i in 1..(self.recent_pages.len() - 1) {
+            ~stride = (self.recent_pages[i + 1] as i32) - (self.recent_pages[i] as i32);
+            if stride != first_stride {
+                return None;  # Pattern broken
+            }
+        }
+
+        # Check for common sequential patterns
+        if first_stride == 1 || first_stride == -1 {
+            Some(first_stride)
+        } else {
+            None  # Not a simple sequential pattern
+        }
+    }
+
+    # Get the last accessed page
+    F last_page(self) -> Option<u32> {
+        if self.recent_pages.is_empty() {
+            None
+        } else {
+            Some(self.recent_pages[self.recent_pages.len() - 1])
+        }
+    }
+
+    # Clear history (e.g., after pattern change)
+    F clear(~self) {
+        self.recent_pages.clear();
+    }
+}
+
+# Read-ahead prefetcher: tracks access patterns and suggests prefetches
+S ReadAhead {
+    file_histories: HashMap<u8, FileAccessHistory>,
+    lock: Mutex,
+    enabled: bool,
+    prefetch_distance: u32,   # Default prefetch distance
+}
+
+I ReadAhead {
+    # Create a new read-ahead prefetcher
+    F new() -> ReadAhead {
+        ReadAhead {
+            file_histories: HashMap.new(),
+            lock: Mutex.new(),
+            enabled: true,
+            prefetch_distance: 8,
+        }
+    }
+
+    # Create with custom prefetch distance
+    F with_distance(prefetch_distance: u32) -> ReadAhead {
+        ReadAhead {
+            file_histories: HashMap.new(),
+            lock: Mutex.new(),
+            enabled: true,
+            prefetch_distance,
+        }
+    }
+
+    # Record a page access
+    F notify_access(~self, file_id: u8, page_id: u32) {
+        if !self.enabled {
+            return;
+        }
+
+        ~guard = self.lock.lock();
+
+        # Get or create file history
+        if !self.file_histories.contains_key(&file_id) {
+            ~history = FileAccessHistory.new(file_id);
+            self.file_histories.insert(file_id, history);
+        }
+
+        ~history = self.file_histories.get_mut(&file_id).unwrap();
+        history.record(page_id);
+
+        drop(guard);
+    }
+
+    # Check if prefetch is needed for this access
+    # Returns Some((start_page, count)) if prefetch should happen
+    F should_prefetch(self, file_id: u8, page_id: u32) -> Option<(u32, u32)> {
+        if !self.enabled {
+            return None;
+        }
+
+        ~guard = self.lock.lock();
+
+        ~history = M self.file_histories.get(&file_id) {
+            Some(h) => h,
+            None => {
+                drop(guard);
+                return None;
+            },
+        };
+
+        # Detect sequential pattern
+        ~stride = M history.detect_sequential() {
+            Some(s) => s,
+            None => {
+                drop(guard);
+                return None;
+            },
+        };
+
+        drop(guard);
+
+        # Calculate prefetch range based on stride
+        if stride > 0 {
+            # Forward sequential access
+            ~start_page = page_id + 1;
+            ~count = self.prefetch_distance;
+            Some((start_page, count))
+        } else if stride < 0 {
+            # Backward sequential access (less common)
+            # Don't prefetch backwards to avoid underflow
+            None
+        } else {
+            None
+        }
+    }
+
+    # Clear history for a file (e.g., after file close)
+    F clear_file(~self, file_id: u8) {
+        ~guard = self.lock.lock();
+        self.file_histories.remove(&file_id);
+        drop(guard);
+    }
+
+    # Clear all histories
+    F clear_all(~self) {
+        ~guard = self.lock.lock();
+        self.file_histories.clear();
+        drop(guard);
+    }
+
+    # Enable/disable read-ahead
+    F set_enabled(~self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    # Check if read-ahead is enabled
+    F is_enabled(self) -> bool {
+        self.enabled
+    }
+
+    # Set prefetch distance
+    F set_prefetch_distance(~self, distance: u32) {
+        self.prefetch_distance = distance;
+
+        # Update all file histories
+        ~guard = self.lock.lock();
+        for (_, history) in self.file_histories.iter_mut() {
+            history.prefetch_distance = distance;
+        }
+        drop(guard);
+    }
+
+    # Get prefetch distance
+    F get_prefetch_distance(self) -> u32 {
+        self.prefetch_distance
+    }
+
+    # Get statistics: number of files being tracked
+    F tracked_file_count(self) -> usize {
+        ~guard = self.lock.lock();
+        ~count = self.file_histories.len();
+        drop(guard);
+        count
+    }
+}

@@ -1,0 +1,11 @@
+# Buffer Pool Module
+# Memory management for cached database pages
+# Includes clock replacement, dirty tracking, partitioning, and read-ahead
+
+pub mod pool;              # Core buffer pool with clock replacement
+pub mod frame;             # Individual buffer frame with page data
+pub mod clock;             # Clock replacement algorithm
+pub mod dirty_tracker;     # Dirty page tracking for checkpoints
+pub mod partitioned;       # Partitioned buffer pool for reduced contention
+pub mod readahead;         # Sequential access detection and prefetching
+pub mod stats;             # Statistics collection and monitoring

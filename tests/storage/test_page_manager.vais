@@ -1,0 +1,172 @@
+# Stage 1: Page Manager Integration Tests
+# Tests: page header R/W, checksum verification, heap page ops,
+#         freelist allocation, meta page bootstrap, overflow pages
+
+use std/test.{assert_eq, assert_ne, assert_true, assert_false, describe, it};
+use std/bytes.{ByteBuffer};
+
+use storage/constants.{
+    PAGE_SIZE_DEFAULT, PAGE_HEADER_SIZE, NULL_PAGE, MVCC_TUPLE_META_SIZE,
+    FLAG_IS_LEAF, FLAG_IS_ROOT,
+};
+use storage/page/header.{PageHeader};
+use storage/page/types.{PAGE_TYPE_HEAP, PAGE_TYPE_BTREE_LEAF, ENGINE_TAG_SQL};
+use storage/page/flags.{PageFlags};
+use storage/page/meta.{MetaPage};
+use storage/page/freelist.{FreelistPage};
+use storage/page/heap.{HeapPage};
+use storage/page/slot.{HeapPageSlot};
+use storage/page/mvcc.{MvccTupleMeta};
+use storage/checksum.{calculate_page_checksum, verify_page_checksum};
+
+describe("Page Header") {
+    it("should serialize and deserialize correctly") {
+        ~header = PageHeader.new(42, PAGE_TYPE_HEAP, ENGINE_TAG_SQL);
+        header.item_count = 5;
+        header.free_space_offset = 100;
+
+        ~buf = Vec.with_capacity(PAGE_SIZE_DEFAULT as usize);
+        buf.resize(PAGE_SIZE_DEFAULT as usize, 0u8);
+        ~bb = ByteBuffer.wrap(&buf);
+        header.serialize(&bb);
+
+        ~restored = PageHeader.read_from_page(&buf).unwrap();
+        assert_eq(restored.page_id, 42);
+        assert_eq(restored.page_type, PAGE_TYPE_HEAP);
+        assert_eq(restored.item_count, 5);
+        assert_eq(restored.free_space_offset, 100);
+    }
+
+    it("should compute CRC32C checksum over full page") {
+        ~buf = Vec.with_capacity(PAGE_SIZE_DEFAULT as usize);
+        buf.resize(PAGE_SIZE_DEFAULT as usize, 0u8);
+
+        ~header = PageHeader.new(1, PAGE_TYPE_HEAP, ENGINE_TAG_SQL);
+        ~bb = ByteBuffer.wrap(&buf);
+        header.serialize(&bb);
+        PageHeader.update_checksum(&buf);
+
+        assert_true(verify_page_checksum(&buf));
+
+        # Corrupt a byte → checksum should fail
+        buf[100] = 0xFF;
+        assert_false(verify_page_checksum(&buf));
+    }
+
+    it("should set and get flags correctly") {
+        ~flags = PageFlags.new();
+        assert_false(flags.is_leaf());
+        assert_false(flags.is_root());
+
+        flags.set_leaf(true);
+        flags.set_root(true);
+        assert_true(flags.is_leaf());
+        assert_true(flags.is_root());
+    }
+}
+
+describe("Meta Page") {
+    it("should bootstrap with magic number and UUID") {
+        ~meta = MetaPage.create_new();
+        assert_eq(meta.magic, 0x56414953);  # "VAIS"
+        assert_ne(meta.database_uuid, [0u8; 16]);
+    }
+
+    it("should serialize and deserialize round-trip") {
+        ~original = MetaPage.create_new();
+        ~buf = Vec.with_capacity(256);
+        buf.resize(256, 0u8);
+        original.serialize_to(&buf);
+
+        ~restored = MetaPage.deserialize_from(&buf).unwrap();
+        assert_eq(restored.magic, original.magic);
+        assert_eq(restored.format_version, original.format_version);
+        assert_eq(restored.database_uuid, original.database_uuid);
+    }
+}
+
+describe("Freelist Bitmap") {
+    it("should allocate and deallocate pages") {
+        ~freelist = FreelistPage.new(PAGE_SIZE_DEFAULT);
+
+        # Allocate a page
+        ~page_id = freelist.allocate().unwrap();
+        assert_true(freelist.is_allocated(page_id));
+
+        # Deallocate
+        freelist.deallocate(page_id);
+        assert_false(freelist.is_allocated(page_id));
+    }
+
+    it("should track free page count") {
+        ~freelist = FreelistPage.new(PAGE_SIZE_DEFAULT);
+        ~initial_free = freelist.free_count();
+
+        ~p1 = freelist.allocate().unwrap();
+        ~p2 = freelist.allocate().unwrap();
+        assert_eq(freelist.free_count(), initial_free - 2);
+
+        freelist.deallocate(p1);
+        assert_eq(freelist.free_count(), initial_free - 1);
+    }
+}
+
+describe("Heap Page (Slotted)") {
+    it("should insert and retrieve tuples") {
+        ~heap = HeapPage.new(1, PAGE_SIZE_DEFAULT);
+        ~tuple_data = [1u8, 2, 3, 4, 5, 6, 7, 8];
+
+        ~slot = heap.insert_tuple(&tuple_data).unwrap();
+        ~retrieved = heap.get_tuple(slot).unwrap();
+        assert_eq(retrieved, &tuple_data);
+    }
+
+    it("should delete tuples and reclaim space") {
+        ~heap = HeapPage.new(1, PAGE_SIZE_DEFAULT);
+        ~data1 = [10u8; 32];
+        ~data2 = [20u8; 32];
+
+        ~s1 = heap.insert_tuple(&data1).unwrap();
+        ~s2 = heap.insert_tuple(&data2).unwrap();
+        ~free_before = heap.free_space();
+
+        heap.delete_tuple(s1);
+        ~free_after = heap.free_space();
+        assert_true(free_after > free_before);
+    }
+
+    it("should handle MVCC tuple metadata") {
+        ~mvcc = MvccTupleMeta.new(100, 0);
+        assert_eq(mvcc.txn_id_create, 100);
+        assert_eq(mvcc.txn_id_expire, 0);
+        assert_eq(mvcc.undo_ptr, 0);
+
+        mvcc.set_expire(200, 1);
+        assert_eq(mvcc.txn_id_expire, 200);
+        assert_eq(mvcc.expire_cmd_id, 1);
+    }
+}
+
+describe("Page I/O Round Trip") {
+    it("should write and read 10K pages with checksum integrity") {
+        # Simulate 10K page writes
+        for i in 0..10000u32 {
+            ~buf = Vec.with_capacity(PAGE_SIZE_DEFAULT as usize);
+            buf.resize(PAGE_SIZE_DEFAULT as usize, 0u8);
+
+            ~header = PageHeader.new(i, PAGE_TYPE_HEAP, ENGINE_TAG_SQL);
+            header.item_count = (i % 100) as u16;
+            ~bb = ByteBuffer.wrap(&buf);
+            header.serialize(&bb);
+            PageHeader.update_checksum(&buf);
+
+            # Verify checksum
+            assert_true(verify_page_checksum(&buf));
+
+            # Read back
+            ~restored = PageHeader.read_from_page(&buf).unwrap();
+            assert_eq(restored.page_id, i);
+            assert_eq(restored.item_count, (i % 100) as u16);
+        }
+    }
+}

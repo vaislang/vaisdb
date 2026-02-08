@@ -1,0 +1,269 @@
+# Buffer Pool Core
+# Clock-based replacement, pin/unpin, dirty tracking, configurable size
+# Based on Stage 4: Memory Architecture
+
+use std/sync.{Mutex};
+use std/hashmap.{HashMap};
+use storage/constants.{PAGE_HEADER_SIZE};
+use storage/error.{VaisError, err_out_of_memory, err_internal};
+use storage/page/header.{PageHeader};
+use storage/page/manager.{PageManager};
+use storage/checksum.{calculate_page_checksum};
+use storage/buffer/frame.{BufferFrame, PageLocation, FrameState};
+use storage/buffer/clock.{ClockReplacer};
+use storage/buffer/dirty_tracker.{DirtyTracker};
+
+# Buffer pool: caches pages in memory to reduce disk I/O
+S BufferPool {
+    frames: Vec<BufferFrame>,
+    page_table: HashMap<u64, u32>,  # (file_id << 32 | page_id) -> frame_id
+    replacer: ClockReplacer,
+    dirty_tracker: DirtyTracker,
+    page_manager: PageManager,
+    page_size: u32,
+    capacity: u32,                  # Max number of frames
+    free_list: Vec<u32>,            # Free frame indices
+    lock: Mutex,                    # Pool-level lock for page_table operations
+    stats: BufferPoolStats,
+}
+
+# Buffer pool statistics
+S BufferPoolStats {
+    hits: u64,
+    misses: u64,
+    evictions: u64,
+    flushes: u64,
+}
+
+I BufferPoolStats {
+    F new() -> BufferPoolStats {
+        BufferPoolStats { hits: 0, misses: 0, evictions: 0, flushes: 0 }
+    }
+
+    F hit_rate(self) -> f64 {
+        ~total = self.hits + self.misses;
+        if total == 0 { 1.0 }
+        else { (self.hits as f64) / (total as f64) }
+    }
+}
+
+I BufferPool {
+    # Create a new buffer pool with given capacity (in pages)
+    F new(page_manager: PageManager, capacity: u32) -> BufferPool {
+        ~page_size = page_manager.get_page_size();
+        ~frames = Vec.with_capacity(capacity as usize);
+        ~free_list = Vec.with_capacity(capacity as usize);
+
+        for i in 0..capacity {
+            frames.push(BufferFrame.new(i, page_size));
+            free_list.push(i);
+        }
+
+        BufferPool {
+            frames,
+            page_table: HashMap.new(),
+            replacer: ClockReplacer.new(capacity),
+            dirty_tracker: DirtyTracker.new(),
+            page_manager,
+            page_size,
+            capacity,
+            free_list,
+            lock: Mutex.new(),
+            stats: BufferPoolStats.new(),
+        }
+    }
+
+    # Fetch a page into the buffer pool, returns frame_id
+    # The page is pinned (pin_count = 1) on return
+    F fetch_page(~self, file_id: u8, page_id: u32) -> Result<u32, VaisError> {
+        ~key = make_page_key(file_id, page_id);
+
+        ~guard = self.lock.lock();
+
+        # Check if page is already in buffer pool
+        if self.page_table.contains_key(&key) {
+            ~frame_id = *self.page_table.get(&key).unwrap();
+            self.frames[frame_id as usize].pin();
+            self.stats.hits += 1;
+            drop(guard);
+            return Ok(frame_id);
+        }
+
+        self.stats.misses += 1;
+
+        # Need to load from disk - find a free frame
+        ~frame_id = self.get_free_frame()?;
+
+        drop(guard);
+
+        # Read page from disk (outside lock to allow concurrent I/O)
+        ~page_data = self.page_manager.read_page(file_id, page_id)?;
+
+        ~guard2 = self.lock.lock();
+
+        # Double-check nobody loaded this page while we were reading
+        if self.page_table.contains_key(&key) {
+            # Someone else loaded it - return our frame to free list
+            self.free_list.push(frame_id);
+            ~existing_frame_id = *self.page_table.get(&key).unwrap();
+            self.frames[existing_frame_id as usize].pin();
+            drop(guard2);
+            return Ok(existing_frame_id);
+        }
+
+        # Load page into frame
+        ~location = PageLocation.new(file_id, page_id);
+        self.frames[frame_id as usize].load(location, &page_data);
+        self.page_table.insert(key, frame_id);
+
+        drop(guard2);
+
+        Ok(frame_id)
+    }
+
+    # Unpin a page (decrement pin count)
+    F unpin_page(~self, frame_id: u32, is_dirty: bool) {
+        self.frames[frame_id as usize].unpin();
+        if is_dirty {
+            self.frames[frame_id as usize].mark_dirty();
+            ~frame = &self.frames[frame_id as usize];
+            self.dirty_tracker.mark_dirty(
+                frame_id,
+                frame.location.clone(),
+                frame.page_lsn,
+            );
+        }
+    }
+
+    # Get read-only reference to a frame's page data
+    F get_page(self, frame_id: u32) -> &[u8] {
+        self.frames[frame_id as usize].get_data()
+    }
+
+    # Get mutable reference to a frame's page data (marks dirty)
+    F get_page_mut(~self, frame_id: u32) -> &~[u8] {
+        ~frame = &self.frames[frame_id as usize];
+        ~data = frame.get_data_mut();
+        self.dirty_tracker.mark_dirty(
+            frame_id,
+            frame.location.clone(),
+            frame.page_lsn,
+        );
+        data
+    }
+
+    # Flush a specific dirty page to disk
+    F flush_page(~self, frame_id: u32) -> Result<(), VaisError> {
+        ~frame = &self.frames[frame_id as usize];
+        if !frame.is_dirty() {
+            return Ok(());
+        }
+
+        # Compute checksum and write
+        ~page_data = frame.data.clone();
+        PageHeader.update_checksum(&page_data);
+
+        self.page_manager.write_page(
+            frame.location.file_id,
+            frame.location.page_id,
+            &page_data,
+        )?;
+
+        self.frames[frame_id as usize].mark_clean();
+        self.dirty_tracker.mark_clean(frame_id);
+        self.stats.flushes += 1;
+
+        Ok(())
+    }
+
+    # Flush all dirty pages (for checkpoint)
+    F flush_all(~self) -> Result<(), VaisError> {
+        ~dirty_pages = self.dirty_tracker.get_dirty_pages();
+        for entry in &dirty_pages {
+            self.flush_page(entry.frame_id)?;
+        }
+        self.page_manager.sync_all()?;
+        Ok(())
+    }
+
+    # Release a page from the buffer pool (unpin + evict if needed)
+    F release_page(~self, frame_id: u32) {
+        self.frames[frame_id as usize].unpin();
+    }
+
+    # Get a free frame (from free list or by eviction)
+    F get_free_frame(~self) -> Result<u32, VaisError> {
+        # Try free list first
+        if !self.free_list.is_empty() {
+            return Ok(self.free_list.pop().unwrap());
+        }
+
+        # Need to evict - use clock replacer
+        M self.replacer.find_victim(&self.frames) {
+            Some(victim_id) => {
+                # Flush dirty victim first
+                if self.frames[victim_id as usize].is_dirty() {
+                    self.flush_page(victim_id)?;
+                }
+
+                # Remove from page table
+                ~victim = &self.frames[victim_id as usize];
+                ~key = make_page_key(victim.location.file_id, victim.location.page_id);
+                self.page_table.remove(&key);
+
+                # Reset frame
+                self.frames[victim_id as usize].reset();
+                self.stats.evictions += 1;
+
+                Ok(victim_id)
+            },
+            None => {
+                Err(err_out_of_memory("buffer_pool", 1, 0))
+            },
+        }
+    }
+
+    # Get buffer pool statistics
+    F get_stats(self) -> &BufferPoolStats {
+        &self.stats
+    }
+
+    # Get dirty page count
+    F dirty_count(self) -> u32 {
+        self.dirty_tracker.dirty_count()
+    }
+
+    # Get capacity (total frames)
+    F get_capacity(self) -> u32 {
+        self.capacity
+    }
+
+    # Get number of used frames
+    F used_count(self) -> u32 {
+        self.capacity - self.free_list.len() as u32
+    }
+
+    # Set FPI flag on all loaded frames (called after checkpoint)
+    F set_all_needs_fpi(~self) {
+        for frame in &self.frames {
+            if !frame.is_empty() {
+                frame.set_needs_fpi(true);
+            }
+        }
+    }
+
+    # Check if a page needs FPI
+    F needs_fpi(self, frame_id: u32) -> bool {
+        self.frames[frame_id as usize].needs_fpi
+    }
+
+    # Clear FPI flag for a frame (after FPI has been written)
+    F clear_fpi(~self, frame_id: u32) {
+        self.frames[frame_id as usize].set_needs_fpi(false);
+    }
+}
+
+# Helper: create unique key for page_table from file_id and page_id
+F make_page_key(file_id: u8, page_id: u32) -> u64 {
+    ((file_id as u64) << 32) | (page_id as u64)
+}

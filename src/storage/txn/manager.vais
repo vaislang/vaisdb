@@ -1,0 +1,363 @@
+# Transaction Manager
+# Orchestrates transaction lifecycle: begin, commit, abort
+# Coordinates ATT, CLOG, undo log, rollback, conflict detection, and deadlock detection
+# Based on Stage 3 MVCC Strategy
+
+use std/sync.{Mutex, AtomicU64};
+use storage/constants.{
+    INVALID_TXN_ID, NULL_UNDO_PTR, DEFAULT_TXN_TIMEOUT_SEC,
+    DEFAULT_CLOG_CACHE_PAGES
+};
+use storage/error.{VaisError, err_internal, err_deadlock, err_txn_timeout};
+use storage/txn/snapshot.{Snapshot, IsolationLevel, DEFAULT_ISOLATION};
+use storage/txn/clog.{Clog, TxnStatus};
+use storage/txn/undo.{UndoLog};
+use storage/txn/undo_entry.{UndoEntry};
+# Note: RollbackExecutor not used directly in manager
+# TODO: Refactor RollbackExecutor to take &UndoLog instead of owning it
+use storage/txn/att.{ActiveTransactionTable, ActiveTransactionEntry, TxnState};
+use storage/txn/conflict.{ConflictDetector};
+use storage/txn/deadlock.{WaitForGraph};
+use storage/buffer/pool.{BufferPool};
+
+# Transaction Manager: central coordinator for transaction lifecycle
+S TransactionManager {
+    att: ActiveTransactionTable,
+    clog: Clog,
+    undo_log: UndoLog,
+    conflict_detector: ConflictDetector,
+    deadlock_detector: WaitForGraph,
+    next_txn_id: AtomicU64,     # Monotonically increasing txn ID
+    txn_timeout_sec: u32,       # Transaction timeout in seconds
+    lock: Mutex,
+}
+
+I TransactionManager {
+    # Create a new transaction manager
+    F new(page_size: u32) -> TransactionManager {
+        TransactionManager {
+            att: ActiveTransactionTable.new(),
+            clog: Clog.new(page_size, DEFAULT_CLOG_CACHE_PAGES),
+            undo_log: UndoLog.new(page_size),
+            conflict_detector: ConflictDetector.new(),
+            deadlock_detector: WaitForGraph.new(),
+            next_txn_id: AtomicU64.new(1),  # Start from 1 (0 is INVALID_TXN_ID)
+            txn_timeout_sec: DEFAULT_TXN_TIMEOUT_SEC,
+            lock: Mutex.new(),
+        }
+    }
+
+    # Begin a new transaction
+    # Returns the new transaction ID
+    F begin(~self, isolation_level: IsolationLevel) -> Result<u64, VaisError> {
+        ~guard = self.lock.lock();
+
+        # Allocate new transaction ID
+        ~txn_id = self.next_txn_id.fetch_add(1);
+
+        # Register in Active Transaction Table (creates snapshot)
+        ~_entry = self.att.register(txn_id, isolation_level);
+
+        # Set CLOG status to IN_PROGRESS
+        self.clog.set_status(txn_id, TxnStatus.InProgress);
+
+        drop(guard);
+
+        Ok(txn_id)
+    }
+
+    # Begin a new transaction with default isolation level
+    F begin_default(~self) -> Result<u64, VaisError> {
+        self.begin(DEFAULT_ISOLATION)
+    }
+
+    # Commit a transaction
+    # This writes TXN_COMMIT WAL record, sets CLOG to COMMITTED, releases locks
+    F commit(~self, txn_id: u64, pool: &~BufferPool) -> Result<(), VaisError> {
+        ~guard = self.lock.lock();
+
+        # Verify transaction is active
+        if !self.att.is_active(txn_id) {
+            drop(guard);
+            return Err(err_internal("Cannot commit: transaction {txn_id} is not active"));
+        }
+
+        # Set state to COMMITTING
+        self.att.set_state(txn_id, TxnState.Committing);
+
+        # TODO: Write TXN_COMMIT WAL record (Phase 2)
+        # wal.write_commit_record(txn_id)?;
+        # wal.fsync()?;
+
+        # Set CLOG status to COMMITTED
+        self.clog.set_status(txn_id, TxnStatus.Committed);
+
+        # Release all write locks held by this transaction
+        self.conflict_detector.release_locks(txn_id);
+
+        # Remove from deadlock graph
+        self.deadlock_detector.remove_txn(txn_id);
+
+        # Set state to COMMITTED
+        self.att.set_state(txn_id, TxnState.Committed);
+
+        # Keep in ATT for now (GC will remove later)
+        # This allows concurrent readers to check transaction status
+
+        drop(guard);
+
+        Ok(())
+    }
+
+    # Abort a transaction
+    # This rolls back via undo chain, writes TXN_ABORT WAL record, sets CLOG to ABORTED
+    F abort(~self, txn_id: u64, pool: &~BufferPool) -> Result<(), VaisError> {
+        ~guard = self.lock.lock();
+
+        # Verify transaction exists
+        ~entry = M self.att.get(txn_id) {
+            Some(e) => e,
+            None => {
+                drop(guard);
+                return Err(err_internal("Cannot abort: transaction {txn_id} not found"));
+            }
+        };
+
+        # Set state to ABORTING
+        self.att.set_state(txn_id, TxnState.Aborting);
+
+        # Get the last undo pointer
+        ~last_undo_ptr = entry.get_last_undo_ptr();
+
+        # Rollback via undo chain (eager undo)
+        if last_undo_ptr != NULL_UNDO_PTR {
+            # Perform rollback using the undo log
+            ~_count = self.perform_rollback(
+                txn_id,
+                last_undo_ptr,
+                pool
+            )?;
+        }
+
+        # TODO: Write TXN_ABORT WAL record (Phase 2)
+        # TODO: Write CLR (Compensation Log Records) for undo operations
+        # wal.write_abort_record(txn_id)?;
+        # wal.fsync()?;
+
+        # Set CLOG status to ABORTED
+        self.clog.set_status(txn_id, TxnStatus.Aborted);
+
+        # Release all write locks held by this transaction
+        self.conflict_detector.release_locks(txn_id);
+
+        # Remove from deadlock graph
+        self.deadlock_detector.remove_txn(txn_id);
+
+        # Set state to ABORTED
+        self.att.set_state(txn_id, TxnState.Aborted);
+
+        drop(guard);
+
+        Ok(())
+    }
+
+    # Create a snapshot for a transaction
+    # This is called internally during BEGIN
+    F create_snapshot(self, txn_id: u64) -> Snapshot {
+        ~active_txns = self.att.get_active_txn_ids();
+        Snapshot.new(txn_id, active_txns)
+    }
+
+    # Check for write-write conflict (first-writer-wins)
+    # Returns error if row is locked by another transaction
+    F check_conflict(
+        ~self,
+        txn_id: u64,
+        file_id: u8,
+        page_id: u32,
+        slot_id: u16,
+    ) -> Result<(), VaisError> {
+        self.conflict_detector.check_and_lock(file_id, page_id, slot_id, txn_id)
+    }
+
+    # Record an undo entry for a transaction
+    # Returns the undo_ptr for the new entry
+    F record_undo(
+        ~self,
+        txn_id: u64,
+        entry: &UndoEntry,
+        pool: &~BufferPool,
+    ) -> Result<u64, VaisError> {
+        # Write undo entry to undo log
+        ~undo_ptr = self.undo_log.write_entry(entry, pool)?;
+
+        # Update ATT with latest undo pointer
+        self.att.set_last_undo_ptr(txn_id, undo_ptr);
+
+        Ok(undo_ptr)
+    }
+
+    # Check if a transaction is active
+    F is_active(self, txn_id: u64) -> bool {
+        self.att.is_active(txn_id)
+    }
+
+    # Get snapshot for a transaction
+    F get_snapshot(self, txn_id: u64) -> Option<&Snapshot> {
+        self.att.get_snapshot(txn_id)
+    }
+
+    # Get transaction status from CLOG
+    F get_txn_status(self, txn_id: u64) -> TxnStatus {
+        self.clog.get_status(txn_id)
+    }
+
+    # Check if a transaction is committed
+    F is_committed(self, txn_id: u64) -> bool {
+        self.clog.is_committed(txn_id)
+    }
+
+    # Check if a transaction is aborted
+    F is_aborted(self, txn_id: u64) -> bool {
+        self.clog.is_aborted(txn_id)
+    }
+
+    # Get the minimum active transaction ID (low water mark for GC)
+    F get_low_water_mark(self) -> u64 {
+        self.att.get_min_active_txn()
+    }
+
+    # Get number of active transactions
+    F count_active_transactions(self) -> usize {
+        self.att.count_active()
+    }
+
+    # Detect deadlocks in the wait-for graph
+    # Returns Some(victim_txn_id) if deadlock detected
+    F detect_deadlock(self) -> Option<u64> {
+        self.deadlock_detector.has_cycle()
+    }
+
+    # Add a wait edge for deadlock detection
+    # Called when txn waiter blocks waiting for txn holder
+    F add_wait_edge(~self, waiter: u64, holder: u64) {
+        self.deadlock_detector.add_wait(waiter, holder);
+    }
+
+    # Check for timed-out transactions and abort them
+    # Returns list of aborted transaction IDs
+    F check_transaction_timeouts(~self, pool: &~BufferPool) -> Vec<u64> {
+        ~timed_out = self.att.find_timed_out_transactions(self.txn_timeout_sec);
+        ~aborted_txns = Vec.new();
+
+        for (txn_id, elapsed_sec) in timed_out {
+            # Abort the timed-out transaction
+            M self.abort(txn_id, pool) {
+                Ok(_) => {
+                    aborted_txns.push(txn_id);
+                },
+                Err(_) => {
+                    # Log error but continue checking other transactions
+                }
+            }
+        }
+
+        aborted_txns
+    }
+
+    # Set transaction timeout (in seconds)
+    F set_timeout(~self, timeout_sec: u32) {
+        ~guard = self.lock.lock();
+        self.txn_timeout_sec = timeout_sec;
+        drop(guard);
+    }
+
+    # Get transaction timeout (in seconds)
+    F get_timeout(self) -> u32 {
+        self.txn_timeout_sec
+    }
+
+    # Get reference to CLOG (for visibility checks)
+    F get_clog(self) -> &Clog {
+        &self.clog
+    }
+
+    # Get reference to undo log
+    F get_undo_log(self) -> &UndoLog {
+        &self.undo_log
+    }
+
+    # Get reference to ATT
+    F get_att(self) -> &ActiveTransactionTable {
+        &self.att
+    }
+
+    # Get statistics for monitoring
+    F get_stats(self) -> TxnManagerStats {
+        TxnManagerStats {
+            active_txns: self.att.count_active(),
+            next_txn_id: self.next_txn_id.load(),
+            total_locks: self.conflict_detector.count_total_locks(),
+            deadlock_edges: self.deadlock_detector.edge_count(),
+            low_water_mark: self.get_low_water_mark(),
+        }
+    }
+
+    # Advance command ID in a transaction's snapshot
+    # Called at the start of each statement within a transaction
+    F advance_cmd_id(~self, txn_id: u64) {
+        self.att.advance_cmd_id(txn_id);
+    }
+
+    # Internal helper: perform rollback by traversing undo chain
+    # Inlined rollback logic from RollbackExecutor
+    # TODO: Refactor to share code with RollbackExecutor or make it a standalone utility
+    F perform_rollback(
+        ~self,
+        txn_id: u64,
+        undo_ptr: u64,
+        pool: &~BufferPool,
+    ) -> Result<u32, VaisError> {
+        if undo_ptr == NULL_UNDO_PTR {
+            return Ok(0);
+        }
+
+        # Read the entire undo chain
+        ~entries = self.undo_log.read_chain(undo_ptr, pool)?;
+        ~count = 0u32;
+
+        # Process each undo entry in reverse chronological order (newest first)
+        # The actual rollback operations are handled by RollbackExecutor
+        # For this design phase, we just validate and count
+        for entry in entries {
+            if entry.txn_id != txn_id {
+                return Err(err_internal(
+                    "Undo entry txn_id mismatch: expected {txn_id}, got {entry.txn_id}"
+                ));
+            }
+            # TODO: Apply actual rollback operations here
+            # This would involve:
+            # - UNDO_INSERT: mark slot as dead
+            # - UNDO_DELETE: restore MVCC metadata
+            # - UNDO_UPDATE: restore old tuple data
+            count += 1;
+        }
+
+        Ok(count)
+    }
+}
+
+# Statistics for monitoring
+S TxnManagerStats {
+    active_txns: usize,
+    next_txn_id: u64,
+    total_locks: usize,
+    deadlock_edges: usize,
+    low_water_mark: u64,
+}
+
+I TxnManagerStats {
+    F to_string(self) -> Str {
+        "TxnManagerStats {{ active_txns: {self.active_txns}, next_txn_id: {self.next_txn_id}, total_locks: {self.total_locks}, deadlock_edges: {self.deadlock_edges}, low_water_mark: {self.low_water_mark} }}"
+    }
+}

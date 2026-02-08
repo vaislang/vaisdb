@@ -1,0 +1,18 @@
+# B+Tree Index Module
+# Balanced tree index for efficient point lookups and range scans
+# Based on Stage 1 Section 9 and Stage 4
+
+pub mod entry;        # Entry types (internal 8B, leaf 8B) and key comparison
+pub mod node;         # Internal and leaf node page format
+pub mod tree;         # B+Tree structure with root tracking
+pub mod cursor;       # Cursor-based iteration over leaf entries
+pub mod key;          # Key encoding, composite keys, prefix compression
+pub mod search;       # Advanced search: lower_bound, upper_bound, range scan
+pub mod insert;       # Insert with automatic leaf/internal split
+pub mod delete;       # Delete with underflow detection, merge/redistribute
+pub mod split;        # Node split operations (leaf and internal)
+pub mod merge;        # Node merge and redistribution
+pub mod wal_integration;  # WAL record generation for B+Tree operations
+pub mod bulk_load;    # Efficient bottom-up B+Tree construction from sorted data
+pub mod prefix;       # Prefix compression for key storage optimization
+pub mod latch;        # Optimistic latch crabbing for concurrent access

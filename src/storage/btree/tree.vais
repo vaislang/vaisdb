@@ -1,0 +1,133 @@
+# B+Tree Structure
+# Manages the tree with root page tracking and basic operations
+# Delegates to buffer pool for page access
+
+use storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
+use storage/error.{VaisError, err_internal};
+use storage/page/header.{PageHeader};
+use storage/page/types.{PAGE_TYPE_BTREE_INTERNAL, PAGE_TYPE_BTREE_LEAF};
+use storage/buffer/pool.{BufferPool};
+use storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
+use storage/btree/entry.{BTreeLeafEntry};
+
+# B+Tree index structure
+S BTree {
+    root_page_id: u32,       # Page ID of root node
+    file_id: u8,             # File where tree lives (usually data.vdb = 0)
+    page_size: u32,
+    height: u32,             # Tree height (1 = root is leaf)
+    entry_count: u64,        # Total entries in the tree
+}
+
+I BTree {
+    # Create a new empty B+Tree with a single leaf root
+    F new(root_page_id: u32, file_id: u8, page_size: u32) -> BTree {
+        BTree {
+            root_page_id,
+            file_id,
+            page_size,
+            height: 1,
+            entry_count: 0,
+        }
+    }
+
+    # Search for a key, returns (page_id, slot_id) via TID or None
+    F search(self, key: &[u8], pool: &~BufferPool) -> Result<Option<u32>, VaisError> {
+        ~leaf_frame = self.find_leaf(key, pool)?;
+        ~page_data = pool.get_page(leaf_frame);
+        ~leaf = BTreeLeafNode.from_page_data(page_data, self.page_size)?;
+
+        ~result = leaf.get_tid(key);
+        pool.unpin_page(leaf_frame, false);
+        Ok(result)
+    }
+
+    # Find the leaf page containing the given key
+    # Returns the buffer pool frame_id (page is pinned)
+    F find_leaf(self, key: &[u8], pool: &~BufferPool) -> Result<u32, VaisError> {
+        ~current_page = self.root_page_id;
+
+        for level in 0..(self.height - 1) {
+            # Load internal node
+            ~frame_id = pool.fetch_page(self.file_id, current_page)?;
+            ~page_data = pool.get_page(frame_id);
+            ~internal = BTreeInternalNode.from_page_data(page_data, self.page_size)?;
+
+            # Find child to descend to
+            ~next_page = internal.find_child(key);
+            pool.unpin_page(frame_id, false);
+
+            current_page = next_page;
+        }
+
+        # Now current_page is the target leaf
+        pool.fetch_page(self.file_id, current_page)
+    }
+
+    # Range scan: find all entries with keys in [start_key, end_key]
+    # Returns Vec<(key, tid)>
+    F range_scan(self, start_key: &[u8], end_key: &[u8], pool: &~BufferPool) -> Result<Vec<(Vec<u8>, u32)>, VaisError> {
+        ~results = Vec.new();
+
+        # Find starting leaf
+        ~frame_id = self.find_leaf(start_key, pool)?;
+        ~page_data = pool.get_page(frame_id);
+        ~leaf = BTreeLeafNode.from_page_data(page_data, self.page_size)?;
+
+        # Find starting position within leaf
+        ~start_idx = leaf.lower_bound(start_key);
+
+        # Scan current leaf from start position
+        ~i = start_idx;
+        loop {
+            while i < leaf.entry_count() as usize {
+                ~key = leaf.get_key(i).to_vec();
+                if key_greater_than(&key, end_key) {
+                    pool.unpin_page(frame_id, false);
+                    return Ok(results);
+                }
+                results.push((key, leaf.entries[i].tid));
+                i += 1;
+            }
+
+            # Follow next_page link
+            ~next = leaf.next_leaf();
+            pool.unpin_page(frame_id, false);
+
+            if next == NULL_PAGE {
+                break;
+            }
+
+            frame_id = pool.fetch_page(self.file_id, next)?;
+            page_data = pool.get_page(frame_id);
+            leaf = BTreeLeafNode.from_page_data(page_data, self.page_size)?;
+            i = 0;
+        }
+
+        Ok(results)
+    }
+
+    # Get tree statistics
+    F get_root_page(self) -> u32 { self.root_page_id }
+    F get_height(self) -> u32 { self.height }
+    F get_entry_count(self) -> u64 { self.entry_count }
+
+    # Update root after split
+    F set_root(~self, new_root_page: u32) {
+        self.root_page_id = new_root_page;
+        self.height += 1;
+    }
+
+    # Increment entry count
+    F inc_entries(~self) { self.entry_count += 1; }
+    F dec_entries(~self) { if self.entry_count > 0 { self.entry_count -= 1; } }
+}
+
+# Helper: check if a > b
+F key_greater_than(a: &[u8], b: &[u8]) -> bool {
+    use storage/btree/entry.{compare_keys, KeyCmp};
+    M compare_keys(a, b) {
+        KeyCmp.Greater => true,
+        _ => false,
+    }
+}

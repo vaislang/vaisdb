@@ -1,0 +1,115 @@
+# Dirty Page Tracker
+# Tracks which frames are dirty and need flushing during checkpoint
+# Maintains a dirty page table for crash recovery
+
+use std/sync.{Mutex};
+use storage/buffer/frame.{PageLocation};
+
+# Entry in the dirty page table
+S DirtyPageEntry {
+    location: PageLocation,
+    first_dirty_lsn: u64,   # LSN when page first became dirty (for recovery)
+    frame_id: u32,
+}
+
+# Dirty page tracker
+S DirtyTracker {
+    entries: Vec<DirtyPageEntry>,
+    lock: Mutex,
+}
+
+I DirtyTracker {
+    F new() -> DirtyTracker {
+        DirtyTracker {
+            entries: Vec.new(),
+            lock: Mutex.new(),
+        }
+    }
+
+    # Mark a page as dirty
+    F mark_dirty(~self, frame_id: u32, location: PageLocation, lsn: u64) {
+        ~guard = self.lock.lock();
+
+        # Check if already tracked
+        for entry in &self.entries {
+            if entry.frame_id == frame_id {
+                # Already dirty, keep the earlier first_dirty_lsn
+                drop(guard);
+                return;
+            }
+        }
+
+        self.entries.push(DirtyPageEntry {
+            location,
+            first_dirty_lsn: lsn,
+            frame_id,
+        });
+
+        drop(guard);
+    }
+
+    # Mark a page as clean (flushed to disk)
+    F mark_clean(~self, frame_id: u32) {
+        ~guard = self.lock.lock();
+
+        ~i: usize = 0;
+        while i < self.entries.len() {
+            if self.entries[i].frame_id == frame_id {
+                self.entries.swap_remove(i);
+                break;
+            }
+            i += 1;
+        }
+
+        drop(guard);
+    }
+
+    # Get all dirty page entries (for checkpoint)
+    F get_dirty_pages(self) -> Vec<DirtyPageEntry> {
+        ~guard = self.lock.lock();
+        ~result = self.entries.clone();
+        drop(guard);
+        result
+    }
+
+    # Get count of dirty pages
+    F dirty_count(self) -> u32 {
+        ~guard = self.lock.lock();
+        ~count = self.entries.len() as u32;
+        drop(guard);
+        count
+    }
+
+    # Get the minimum first_dirty_lsn (for recovery start point)
+    F min_dirty_lsn(self) -> u64 {
+        ~guard = self.lock.lock();
+        ~min_lsn: u64 = u64::MAX;
+        for entry in &self.entries {
+            if entry.first_dirty_lsn < min_lsn {
+                min_lsn = entry.first_dirty_lsn;
+            }
+        }
+        drop(guard);
+        min_lsn
+    }
+
+    # Clear all entries (after full flush)
+    F clear(~self) {
+        ~guard = self.lock.lock();
+        self.entries.clear();
+        drop(guard);
+    }
+
+    # Check if a specific page is dirty
+    F is_dirty(self, file_id: u8, page_id: u32) -> bool {
+        ~guard = self.lock.lock();
+        for entry in &self.entries {
+            if entry.location.file_id == file_id && entry.location.page_id == page_id {
+                drop(guard);
+                return true;
+            }
+        }
+        drop(guard);
+        false
+    }
+}

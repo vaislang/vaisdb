@@ -1,0 +1,142 @@
+# Unified Page Header (48 bytes)
+# All 4 engines share this header. Every page on disk begins with these 48 bytes.
+# Fields ordered for natural alignment: u64 at 8-byte, u32 at 4-byte, u16 at 2-byte boundaries.
+
+use std/bytes.{ByteBuffer};
+use storage/constants.{PAGE_HEADER_SIZE, NULL_PAGE, COMPRESSION_NONE};
+use storage/error.{VaisError, err_internal};
+use storage/checksum.{calculate_page_checksum};
+use storage/page/types.{PAGE_TYPE_UNUSED, ENGINE_TAG_COMMON};
+use storage/page/flags.{PageFlags};
+
+S PageHeader {
+    page_lsn: u64,           # LSN of last WAL record that modified this page
+    txn_id: u64,             # Transaction that last modified this page
+    page_id: u32,            # Unique page identifier (0 = meta page)
+    checksum: u32,           # CRC32C of entire page (excluding this field during calc)
+    prev_page: u32,          # Previous page in chain (0 = none)
+    next_page: u32,          # Next page in chain (0 = none)
+    overflow_page: u32,      # First overflow page (0 = none)
+    free_space_offset: u16,  # Offset to start of free space within page
+    item_count: u16,         # Number of items/tuples/entries in this page
+    flags: u16,              # Bit flags (see page/flags.vais)
+    reserved: u16,           # Reserved for future use (must be 0)
+    page_type: u8,           # Page type (see page/types.vais)
+    engine_tag: u8,          # Engine that owns this page
+    compression_algo: u8,    # 0=none, 1=lz4, 2=zstd
+    format_version: u8,      # Page format version (starts at 1)
+}
+
+I PageHeader {
+    # Create a new page header with defaults
+    F new(page_id: u32, page_type: u8, engine_tag: u8) -> PageHeader {
+        PageHeader {
+            page_lsn: 0,
+            txn_id: 0,
+            page_id,
+            checksum: 0,
+            prev_page: NULL_PAGE,
+            next_page: NULL_PAGE,
+            overflow_page: NULL_PAGE,
+            free_space_offset: PAGE_HEADER_SIZE as u16,
+            item_count: 0,
+            flags: 0,
+            reserved: 0,
+            page_type,
+            engine_tag,
+            compression_algo: COMPRESSION_NONE,
+            format_version: 1,
+        }
+    }
+
+    # Create an unused/empty page header
+    F unused(page_id: u32) -> PageHeader {
+        PageHeader.new(page_id, PAGE_TYPE_UNUSED, ENGINE_TAG_COMMON)
+    }
+
+    # Serialize page header to ByteBuffer (writes exactly 48 bytes)
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u64_le(self.page_lsn);
+        buf.put_u64_le(self.txn_id);
+        buf.put_u32_le(self.page_id);
+        buf.put_u32_le(self.checksum);
+        buf.put_u32_le(self.prev_page);
+        buf.put_u32_le(self.next_page);
+        buf.put_u32_le(self.overflow_page);
+        buf.put_u16_le(self.free_space_offset);
+        buf.put_u16_le(self.item_count);
+        buf.put_u16_le(self.flags);
+        buf.put_u16_le(self.reserved);
+        buf.put_u8(self.page_type);
+        buf.put_u8(self.engine_tag);
+        buf.put_u8(self.compression_algo);
+        buf.put_u8(self.format_version);
+    }
+
+    # Deserialize page header from ByteBuffer (reads exactly 48 bytes)
+    F deserialize(buf: &ByteBuffer) -> Result<PageHeader, VaisError> {
+        Ok(PageHeader {
+            page_lsn: buf.get_u64_le()?,
+            txn_id: buf.get_u64_le()?,
+            page_id: buf.get_u32_le()?,
+            checksum: buf.get_u32_le()?,
+            prev_page: buf.get_u32_le()?,
+            next_page: buf.get_u32_le()?,
+            overflow_page: buf.get_u32_le()?,
+            free_space_offset: buf.get_u16_le()?,
+            item_count: buf.get_u16_le()?,
+            flags: buf.get_u16_le()?,
+            reserved: buf.get_u16_le()?,
+            page_type: buf.get_u8()?,
+            engine_tag: buf.get_u8()?,
+            compression_algo: buf.get_u8()?,
+            format_version: buf.get_u8()?,
+        })
+    }
+
+    # Serialize page header directly into a page-sized byte array at offset 0
+    F write_to_page(self, page_data: &~[u8]) {
+        ~buf = ByteBuffer.wrap(page_data);
+        self.serialize(&buf);
+    }
+
+    # Read page header from a page-sized byte array at offset 0
+    F read_from_page(page_data: &[u8]) -> Result<PageHeader, VaisError> {
+        ~buf = ByteBuffer.wrap_readonly(page_data);
+        PageHeader.deserialize(&buf)
+    }
+
+    # Update the checksum field in a full page buffer
+    # Must be called AFTER all page content is written
+    F update_checksum(page_data: &~[u8]) {
+        ~checksum = calculate_page_checksum(page_data);
+        # Write checksum at offset 20 (little-endian)
+        page_data[20] = (checksum & 0xFF) as u8;
+        page_data[21] = ((checksum >> 8) & 0xFF) as u8;
+        page_data[22] = ((checksum >> 16) & 0xFF) as u8;
+        page_data[23] = ((checksum >> 24) & 0xFF) as u8;
+    }
+
+    # Check if this page has a valid chain link
+    F has_next(self) -> bool {
+        self.next_page != NULL_PAGE
+    }
+
+    F has_prev(self) -> bool {
+        self.prev_page != NULL_PAGE
+    }
+
+    F has_overflow(self) -> bool {
+        self.overflow_page != NULL_PAGE
+    }
+
+    # Get PageFlags wrapper
+    F get_flags(self) -> PageFlags {
+        PageFlags.from_bits(self.flags)
+    }
+
+    # Set flags from PageFlags wrapper
+    F set_flags(~self, flags: PageFlags) {
+        self.flags = flags.to_bits();
+    }
+}

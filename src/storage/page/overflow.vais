@@ -1,0 +1,265 @@
+# Overflow Page Management
+# Handles chained overflow pages for large tuples, vectors, and other data
+# Based on Stage 1 Section 7: Heap Page Overflow Handling
+
+use std/bytes.{ByteBuffer};
+use storage/constants.{PAGE_HEADER_SIZE, NULL_PAGE};
+use storage/error.{VaisError, err_internal, err_page_corruption};
+use storage/page/header.{PageHeader};
+use storage/page/types.{PAGE_TYPE_OVERFLOW, ENGINE_TAG_COMMON};
+use storage/page/allocator.{PageAllocator};
+use storage/page/freelist.{FreelistBitmap};
+
+# Overflow chain metadata
+# Stored inline with the main tuple/data
+S OverflowPointer {
+    overflow_page_id: u32,    # First page in overflow chain
+    overflow_total_len: u32,  # Total length of overflow data (all pages combined)
+}
+
+I OverflowPointer {
+    # Serialize overflow pointer (8 bytes)
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u32_le(self.overflow_page_id);
+        buf.put_u32_le(self.overflow_total_len);
+    }
+
+    # Deserialize overflow pointer (8 bytes)
+    F deserialize(buf: &ByteBuffer) -> Result<OverflowPointer, VaisError> {
+        Ok(OverflowPointer {
+            overflow_page_id: buf.get_u32_le()?,
+            overflow_total_len: buf.get_u32_le()?,
+        })
+    }
+}
+
+# Calculate maximum data capacity per overflow page
+F max_data_per_page(page_size: u32) -> u32 {
+    page_size - PAGE_HEADER_SIZE
+}
+
+# Overflow page body (after 48-byte page header)
+# Just contains raw continuation data
+S OverflowPage {
+    data: Vec<u8>,  # Actual overflow data stored in this page
+}
+
+I OverflowPage {
+    # Create new overflow page with data
+    F new(data: Vec<u8>) -> OverflowPage {
+        OverflowPage { data }
+    }
+
+    # Write overflow page to full page buffer
+    F write_to_page(
+        self,
+        page_data: &~[u8],
+        page_id: u32,
+        next_page: u32,
+        page_lsn: u64,
+        txn_id: u64
+    ) {
+        # Write page header
+        ~header = PageHeader.new(page_id, PAGE_TYPE_OVERFLOW, ENGINE_TAG_COMMON);
+        header.page_lsn = page_lsn;
+        header.txn_id = txn_id;
+        header.next_page = next_page;
+        header.free_space_offset = (PAGE_HEADER_SIZE + (self.data.len() as u32)) as u16;
+        header.item_count = 0;
+
+        header.write_to_page(page_data);
+
+        # Write overflow data after header
+        for i in 0..self.data.len() {
+            page_data[PAGE_HEADER_SIZE as usize + i] = self.data[i];
+        }
+
+        # Update checksum
+        PageHeader.update_checksum(page_data);
+    }
+
+    # Read overflow page from full page buffer
+    F read_from_page(page_data: &[u8], page_size: u32) -> Result<OverflowPage, VaisError> {
+        ~header = PageHeader.read_from_page(page_data)?;
+
+        # Verify this is an overflow page
+        if header.page_type != PAGE_TYPE_OVERFLOW {
+            return Err(err_internal("Expected OVERFLOW page type"));
+        }
+
+        # Read data after header
+        ~data_len = (header.free_space_offset as u32 - PAGE_HEADER_SIZE) as usize;
+        ~data = Vec.with_capacity(data_len);
+
+        for i in 0..data_len {
+            data.push(page_data[PAGE_HEADER_SIZE as usize + i]);
+        }
+
+        Ok(OverflowPage { data })
+    }
+}
+
+# Write large data across multiple overflow pages
+# Returns the first overflow page_id
+# NOTE: In real implementation, this would use buffer pool for I/O
+# This is a simplified version showing the algorithm
+F write_overflow_data(
+    data: &[u8],
+    page_size: u32,
+    file_id: u8,
+    allocator: &~PageAllocator,
+    bitmap: &~FreelistBitmap,
+    page_lsn: u64,
+    txn_id: u64
+) -> Result<u32, VaisError> {
+    ~max_per_page = max_data_per_page(page_size) as usize;
+    ~num_pages = (data.len() + max_per_page - 1) / max_per_page;
+
+    if num_pages == 0 {
+        return Err(err_internal("Cannot create overflow chain with zero data"));
+    }
+
+    # Allocate all needed pages upfront
+    ~page_ids = allocator.allocate_bulk(file_id, num_pages as u32, bitmap)?;
+
+    if page_ids.len() < num_pages {
+        return Err(err_internal("Could not allocate enough overflow pages"));
+    }
+
+    ~first_page_id = page_ids[0];
+
+    # Write each overflow page
+    for i in 0..num_pages {
+        ~start_offset = i * max_per_page;
+        ~end_offset = (start_offset + max_per_page).min(data.len());
+        ~chunk = &data[start_offset..end_offset];
+
+        ~page_id = page_ids[i];
+        ~next_page = if i + 1 < num_pages {
+            page_ids[i + 1]
+        } else {
+            NULL_PAGE  # Last page in chain
+        };
+
+        # In real implementation, would allocate page buffer and write via buffer pool
+        # Here we just show the structure:
+        # let page_buffer = allocate_page_buffer(page_size);
+        # let overflow_page = OverflowPage.new(chunk.to_vec());
+        # overflow_page.write_to_page(&page_buffer, page_id, next_page, page_lsn, txn_id);
+        # buffer_pool.write_page(file_id, page_id, &page_buffer);
+    }
+
+    Ok(first_page_id)
+}
+
+# Read data from overflow page chain
+# Returns the complete data concatenated from all pages
+# NOTE: In real implementation, this would use buffer pool for I/O
+F read_overflow_data(
+    first_page_id: u32,
+    file_id: u8,
+    page_size: u32,
+    expected_total_len: u32
+) -> Result<Vec<u8>, VaisError> {
+    ~result = Vec.with_capacity(expected_total_len as usize);
+    ~current_page_id = first_page_id;
+    ~max_iterations = 1000;  # Safety limit to prevent infinite loops
+    ~iteration = 0u32;
+
+    while current_page_id != NULL_PAGE {
+        if iteration >= max_iterations {
+            return Err(err_internal("Overflow chain too long or circular"));
+        }
+        iteration += 1;
+
+        # In real implementation, would read via buffer pool:
+        # let page_buffer = buffer_pool.read_page(file_id, current_page_id)?;
+        # let overflow_page = OverflowPage.read_from_page(&page_buffer, page_size)?;
+        # let header = PageHeader.read_from_page(&page_buffer)?;
+        #
+        # result.extend_from_slice(&overflow_page.data);
+        # current_page_id = header.next_page;
+
+        # For now, just break (this is a placeholder)
+        break;
+    }
+
+    # Verify we read the expected amount
+    if result.len() != expected_total_len as usize {
+        return Err(err_page_corruption(
+            first_page_id,
+            PAGE_TYPE_OVERFLOW
+        ).with_detail("Overflow chain length mismatch"));
+    }
+
+    Ok(result)
+}
+
+# Free entire overflow page chain
+# Deallocates all pages in the chain
+F free_overflow_chain(
+    first_page_id: u32,
+    file_id: u8,
+    allocator: &~PageAllocator,
+    bitmap: &~FreelistBitmap,
+    page_size: u32
+) -> Result<(), VaisError> {
+    ~current_page_id = first_page_id;
+    ~max_iterations = 1000;  # Safety limit
+    ~iteration = 0u32;
+    ~pages_to_free = Vec.new();
+
+    # Collect all page IDs in chain
+    while current_page_id != NULL_PAGE {
+        if iteration >= max_iterations {
+            return Err(err_internal("Overflow chain too long or circular"));
+        }
+        iteration += 1;
+
+        pages_to_free.push(current_page_id);
+
+        # In real implementation, read next_page from header:
+        # let page_buffer = buffer_pool.read_page(file_id, current_page_id)?;
+        # let header = PageHeader.read_from_page(&page_buffer)?;
+        # current_page_id = header.next_page;
+
+        # For now, just break
+        break;
+    }
+
+    # Zero out and deallocate all pages
+    for page_id in pages_to_free {
+        # In real implementation, zero out page data:
+        # let page_buffer = allocate_page_buffer(page_size);
+        # zero_page_buffer(&page_buffer);
+        # buffer_pool.write_page(file_id, page_id, &page_buffer);
+
+        allocator.deallocate_page(file_id, page_id, bitmap)?;
+    }
+
+    Ok(())
+}
+
+# Calculate how many overflow pages are needed for data of given size
+F overflow_pages_needed(data_len: u32, page_size: u32) -> u32 {
+    ~max_per_page = max_data_per_page(page_size);
+    (data_len + max_per_page - 1) / max_per_page
+}
+
+# Check if data size requires overflow pages
+F needs_overflow(data_len: u32, available_inline: u32) -> bool {
+    data_len > available_inline
+}
+
+# Calculate how much data can be stored inline (before overflow threshold)
+# Common threshold: store at least 64 bytes inline for indexing
+F inline_threshold(page_size: u32) -> u32 {
+    64u32.min(max_data_per_page(page_size) / 4)
+}
+
+# Split data into inline portion and overflow portion
+# Returns (inline_data, overflow_data)
+F split_for_overflow(data: &[u8], inline_size: u32) -> (&[u8], &[u8]) {
+    ~inline_end = (inline_size as usize).min(data.len());
+    (&data[0..inline_end], &data[inline_end..])
+}

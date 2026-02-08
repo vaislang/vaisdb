@@ -1,0 +1,8 @@
+# I/O Layer Module
+# Provides mmap and buffered I/O backends for page access
+
+pub mod mmap;
+pub mod buffered;
+
+# I/O mode selection
+L IoMode = Mmap | Buffered;

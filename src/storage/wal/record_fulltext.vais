@@ -1,0 +1,153 @@
+# Full-Text Search Engine WAL Record Payloads (0x40-0x4F)
+# Based on Stage 2: WAL Design
+# Inverted index posting list operations
+
+use storage/error.{VaisError};
+use storage/bytes.{write_string, read_string, write_bytes, read_bytes};
+use std/bytes.{ByteBuffer};
+
+# ============================================================================
+# POSTING_LIST_APPEND (0x40) - Append entry to posting list
+# ============================================================================
+
+S PostingListAppendPayload {
+    term_hash: u64,
+    page_id: u32,
+    entry: Vec<u8>,         # Serialized posting entry
+}
+
+I PostingListAppendPayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        buf.put_u64_le(self.term_hash);
+        buf.put_u32_le(self.page_id);
+        write_bytes(buf, &self.entry);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<PostingListAppendPayload, VaisError> {
+        ~term_hash = buf.get_u64_le()?;
+        ~page_id = buf.get_u32_le()?;
+        ~entry = read_bytes(buf)?;
+
+        Ok(PostingListAppendPayload {
+            term_hash,
+            page_id,
+            entry,
+        })
+    }
+}
+
+# ============================================================================
+# POSTING_LIST_DELETE (0x41) - Delete entry from posting list
+# ============================================================================
+
+S PostingListDeletePayload {
+    term_hash: u64,
+    page_id: u32,
+    doc_id: u64,
+}
+
+I PostingListDeletePayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        buf.put_u64_le(self.term_hash);
+        buf.put_u32_le(self.page_id);
+        buf.put_u64_le(self.doc_id);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<PostingListDeletePayload, VaisError> {
+        ~term_hash = buf.get_u64_le()?;
+        ~page_id = buf.get_u32_le()?;
+        ~doc_id = buf.get_u64_le()?;
+
+        Ok(PostingListDeletePayload {
+            term_hash,
+            page_id,
+            doc_id,
+        })
+    }
+}
+
+# ============================================================================
+# DICTIONARY_INSERT (0x42) - Insert term into dictionary
+# ============================================================================
+
+S DictionaryInsertPayload {
+    term: Str,
+    posting_head_page: u32,     # First page of posting list
+}
+
+I DictionaryInsertPayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        write_string(buf, &self.term);
+        buf.put_u32_le(self.posting_head_page);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<DictionaryInsertPayload, VaisError> {
+        ~term = read_string(buf)?;
+        ~posting_head_page = buf.get_u32_le()?;
+
+        Ok(DictionaryInsertPayload {
+            term,
+            posting_head_page,
+        })
+    }
+}
+
+# ============================================================================
+# DICTIONARY_DELETE (0x43) - Delete term from dictionary
+# ============================================================================
+
+S DictionaryDeletePayload {
+    term: Str,
+    old_posting_head: u32,
+}
+
+I DictionaryDeletePayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        write_string(buf, &self.term);
+        buf.put_u32_le(self.old_posting_head);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<DictionaryDeletePayload, VaisError> {
+        ~term = read_string(buf)?;
+        ~old_posting_head = buf.get_u32_le()?;
+
+        Ok(DictionaryDeletePayload {
+            term,
+            old_posting_head,
+        })
+    }
+}
+
+# ============================================================================
+# TERM_FREQ_UPDATE (0x44) - Update term frequency
+# ============================================================================
+
+S TermFreqUpdatePayload {
+    term_hash: u64,
+    doc_id: u64,
+    old_freq: u32,
+    new_freq: u32,
+}
+
+I TermFreqUpdatePayload {
+    F serialize(&self, buf: &~ByteBuffer) {
+        buf.put_u64_le(self.term_hash);
+        buf.put_u64_le(self.doc_id);
+        buf.put_u32_le(self.old_freq);
+        buf.put_u32_le(self.new_freq);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<TermFreqUpdatePayload, VaisError> {
+        ~term_hash = buf.get_u64_le()?;
+        ~doc_id = buf.get_u64_le()?;
+        ~old_freq = buf.get_u32_le()?;
+        ~new_freq = buf.get_u32_le()?;
+
+        Ok(TermFreqUpdatePayload {
+            term_hash,
+            doc_id,
+            old_freq,
+            new_freq,
+        })
+    }
+}
