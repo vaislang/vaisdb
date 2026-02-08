@@ -38,7 +38,7 @@ VaisDB solves the fundamental problem of RAG systems: **4 databases for 1 use ca
 
 | Phase | Name | Status | Progress |
 |-------|------|--------|----------|
-| 0 | Architecture & Design Decisions | ✅ Complete | 24/24 (100%) |
+| 0 | Architecture & Design Decisions | ✅ Complete | 31/31 (100%) |
 | 1 | Storage Engine | ⏳ Planned | 0/38 (0%) |
 | 2 | SQL Engine | ⏳ Planned | 0/42 (0%) |
 | 3 | Vector Engine | ⏳ Planned | 0/24 (0%) |
@@ -62,34 +62,53 @@ VaisDB solves the fundamental problem of RAG systems: **4 databases for 1 use ca
 
 These decisions affect ALL subsequent phases. Getting them wrong means rewriting from scratch.
 
+### Stage 7 - Design Review Fixes (2026-02-08)
+모드: 자동진행
+- [x] 1. Stage 1 수정: Torn write 보호(FPI), expire_cmd_id(32B), 헤더 정렬, undo_ptr, IS_DIRTY 제거, 파일 레이아웃 (Opus 직접) ✅
+  변경: docs/architecture/stage1-on-disk-format.md (FPI 섹션 추가, 32B MVCC 메타데이터, 자연 정렬 헤더, tmp/ 디렉토리)
+- [x] 2. Stage 2 수정: CLR 등록(0x06), HNSW WAL page ref, checksum zeroing, PAGE_ALLOC/DEALLOC, 직렬화 포맷, 헤더 48B (Opus 직접) ✅
+  변경: docs/architecture/stage2-wal-design.md (CLR 0x06, PAGE_ALLOC 0x07/DEALLOC 0x08, 48B 헤더, 직렬화 포맷 섹션)
+- [x] 3. Stage 3 수정: CLOG+abort 가시성, eager undo, cmd_id(38B), fulltext MVCC, invisible_ratio, edge conflict (Opus 직접) ✅
+  변경: docs/architecture/stage3-mvcc-strategy.md (CLOG 테이블, eager undo+CLR, 38B AdjEntry, fulltext posting MVCC)
+- [x] 4. Stage 4 수정: HNSW/BP I/O 분리, idle/active 커넥션, undo 메모리, 에러코드 7자리, pressure 정규화 (Sonnet 위임) ✅
+  변경: docs/architecture/stage4-memory-architecture.md (Layer 0 BP경유, idle 200KB/active 4.2MB, 에러코드 VAIS-0003001)
+- [x] 5. Stage 5 수정: 카운트(67개), EE 구분, NOT_IMPLEMENTED/DATA_TOO_LONG/SERIALIZATION_FAILURE, severity, line/column (Sonnet 위임) ✅
+  변경: docs/architecture/stage5-error-codes.md (67개 카탈로그, severity 필드, 4개 에러코드 추가, VaisError line+column)
+- [x] 6. Stage 6 수정: ALTER SYSTEM, 포트 5433, max_connections auto, 5개 설정 추가, RELOAD CONFIG (Sonnet 위임) ✅
+  변경: docs/architecture/stage6-configuration.md (ALTER SYSTEM→meta.vdb, 5433포트, 5개 설정, RELOAD/SIGHUP)
+- [x] 7. ROADMAP 동기화: 파일 레이아웃, WAL 헤더, MVCC 32B, 에러코드, 설정 hierarchy (Opus 직접) ✅
+  변경: ROADMAP.md (헤더 정렬, wal/ 디렉토리, 32B MVCC, 48B WAL, engine 06-07, category 06-10, SQL SET hierarchy)
+진행률: 7/7 (100%)
+
 ### Stage 1 - On-Disk Format Decisions (IMMUTABLE after first user)
 
-- [x] **Unified page header format (48 bytes)** - All 4 engines share this header:
+- [x] **Unified page header format (48 bytes, naturally aligned)** - All 4 engines share this header:
   ```
-  page_id: u32, page_type: u8 (256 types), engine_tag: u8,
-  page_lsn: u64, txn_id: u64, checksum: u32 (CRC32C),
-  flags: u16, free_space_offset: u16, item_count: u16,
-  prev_page: u32, next_page: u32, overflow_page: u32,
-  compression_algo: u8, format_version: u8, reserved: u16
+  page_lsn: u64 (offset 0), txn_id: u64 (offset 8),
+  page_id: u32 (offset 16), checksum: u32 (offset 20),
+  prev_page: u32 (offset 24), next_page: u32 (offset 28),
+  overflow_page: u32 (offset 32),
+  free_space_offset: u16, item_count: u16, flags: u16, reserved: u16,
+  page_type: u8, engine_tag: u8, compression_algo: u8, format_version: u8
   ```
 - [x] **Page type registry** - Define all page types upfront: DATA, BTREE_INTERNAL, BTREE_LEAF, HNSW_NODE, HNSW_LAYER, GRAPH_ADJ, GRAPH_NODE, INVERTED_POSTING, INVERTED_DICT, FREELIST, OVERFLOW, META, WAL_SEGMENT, CATALOG
 - [x] **Default page size decision** - 8KB default, 16KB for vector-heavy workloads. Document that this is **IMMUTABLE** after database creation
-- [x] **File layout strategy** - Bundle directory (`.vaisdb/`): `data.vdb`, `wal.vdb`, `vectors.vdb`, `fulltext.vdb`, `meta.vdb`. Appears as single unit, internal separation for I/O parallelism
-- [x] **MVCC tuple metadata format (28 bytes)** - Every row carries:
+- [x] **File layout strategy** - Bundle directory (`.vaisdb/`): `data.vdb`, `wal/` (segment files), `vectors.vdb`, `graph.vdb`, `fulltext.vdb`, `meta.vdb`, `undo/undo.vdb`, `tmp/`. Appears as single unit, internal separation for I/O parallelism
+- [x] **MVCC tuple metadata format (32 bytes)** - Every row carries:
   ```
   txn_id_create: u64, txn_id_expire: u64,
-  undo_ptr: u64, cmd_id: u32
+  undo_ptr: u64, cmd_id: u32, expire_cmd_id: u32
   ```
-  `cmd_id` is critical: enables correct behavior for `INSERT INTO ... SELECT FROM same_table`
+  `cmd_id`/`expire_cmd_id`: enables correct visibility for self-referencing operations within a transaction
 
 ### Stage 2 - WAL Design (Affects crash recovery of ALL engines)
 
-- [x] **Unified WAL record header** - `lsn: u64, txn_id: u64, prev_lsn: u64, record_type: u8, engine_type: u8, record_length: u32, timestamp: u64`
+- [x] **Unified WAL record header (48 bytes)** - `lsn: u64, txn_id: u64, prev_lsn: u64, record_type: u8, engine_type: u8, record_length: u32, checksum: u32, timestamp: u64, reserved: [u8; 6]`
 - [x] **Relational WAL records** - PAGE_WRITE, TUPLE_INSERT/DELETE/UPDATE, BTREE_SPLIT/MERGE
 - [x] **Vector WAL records** - HNSW_INSERT_NODE (all layer edges), HNSW_DELETE_NODE, HNSW_UPDATE_EDGES, HNSW_LAYER_PROMOTE, VECTOR_DATA_WRITE, QUANTIZATION_UPDATE
 - [x] **Graph WAL records** - GRAPH_NODE_INSERT/DELETE, GRAPH_EDGE_INSERT/DELETE (both adjacency lists!), GRAPH_PROPERTY_UPDATE, ADJ_LIST_PAGE_SPLIT
 - [x] **Full-text WAL records** - POSTING_LIST_APPEND/DELETE, DICTIONARY_INSERT/DELETE, TERM_FREQ_UPDATE
-- [x] **Meta WAL records** - TXN_BEGIN/COMMIT/ABORT, CHECKPOINT_BEGIN/END, SCHEMA_CHANGE
+- [x] **Meta WAL records** - TXN_BEGIN/COMMIT/ABORT, CHECKPOINT_BEGIN/END, SCHEMA_CHANGE, CLR, PAGE_ALLOC/DEALLOC
 - [x] **Physiological logging strategy** - Page-level physical + intra-page logical. Vector data uses logical logging (operation + params) since HNSW insertion is non-deterministic
 
 ### Stage 3 - MVCC Strategy Decisions
@@ -115,13 +134,13 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 ### Stage 5 - Error Code System (IMMUTABLE after first client)
 
 - [x] **Error code format** - `VAIS-EECCNNN` (EE=engine, CC=category, NNN=number)
-- [x] **Engine codes** - 00=common, 01=SQL, 02=vector, 03=graph, 04=fulltext, 05=storage
-- [x] **Category codes** - 01=syntax, 02=constraint, 03=resource, 04=concurrency, 05=internal
+- [x] **Engine codes** - 00=common, 01=SQL, 02=vector, 03=graph, 04=fulltext, 05=storage, 06=server, 07=client
+- [x] **Category codes** - 01=syntax, 02=constraint, 03=resource, 04=concurrency, 05=internal, 06=auth, 07=config, 08=io, 09=protocol, 10=limit
 - [x] **Initial error catalog** - Define all error codes for Phase 1-2 before implementation
 
 ### Stage 6 - Configuration System Design
 
-- [x] **Configuration hierarchy** - CLI args > env vars > config file > defaults
+- [x] **Configuration hierarchy** - SQL SET > ALTER SYSTEM > CLI args > env vars > config file > defaults
 - [x] **Session vs global scope** - `SET SESSION` vs `SET GLOBAL`
 - [x] **Immutable settings documentation** - page_size, hnsw_m, hnsw_m_max_0 cannot change after creation
 - [x] **Runtime-changeable settings** - buffer_pool_size, hnsw_ef_search, query_timeout, slow_query_threshold
@@ -529,7 +548,7 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ### Stage 1 - Wire Protocol
 
-- [ ] **TCP server** - Accept connections on configurable port (default 5432)
+- [ ] **TCP server** - Accept connections on configurable port (default 5433)
 - [ ] **Binary protocol** - Length-prefixed messages: Query, Parse, Bind, Execute, Result, Error
 - [ ] **Prepared statement protocol** - Parse → Bind (with parameters) → Execute cycle
 - [ ] **Connection pooling** - Server-side connection management with max_connections limit

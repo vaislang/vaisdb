@@ -6,7 +6,7 @@
 
 ---
 
-## 1. Unified WAL Record Header (42 bytes)
+## 1. Unified WAL Record Header (48 bytes)
 
 Every WAL record across all engines begins with this header.
 
@@ -23,9 +23,14 @@ Offset  Size  Field           Type    Description
 26      4     record_length   u32     Total record length including header and payload
 30      8     timestamp       u64     Unix timestamp in microseconds
 38      4     checksum        u32     CRC32C of entire record (header + payload)
+42      6     reserved        [u8;6]  Reserved for alignment (must be 0x00)
 ```
 
-**Total header: 42 bytes**
+**Total header: 48 bytes**
+
+> **Alignment note:** The 42-byte header results in payload starting at a non-aligned offset. For implementation, two approaches: (a) pad header to 48 bytes with 6 reserved bytes for natural u64 alignment of payloads, or (b) use memcpy-based field access instead of pointer casts. Decision: pad to 48 bytes — add `reserved: [u8; 6]` at offset 42. This ensures all payload fields starting with u64 values are naturally aligned.
+
+**Checksum computation:** The `checksum` field (offset 38, 4 bytes) is set to 0x00000000 before computing CRC32C over the entire record (header + payload). The computed value is then written back to the checksum field. This mirrors the same rule specified for page header checksums in Stage 1.
 
 ### LSN Design
 
@@ -55,7 +60,14 @@ Value  Name                Payload
 0x03   CHECKPOINT_BEGIN    { active_txns: Vec<u64> }
 0x04   CHECKPOINT_END      { }
 0x05   SCHEMA_CHANGE       { change_type: u8, schema_data: bytes }
+0x06   CLR                 { original_record_type: u8, undo_next_lsn: u64, page_id: u32, file_id: u8 }
+0x07   PAGE_ALLOC          { file_id: u8, page_id: u32, page_type: u8 }
+0x08   PAGE_DEALLOC        { file_id: u8, page_id: u32 }
 ```
+
+**CLR (Compensation Log Record):** Written during the UNDO phase of recovery. The `original_record_type` identifies the type of record being undone. The `undo_next_lsn` points to the next record to undo, preventing re-undo of already-undone operations if a crash occurs during recovery. CLRs are redo-only records. During recovery UNDO phase, CLRs are skipped (their `undo_next_lsn` is followed instead).
+
+**PAGE_ALLOC / PAGE_DEALLOC:** Records allocation and deallocation of pages from the free list. Prevents page leaks on crash. If PAGE_ALLOC is in WAL but the page is never used (crash before data written), recovery can return it to the free list.
 
 ### Relational Records (0x10-0x1F)
 
@@ -77,13 +89,19 @@ Value  Name                Payload
 ```
 Value  Name                Payload
 ─────  ────                ───────
-0x20   HNSW_INSERT_NODE    { node_id: u64, layer: u8, neighbors: Vec<(u64, f32)> }
-0x21   HNSW_DELETE_NODE    { node_id: u64, layers_affected: Vec<u8> }
-0x22   HNSW_UPDATE_EDGES   { node_id: u64, layer: u8, old_neighbors: Vec<u64>, new_neighbors: Vec<u64> }
-0x23   HNSW_LAYER_PROMOTE  { node_id: u64, new_max_layer: u8 }
+0x20   HNSW_INSERT_NODE    { node_id: u64, layer: u8, neighbors: Vec<(u64, f32)>,
+                             file_id: u8, page_id: u32, affected_pages: Vec<(u8, u32)> }
+0x21   HNSW_DELETE_NODE    { node_id: u64, layers_affected: Vec<u8>,
+                             file_id: u8, page_id: u32 }
+0x22   HNSW_UPDATE_EDGES   { node_id: u64, layer: u8, old_neighbors: Vec<u64>, new_neighbors: Vec<u64>,
+                             file_id: u8, page_id: u32 }
+0x23   HNSW_LAYER_PROMOTE  { node_id: u64, new_max_layer: u8,
+                             file_id: u8, page_id: u32 }
 0x24   VECTOR_DATA_WRITE   { file_id: u8, page_id: u32, offset: u16, vector_data: bytes }
 0x25   QUANTIZATION_UPDATE { index_id: u32, codebook: bytes }
 ```
+
+**Physical page references in HNSW records:** Each HNSW record includes `file_id: u8` and `page_id: u32` fields identifying the primary physical page affected. For HNSW_INSERT_NODE, which affects multiple pages (node data page + neighbor list pages at each layer), the `affected_pages: Vec<(u8, u32)>` field lists all (file_id, page_id) pairs involved. Physical page references enable ARIES-style redo: compare `page_lsn` with record LSN to skip already-applied changes. Without page references, redo would require logical index lookups, creating a chicken-and-egg problem during recovery.
 
 ### Graph Records (0x30-0x3F)
 
@@ -349,11 +367,24 @@ When on:
 
 ---
 
+## 9. WAL Record Serialization Format
+
+All WAL record payloads follow these binary serialization rules:
+
+- **Integers:** All multi-byte integers are **little-endian**. This applies to u16, u32, u64, i32, i64, f32, f64, etc.
+- **Strings:** Length-prefixed with a u32 byte count followed by UTF-8 encoded bytes. No null terminator is written or expected.
+- **Byte arrays (`bytes`):** Length-prefixed with a u32 byte count followed by raw bytes.
+- **`Vec<T>`:** A u32 element count followed by each element serialized according to its type's rules.
+- **Varint:** Unsigned LEB128 encoding, used for compact storage of small values where appropriate (e.g., in contexts where values are typically small but may occasionally be large).
+- **Self-describing payloads:** All payloads are self-describing via their `record_type` field in the WAL header — no additional type tags are needed within the payload itself.
+
+---
+
 ## Verification Checklist
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Unified WAL record header | Done | 42 bytes, all fields specified |
+| Unified WAL record header | Done | 48 bytes (42 + 6 reserved), all fields specified |
 | Relational WAL records | Done | PAGE_WRITE, TUPLE_*, BTREE_* |
 | Vector WAL records | Done | HNSW_*, VECTOR_*, QUANTIZATION_* |
 | Graph WAL records | Done | Bidirectional edge records, ADJ_LIST_SPLIT |
@@ -365,3 +396,9 @@ When on:
 | Group commit | Done | 1ms batching for throughput |
 | Checkpoint design | Done | Fuzzy checkpoint, no global lock |
 | WAL archiving hook | Done | For PITR support |
+| CLR record type | Done | Meta record 0x06, redo-only with undo_next_lsn |
+| HNSW physical page references | Done | file_id + page_id on all HNSW records |
+| Checksum zeroing rule | Done | Set to 0 before CRC32C computation |
+| PAGE_ALLOC / PAGE_DEALLOC records | Done | Meta records 0x07, 0x08 for free list tracking |
+| Binary serialization format | Done | Little-endian, length-prefixed strings/bytes, LEB128 varint |
+| Header alignment padding | Done | 6 reserved bytes at offset 42 for u64 alignment |

@@ -90,14 +90,18 @@ Static allocation wastes memory. A SQL-heavy workload doesn't need 25% for HNSW 
 ```
 Every 60 seconds, the memory manager evaluates:
 
-  sql_pressure   = buffer_pool.miss_rate * buffer_pool.eviction_rate
-  vector_pressure = hnsw_cache.miss_rate * vector_query_count
-  text_pressure   = dict_cache.miss_rate * fulltext_query_count
+  All pressure values are normalized to 0.0–1.0 range:
 
-  If sql_pressure > threshold AND vector_pressure < threshold:
+  buffer_pool_pressure = miss_rate (0.0–1.0, already a ratio)
+  hnsw_pressure = 1.0 - (free_slots / total_slots)
+  query_pressure = active_spills / max_concurrent_queries
+
+  Rebalancing triggers when any pressure > 0.8 or when pressures are imbalanced by > 0.3
+
+  If buffer_pool_pressure > threshold AND hnsw_pressure < threshold:
     shift 5% from HNSW Cache → Buffer Pool
 
-  If vector_pressure > threshold AND sql_pressure < threshold:
+  If hnsw_pressure > threshold AND buffer_pool_pressure < threshold:
     shift 5% from Buffer Pool → HNSW Cache
 
   etc.
@@ -166,11 +170,27 @@ Layers 1-5 total: ~66,666 nodes × 6KB ≈ 400MB for 1M 1536-dim vectors
 This is acceptable and pinned.
 ```
 
+### HNSW Cache vs Buffer Pool I/O Path
+
+HNSW Layer 1+ nodes: Loaded directly from vectors.vdb into the HNSW Cache at startup. Managed by HNSW Cache's own eviction policy (pinned, never evicted). Bypasses buffer pool entirely.
+
+HNSW Layer 0 nodes: Managed through the buffer pool like other data pages. Accessed via standard page read/write through buffer pool.
+
+This means HNSW Layer 0 pages may be evicted from the buffer pool under memory pressure, while Layer 1+ nodes remain pinned in the dedicated HNSW Cache.
+
+I/O for HNSW Cache: Direct file read from vectors.vdb using mmap or buffered I/O. No buffer pool involvement. Dirty HNSW Cache pages are flushed directly during checkpoint.
+
+### Undo Log Memory
+
+Undo log pages are cached within the buffer pool allocation. Under heavy write workloads, undo pages may consume up to 10-15% of the buffer pool.
+
+Buffer pool eviction priority treats undo pages at priority 3 (between data pages at 2 and B+Tree leaf pages at 4): hot undo pages for active transactions are retained, expired undo pages are evicted first.
+
 ### Out-of-Memory Handling
 
 ```
 If all eviction fails and memory is still insufficient:
-  1. Reject new queries with VAIS-000301 "Insufficient memory"
+  1. Reject new queries with VAIS-0003001 "Insufficient memory"
   2. Allow running queries to complete
   3. Trigger aggressive GC
   4. Log warning for operator attention
@@ -237,25 +257,35 @@ SET SESSION query_memory_limit = '64MB';   -- For OLTP connections
 
 ### Per-Connection Overhead
 
-```
-Component              Size        Notes
-─────────              ────        ─────
-Connection state       ~2 KB       Socket, auth, session vars
-Parse cache            ~64 KB      Cached prepared statement plans
-Result buffer          ~128 KB     Streaming result set buffer
-Transaction state      ~4 KB       Snapshot, active locks
-Sort buffer (default)  ~4 MB       Initial sort buffer per query
-Total per connection   ~4.2 MB     Before query execution
-```
+Connection memory model (revised):
+
+Idle connection: ~200KB (connection state, parse cache, small result buffer, transaction state)
+
+Active connection (executing query): ~4.2MB (idle + sort buffer 4MB)
+
+max_connections governs total connections (mostly idle). max_concurrent_queries (new setting, default = CPU cores * 2) governs simultaneously active queries.
+
+Memory formula: connection_memory = max_connections * 200KB + max_concurrent_queries * 4MB
 
 ### Max Connections
 
 ```
-max_connections = (system_overhead_memory - 100MB) / 4.2MB
+Examples:
 
-4GB budget:  (200MB - 100MB) / 4.2MB ≈ 23 connections
-8GB budget:  (400MB - 100MB) / 4.2MB ≈ 71 connections
-16GB budget: (800MB - 100MB) / 4.2MB ≈ 166 connections
+4GB budget (System Overhead: 200MB, assuming 8 cores):
+  max_connections = 100
+  max_concurrent_queries = 16
+  connection_memory = 100 * 200KB + 16 * 4MB = 20MB + 64MB = 84MB
+
+8GB budget (System Overhead: 400MB, assuming 8 cores):
+  max_connections = 500
+  max_concurrent_queries = 16
+  connection_memory = 500 * 200KB + 16 * 4MB = 100MB + 64MB = 164MB
+
+16GB budget (System Overhead: 800MB, assuming 16 cores):
+  max_connections = 1000
+  max_concurrent_queries = 32
+  connection_memory = 1000 * 200KB + 32 * 4MB = 200MB + 128MB = 328MB
 ```
 
 These are conservative estimates. Actual per-connection memory varies with query complexity.

@@ -69,15 +69,17 @@ The oversample factor compensates for candidates that are invisible to the curre
 Base oversample factor: 2.0 (search 2x candidates, filter to k)
 
 Adaptive formula:
-  uncommitted_ratio = active_uncommitted_vectors / total_indexed_vectors
-  oversample = max(2.0, 1.0 / (1.0 - uncommitted_ratio) * 1.5)
+  invisible_ratio = (active_uncommitted_vectors + soft_deleted_not_gc_vectors) / total_indexed_vectors
+  oversample = max(2.0, 1.0 / (1.0 - invisible_ratio) * 1.5)
 
 Example:
-  1% uncommitted → oversample = 2.0 (base is fine)
-  10% uncommitted → oversample = max(2.0, 1.67) = 2.0
-  30% uncommitted → oversample = max(2.0, 2.14) = 2.14
-  50% uncommitted → oversample = max(2.0, 3.0) = 3.0
+  1% invisible → oversample = 2.0 (base is fine)
+  10% invisible → oversample = max(2.0, 1.67) = 2.0
+  30% invisible → oversample = max(2.0, 2.14) = 2.14
+  50% invisible → oversample = max(2.0, 3.0) = 3.0
 ```
+
+`soft_deleted_not_gc_vectors` counts vectors marked for deletion but not yet physically removed by GC. These vectors are still present in the HNSW graph and may be returned as candidates, so they must be accounted for in the oversample factor.
 
 ### When Oversample Is Insufficient
 
@@ -108,10 +110,15 @@ AdjEntry {
     edge_type:      u16,    // Edge type (index into type table)
     txn_id_create:  u64,    // Transaction that created this edge
     txn_id_expire:  u64,    // Transaction that deleted this edge (0 = active)
+    cmd_id:         u32,    // Command ID within creating transaction
 }
 
-Total: 34 bytes per adjacency entry
+Total: 38 bytes per adjacency entry
 ```
+
+`cmd_id` enables correct visibility for self-referencing graph operations within a single transaction (e.g., INSERT edges from a `GRAPH_TRAVERSE` result in the same statement).
+
+Note: The struct uses packed/serialized layout (not C struct alignment) since it is an on-disk format. No padding bytes are added between fields.
 
 ### Traversal Visibility
 
@@ -126,18 +133,35 @@ fn traverse_neighbors(node_id: u64, snapshot: &Snapshot) -> Vec<AdjEntry> {
 }
 
 fn is_edge_visible(entry: &AdjEntry, snapshot: &Snapshot) -> bool {
+    // Check aborted status first via Transaction Status Table (CLOG)
+    // If the creating txn was aborted, the edge was never committed → invisible
+    if is_aborted(entry.txn_id_create) {
+        return false;
+    }
+
+    // If the expiring txn was aborted, the deletion was rolled back → edge is still visible
+    // (treat txn_id_expire as if it were 0)
+    let expire_is_effective = entry.txn_id_expire != 0
+                              && !is_aborted(entry.txn_id_expire);
+
     // Created by committed txn visible to this snapshot
     let created_visible = is_committed_before(entry.txn_id_create, snapshot)
                           || entry.txn_id_create == snapshot.current_txn;
 
-    // Not yet expired, or expired by uncommitted txn
-    let not_expired = entry.txn_id_expire == 0
+    // Not yet expired, or expired by uncommitted/aborted txn
+    let not_expired = !expire_is_effective
                       || (!is_committed_before(entry.txn_id_expire, snapshot)
                           && entry.txn_id_expire != snapshot.current_txn);
 
     created_visible && not_expired
 }
 ```
+
+The `is_committed_before(txn_id, snapshot)` function must consult the Transaction Status Table (CLOG equivalent) to distinguish between COMMITTED, ABORTED, and IN_PROGRESS states.
+
+### Transaction Status Table (CLOG)
+
+A persistent structure mapping `txn_id` to status (`COMMITTED`, `ABORTED`, `IN_PROGRESS`). Stored in `meta.vdb`. Cached in memory for hot transactions. Required for both tuple and edge visibility checks.
 
 ### Snapshot-Consistent Multi-Hop Traversal
 
@@ -243,7 +267,45 @@ Trigger when ANY of:
 
 ---
 
-## 5. Transaction Timeout
+## 5. MVCC for Full-Text Posting Lists
+
+### Design
+
+Each posting list entry carries MVCC metadata:
+
+```
+PostingEntry {
+    doc_id:         u64,    // Document ID
+    term_freq:      u32,    // Term frequency in document
+    positions:      [u32],  // Term positions (variable length)
+    txn_id_create:  u64,    // Transaction that created this entry
+    txn_id_expire:  u64,    // Transaction that deleted this entry (0 = active)
+}
+
+MVCC overhead: 16 bytes per posting entry (txn_id_create + txn_id_expire)
+```
+
+### Visibility Check
+
+Visibility check is the same as tuple visibility: `is_visible(posting_entry, snapshot)`. Each posting entry's `txn_id_create` and `txn_id_expire` are evaluated against the current snapshot to determine if the entry should be included in search results.
+
+### Deletion Bitmap Optimization
+
+A deletion bitmap is used for performance optimization: entries marked in the deletion bitmap are quickly skipped without checking MVCC fields. This avoids the overhead of full visibility checks for entries that are known to be deleted.
+
+The deletion bitmap is reconciled with MVCC during GC: entries where `txn_id_expire` is committed below the low water mark are permanently removed from the posting list and their corresponding bits cleared from the bitmap.
+
+### BM25 Document Frequency Tracking
+
+BM25 scoring requires accurate document frequency (DF) and total document count. Under concurrent writes, these counts may be slightly stale. VaisDB uses approximate counts with a documented tolerance for slight inaccuracy under concurrent writes. The approximation is bounded: DF can only be off by the number of in-flight transactions modifying the relevant terms, which is typically negligible relative to total document count.
+
+### FULLTEXT_MATCH Visibility
+
+`FULLTEXT_MATCH` results are post-filtered by MVCC visibility, similar to the HNSW post-filter strategy. The posting list is traversed to collect candidate documents, and each candidate is then checked against the current snapshot. Only visible documents are included in the final ranked result set.
+
+---
+
+## 6. Transaction Timeout
 
 ### Default: 5 minutes
 
@@ -263,11 +325,16 @@ transaction_timeout_sec: 300
 
 ```
 1. Transaction is marked as ABORTED
-2. All locks released immediately
-3. Undo is applied lazily (undo records remain, cleaned up by GC)
-4. Client receives error: VAIS-000301 "Transaction timeout after 300 seconds"
-5. Client must BEGIN new transaction
+2. Undo chain is immediately traversed and old values are restored to data pages (eager undo)
+3. Undo operations generate CLR (Compensation Log Records) in the WAL for crash recovery correctness
+4. All locks released after undo is complete
+5. Client receives error: VAIS-0004001 "Transaction timeout after 300 seconds"
+6. Client must BEGIN new transaction
 ```
+
+VaisDB uses eager undo (InnoDB style): when a transaction aborts (timeout, explicit ROLLBACK, or deadlock victim), the undo chain is immediately traversed and old values are restored to data pages. This ensures the visibility function never needs to traverse undo chains for aborted transactions.
+
+Undo operations generate CLR (Compensation Log Records) in the WAL for crash recovery correctness.
 
 ### Configurable per Session
 
@@ -278,7 +345,7 @@ SET SESSION transaction_timeout = 0;    -- No timeout (dangerous)
 
 ---
 
-## 6. Isolation Levels
+## 7. Isolation Levels
 
 ### Supported Levels
 
@@ -325,9 +392,17 @@ On UPDATE/DELETE:
      (with deadlock detection timeout)
 ```
 
+#### Graph Edge Write-Write Conflict
+
+Graph edge write-write conflict: If T1 sets `txn_id_expire` on edge E (marking deletion) and T2 also attempts to set `txn_id_expire` on edge E, the second writer detects the conflict via the non-zero `txn_id_expire` field.
+
+Resolution: first-committer-wins, same as tuple conflict detection. The later transaction is aborted with `VAIS-0004003 WRITE_CONFLICT`.
+
+Edge property updates follow the same conflict detection: check `txn_id_expire` of the current version before applying update.
+
 ---
 
-## 7. MVCC Concurrency Scenarios (Verification)
+## 8. MVCC Concurrency Scenarios (Verification)
 
 ### Scenario 1: Basic Snapshot Isolation
 ```

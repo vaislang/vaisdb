@@ -13,12 +13,23 @@ Settings are resolved in priority order (highest first):
 ```
 Priority  Source              Example
 ────────  ──────              ───────
-1 (high)  SQL SET command     SET SESSION query_timeout = 30;
-2         CLI arguments       vaisdb --port 5433 --memory-budget 8GB
-3         Environment vars    VAISDB_PORT=5433
-4         Config file         vaisdb.conf (in database directory)
-5 (low)   Built-in defaults   Hardcoded in source
+1 (high)  SQL SET SESSION     SET SESSION query_timeout = 30;
+2         SQL SET GLOBAL      SET GLOBAL query_timeout = 60; (runtime only)
+3         SQL ALTER SYSTEM    ALTER SYSTEM SET query_timeout = 60; (persisted)
+4         CLI arguments       vaisdb --port 5433 --memory-budget 8GB
+5         Environment vars    VAISDB_PORT=5433
+6         Config file         vaisdb.conf (in database directory)
+7 (low)   Built-in defaults   Hardcoded in source
 ```
+
+### Size Value Format
+
+Size values accept numeric values with optional unit suffix.
+
+- Supported units: B (bytes), KB, MB, GB, TB
+- All units are base-2: 1KB = 1024 bytes, 1MB = 1048576 bytes, 1GB = 1073741824 bytes
+- Case insensitive: '8gb', '8GB', '8Gb' are all valid
+- Bare numbers (no suffix) are interpreted as bytes
 
 ### Config File Format
 
@@ -27,8 +38,8 @@ Priority  Source              Example
 # Located at: mydb.vaisdb/vaisdb.conf
 
 [server]
-port = 5432
-max_connections = 100
+port = 5433
+max_connections = "auto"
 bind_address = "0.0.0.0"
 
 [storage]
@@ -44,6 +55,8 @@ query_memory_percent = 15
 
 [wal]
 sync_mode = "fsync"       # fsync | fdatasync | async
+archive_mode = "off"
+buffer_size = "16MB"
 group_commit_timeout_us = 1000
 checkpoint_interval_sec = 300
 
@@ -67,6 +80,13 @@ gc_io_limit_mbps = 50
 gc_cpu_limit_percent = 10
 gc_min_interval_sec = 60
 
+[temp]
+directory = "auto"
+
+[tls]
+cert_file = ""
+key_file = ""
+
 [logging]
 log_level = "info"        # debug | info | warn | error
 slow_query_log = true
@@ -83,6 +103,8 @@ memory.memory_budget  → VAISDB_MEMORY_BUDGET
 wal.sync_mode         → VAISDB_WAL_SYNC_MODE
 vector.hnsw_ef_search → VAISDB_VECTOR_HNSW_EF_SEARCH
 ```
+
+**Note:** All settings use dot-notation as canonical name. In TOML config, the prefix before the dot becomes the section header. For example, `wal.sync_mode` appears in the TOML file as `sync_mode` under the `[wal]` section, in environment variables as `VAISDB_WAL_SYNC_MODE`, and in SQL SET commands as `SET wal.sync_mode = 'fdatasync'`.
 
 ---
 
@@ -102,8 +124,14 @@ vector.hnsw_ef_search → VAISDB_VECTOR_HNSW_EF_SEARCH
 SET SESSION query_timeout = 60;
 SET query_timeout = 60;          -- SESSION is default
 
--- Set server-wide default (affects new sessions)
+-- Set server-wide default (affects new sessions, runtime only)
 SET GLOBAL query_timeout = 60;
+
+-- Persist setting to meta.vdb configuration store
+ALTER SYSTEM SET query_timeout = 60;
+
+-- Remove persisted override
+ALTER SYSTEM RESET query_timeout;
 
 -- View current effective value
 SHOW query_timeout;
@@ -114,13 +142,29 @@ SHOW ALL SETTINGS;
 -- Reset to default
 RESET query_timeout;             -- Reset session to global
 RESET ALL;                       -- Reset all session overrides
+RESET GLOBAL query_timeout;      -- Reset global to ALTER SYSTEM/config/default
+RESET GLOBAL ALL;                -- Reset all global overrides
 ```
+
+**SET GLOBAL**: Changes the runtime default for all new sessions. **Not persisted** — lost on server restart.
+
+**ALTER SYSTEM SET <setting> = <value>**: Persists the setting to `meta.vdb` configuration store. Takes effect on next server restart (for restart-required settings) or immediately for runtime-changeable settings. Survives restart.
+
+**ALTER SYSTEM RESET <setting>**: Removes a previously persisted override, reverting to config file default.
 
 ### Scope Resolution
 
 ```
-Effective value = SESSION override ?? GLOBAL override ?? config file ?? default
+Effective value = SESSION override ?? GLOBAL override ?? ALTER SYSTEM ?? CLI args ?? env vars ?? config file ?? default
 ```
+
+### Configuration Reload
+
+**RELOAD CONFIG** SQL command: Re-reads the config file and applies changes to runtime-changeable settings. Restart-required settings are noted but not applied until restart.
+
+**SIGHUP signal**: Same effect as RELOAD CONFIG. Useful for scripted administration.
+
+Reload does NOT affect existing session overrides (SET SESSION values are preserved).
 
 ---
 
@@ -149,11 +193,13 @@ These require server restart to take effect (stored in config file).
 ```
 Setting                   Default     Notes
 ───────                   ───────     ─────
-port                      5432        Bind port
+port                      5433        Bind port (default 5433 to avoid conflict with PostgreSQL 5432)
 bind_address              0.0.0.0     Listen address
-max_connections           100         Connection limit (affects memory allocation)
-wal_sync_mode             fsync       WAL durability mode
-wal_archive_mode          off         WAL archiving for PITR
+max_connections           auto        auto = min(1000, max(10, (system_overhead_memory - 100MB) / 200KB)) for idle connection slots
+wal.sync_mode             fsync       WAL durability mode
+wal.archive_mode          off         WAL archiving for PITR
+wal_buffer_size           16MB        WAL write buffer size. Larger values improve throughput for write-heavy workloads.
+temp_file_directory       auto        auto = <db_dir>/tmp/. Directory for temporary files (sort spill, hash join spill).
 log_file                  vaisdb.log  Log file path
 tls_cert_file             (none)      TLS certificate path
 tls_key_file              (none)      TLS private key path
@@ -170,9 +216,12 @@ hnsw_cache_percent              25          GLOBAL   Triggers rebalance
 dict_cache_percent              5           GLOBAL   Triggers rebalance
 query_memory_percent            15          GLOBAL   Triggers rebalance
 hnsw_ef_search                  64          SESSION  Higher = better recall, slower
+oversample_factor               2.0         SESSION  HNSW MVCC post-filter oversample multiplier (1.0-10.0). Higher = better recall, slower search.
 query_memory_limit              256MB       SESSION  Per-query memory cap
 query_timeout_sec               30          SESSION  Query execution timeout
 transaction_timeout_sec         300         SESSION  Transaction timeout
+max_concurrent_queries          auto        SESSION  auto = CPU cores * 2. Maximum simultaneously executing queries. Controls active query memory allocation.
+deadlock_detection_interval_ms  1000        SESSION  Interval between deadlock detection cycles (100-10000 ms)
 slow_query_threshold_ms         1000        GLOBAL   Slow query log threshold
 default_isolation               snapshot    SESSION  Isolation level
 gc_io_limit_mbps                50          GLOBAL   GC I/O throttle
@@ -201,8 +250,10 @@ checkpoint_interval_sec         300         GLOBAL   Checkpoint frequency
 │ port                         │           │    ✓     │         │         │
 │ bind_address                 │           │    ✓     │         │         │
 │ max_connections              │           │    ✓     │         │         │
-│ wal_sync_mode                │           │    ✓     │         │         │
-│ wal_archive_mode             │           │    ✓     │         │         │
+│ wal.sync_mode                │           │    ✓     │         │         │
+│ wal.archive_mode             │           │    ✓     │         │         │
+│ wal_buffer_size              │           │    ✓     │         │         │
+│ temp_file_directory          │           │    ✓     │         │         │
 │ log_file                     │           │    ✓     │         │         │
 │ tls_cert_file / tls_key_file │           │    ✓     │         │         │
 ├──────────────────────────────┼───────────┼──────────┼─────────┼─────────┤
@@ -216,9 +267,12 @@ checkpoint_interval_sec         300         GLOBAL   Checkpoint frequency
 │ checkpoint_interval_sec      │           │          │    ✓    │         │
 ├──────────────────────────────┼───────────┼──────────┼─────────┼─────────┤
 │ hnsw_ef_search               │           │          │    ✓    │    ✓    │
+│ oversample_factor            │           │          │    ✓    │    ✓    │
 │ query_memory_limit           │           │          │    ✓    │    ✓    │
 │ query_timeout_sec            │           │          │    ✓    │    ✓    │
 │ transaction_timeout_sec      │           │          │    ✓    │    ✓    │
+│ max_concurrent_queries       │           │          │    ✓    │    ✓    │
+│ deadlock_detection_interval  │           │          │    ✓    │    ✓    │
 │ default_isolation            │           │          │    ✓    │    ✓    │
 └──────────────────────────────┴───────────┴──────────┴─────────┴─────────┘
 ```
@@ -245,7 +299,7 @@ SHOW SESSION OVERRIDES;
 -- Show effective config with source
 SHOW CONFIG SOURCE;
 -- query_timeout | 60 | session (SET SESSION)
--- port          | 5432 | config_file (vaisdb.conf)
+-- port          | 5433 | config_file (vaisdb.conf)
 -- page_size     | 8192 | database_meta (immutable)
 ```
 

@@ -32,16 +32,18 @@ Example: `VAIS-0102003` = Engine 01 (SQL), Category 02 (constraint), Error 003
 ```
 Code  Engine           Description
 ────  ──────           ───────────
-00    common           Shared infrastructure (transactions, storage, config)
+00    common           Shared infrastructure errors that are NOT specific to any engine. Includes: transactions, configuration, authentication, and **unexpected internal errors** (programming bugs, assertion failures, invariant violations).
 01    sql              SQL/relational engine
 02    vector           Vector engine (HNSW, quantization)
 03    graph            Graph engine (traversal, adjacency)
 04    fulltext         Full-text search engine
-05    storage          Storage layer (pages, buffer pool, WAL)
+05    storage          Storage layer errors for **expected failure conditions**: page corruption detected on read, WAL segment corruption, disk full, I/O errors. These are operational issues, not bugs.
 06    server           Server/protocol layer
 07    client           Client-side errors
 08-99 (reserved)       Future engines and components
 ```
+
+**Guideline**: If the error indicates a bug in VaisDB code, use EE=00 CC=05. If the error indicates a hardware/filesystem/operational issue, use EE=05.
 
 ---
 
@@ -73,13 +75,15 @@ Code  Category         Description
 Code           Name                        Message Template
 ────           ────                        ────────────────
 VAIS-0001001   SYNTAX_ERROR                "Syntax error at position {pos}: {detail}"
+VAIS-0001002   NOT_IMPLEMENTED             "Feature '{feature}' is not yet implemented"
 VAIS-0003001   OUT_OF_MEMORY               "Insufficient memory: {component} requires {needed}, available {available}"
 VAIS-0003002   DISK_FULL                   "Disk full: cannot write {bytes} bytes to {file}"
 VAIS-0003003   MAX_CONNECTIONS             "Maximum connections ({max}) reached"
-VAIS-0004001   DEADLOCK                    "Deadlock detected, transaction {txn_id} aborted"
-VAIS-0004002   TXN_TIMEOUT                 "Transaction timeout after {seconds} seconds"
+VAIS-0004001   TRANSACTION_TIMEOUT         "Transaction timeout after {seconds} seconds"
+VAIS-0004002   DEADLOCK                    "Deadlock detected, transaction {txn_id} aborted"
 VAIS-0004003   WRITE_CONFLICT              "Write-write conflict on {table}.{row}: transaction {other_txn} committed first"
 VAIS-0004004   LOCK_TIMEOUT                "Lock wait timeout after {seconds} seconds"
+VAIS-0004005   SERIALIZATION_FAILURE       "Transaction could not be serialized. Retry recommended."
 VAIS-0005001   INTERNAL_ERROR              "Internal error: {detail} (please report this bug)"
 VAIS-0005002   CHECKSUM_MISMATCH           "Page checksum mismatch: page {page_id} in {file}"
 VAIS-0005003   WAL_CORRUPTION              "WAL corruption detected at LSN {lsn}"
@@ -104,6 +108,7 @@ VAIS-0102002   NOT_NULL_VIOLATION          "NOT NULL constraint failed: {table}.
 VAIS-0102003   UNIQUE_VIOLATION            "Unique constraint failed: {table}.{index}({value})"
 VAIS-0102004   CHECK_VIOLATION             "CHECK constraint failed: {table}.{constraint}"
 VAIS-0102005   FK_VIOLATION                "Foreign key constraint failed: {detail}"
+VAIS-0102006   DATA_TOO_LONG               "Data too long for column '{column}' (max {max_len}, got {actual_len})"
 VAIS-0109001   TYPE_MISMATCH               "Type mismatch: expected {expected}, got {actual}"
 VAIS-0109002   CAST_ERROR                  "Cannot cast {value} from {from_type} to {to_type}"
 VAIS-0109003   DIVISION_BY_ZERO            "Division by zero"
@@ -122,12 +127,12 @@ Code           Name                        Message Template
 VAIS-0201001   VECTOR_PARSE_ERROR          "Invalid vector literal: {detail}"
 VAIS-0202001   DIMENSION_MISMATCH          "Vector dimension mismatch: index expects {expected}, got {actual}"
 VAIS-0202002   INVALID_DISTANCE_METRIC     "Unknown distance metric: {metric}"
+VAIS-0202003   MODEL_MISMATCH              "Embedding model mismatch: index uses '{model}', got vector from '{other}'"
 VAIS-0203001   HNSW_OOM                    "HNSW index out of memory: {index_name} requires {needed}"
 VAIS-0205001   HNSW_CORRUPTION             "HNSW index corruption detected in {index_name}: {detail}"
 VAIS-0209001   INVALID_VECTOR              "Invalid vector: {reason} (NaN, Inf, or wrong type)"
 VAIS-0209002   VECTOR_TOO_LARGE            "Vector dimension {dim} exceeds maximum {max}"
 VAIS-0210001   VECTOR_INDEX_NOT_FOUND      "Vector index '{name}' does not exist"
-VAIS-0202003   MODEL_MISMATCH              "Embedding model mismatch: index uses '{model}', got vector from '{other}'"
 ```
 
 ### Graph Engine Errors (EE=03)
@@ -168,6 +173,7 @@ VAIS-0505002   WAL_SEGMENT_CORRUPT         "WAL segment {segment} corrupted at o
 VAIS-0508001   FSYNC_FAILED                "fsync failed on {file}: {os_error}"
 VAIS-0508002   MMAP_FAILED                 "mmap failed: {os_error}"
 VAIS-0508003   FLOCK_FAILED                "Cannot acquire database lock: another process has it"
+VAIS-0508004   DISK_IO_ERROR               "Disk I/O error on {file}: {os_error}"
 ```
 
 ### Server Errors (EE=06)
@@ -193,8 +199,15 @@ struct VaisError {
     message: String,       // Human-readable message
     detail: Option<String>,// Additional detail (stack trace for internal errors)
     hint: Option<String>,  // Suggested fix
-    position: Option<u32>, // Position in query string (for syntax errors)
+    severity: ErrorSeverity,  // ERROR, WARNING, FATAL
+    line: Option<u32>,     // Source line number (for SQL parse errors)
+    column: Option<u32>,   // Source column number (for SQL parse errors)
 }
+
+// Severity levels (matches PostgreSQL severity levels for client compatibility)
+// - ERROR: Operation failed but connection is intact, can continue
+// - WARNING: Operation succeeded but with caveats (e.g., truncation)
+// - FATAL: Connection must be terminated (e.g., protocol violation, out of memory)
 ```
 
 ### Wire Protocol Response
@@ -237,13 +250,14 @@ Internal errors (VAIS-00050xx) log full details to server log but return generic
 | Error code format defined | Done | VAIS-EECCNNN (7 digits) |
 | Engine codes assigned | Done | 00-07, 08-99 reserved |
 | Category codes assigned | Done | 01-10, 11-99 reserved |
-| Common errors | Done | 17 error codes |
-| SQL errors | Done | 14 error codes |
-| Vector errors | Done | 8 error codes |
-| Graph errors | Done | 8 error codes |
-| Full-text errors | Done | 4 error codes |
-| Storage errors | Done | 6 error codes |
-| Server errors | Done | 4 error codes |
+| Common errors (EE=00) | Done | 19 error codes |
+| SQL errors (EE=01) | Done | 16 error codes |
+| Vector errors (EE=02) | Done | 9 error codes |
+| Graph errors (EE=03) | Done | 8 error codes |
+| Full-text errors (EE=04) | Done | 4 error codes |
+| Storage errors (EE=05) | Done | 7 error codes |
+| Server errors (EE=06) | Done | 4 error codes |
+| Total error codes | Done | 67 error codes |
 | No conflicts | Done | All codes unique |
 | Extensible | Done | Reserved ranges for future |
 | Error sanitization | Done | No internal details to clients |
