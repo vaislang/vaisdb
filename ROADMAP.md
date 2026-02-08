@@ -39,7 +39,7 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 
 | Phase | Name | Status | Progress |
 |-------|------|--------|----------|
-| 0 | Architecture & Design Decisions | ✅ Complete | 43/43 (100%) |
+| 0 | Architecture & Design Decisions | ✅ Complete | 56/56 (100%) |
 | 1 | Storage Engine | ⏳ Planned | 0/38 (0%) |
 | 2 | SQL Engine | ⏳ Planned | 0/42 (0%) |
 | 3 | Vector Engine | ⏳ Planned | 0/24 (0%) |
@@ -97,6 +97,40 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
   변경: docs/architecture/stage7-implementation-mapping.md (5개 직렬화 패턴 + ClogPage helper)
 - [x] 7. ROADMAP 동기화: Phase 0 카운트, 카테고리 코드, 메모리 범위 (Opus 직접) ✅
   변경: ROADMAP.md (Phase 0 43/43, 카테고리 09=type/10=notfound, 메모리 범위 정렬)
+진행률: 7/7 (100%)
+
+### Stage 9 - Design Review Round 4: Page Internal Layout (2026-02-08)
+모드: 자동진행
+- [x] 1. Stage 1 보강: Heap page 내부 레이아웃 + Freelist 구조 (Opus 직접) ✅
+  변경: docs/architecture/stage1-on-disk-format.md (Section 7: slotted page, Section 8: per-file bitmap freelist)
+- [x] 2. Stage 1 보강: Undo page 레이아웃 + Meta page 레이아웃 (Opus 직접) ✅
+  변경: docs/architecture/stage1-on-disk-format.md (Section 10: undo entry 28B header, Section 11: meta.vdb/bootstrap/file header 256B)
+- [x] 3. Stage 1 보강: B+Tree node 페이지 포맷 (Opus 직접) ✅
+  변경: docs/architecture/stage1-on-disk-format.md (Section 9: internal 8B key dir, leaf 8B entry dir + TID 4B, prefix compression)
+- [x] 4. Stage 1 visibility function is_aborted fast-path 추가 (Sonnet 위임) ✅
+  변경: docs/architecture/stage1-on-disk-format.md (is_aborted fast-path, expired_by_effective 패턴, unified note)
+- [x] 5. Stage 7 직렬화 패턴 추가: HeapPage, UndoEntry, FreelistPage, BTreeNode (Sonnet 위임) ✅
+  변경: docs/architecture/stage7-implementation-mapping.md (6개 구조체: HeapPageSlot, UndoEntry, FreelistBitmap, BTreeInternal/Leaf, MetaPageHeader)
+- [x] 6. ROADMAP 동기화 (Opus 직접) ✅
+  변경: ROADMAP.md (Phase 0 49/49, Stage 9 체크박스 완료)
+진행률: 6/6 (100%)
+
+### Stage 10 - Design Final Review (2026-02-08)
+모드: 자동진행
+- [x] 1. Stage 7 magic number 불일치 수정 (Sonnet 위임) ✅
+  변경: docs/architecture/stage7-implementation-mapping.md (0x56414953444200 → 0x5641495344422031)
+- [x] 2. Stage 7 MetaPageHeader page_size 주석 수정 (Sonnet 위임) ✅
+  변경: docs/architecture/stage7-implementation-mapping.md (4096 or 8192 → 8192 or 16384)
+- [x] 3. Stage 7 UndoEntry entry_type 값 수정 (Sonnet 위임) ✅
+  변경: docs/architecture/stage7-implementation-mapping.md (0=UPDATE→0x01=INSERT_UNDO 등)
+- [x] 4. Stage 1 B+Tree split WAL 순서 주석 수정 (Sonnet 위임) ✅
+  변경: docs/architecture/stage1-on-disk-format.md (before→after PAGE_ALLOC)
+- [x] 5. Stage 7 MetaPageHeader reserved 필드 주석 추가 (Sonnet 위임) ✅
+  변경: docs/architecture/stage7-implementation-mapping.md (reserved [u8;128] + 256B 주석)
+- [x] 6. Stage 1 overflow 설계 모호성 해소 (Opus 직접) ✅
+  변경: docs/architecture/stage1-on-disk-format.md (tuple-level vs page-level overflow 명확화)
+- [x] 7. ROADMAP 동기화 (Opus 직접) ✅
+  변경: ROADMAP.md (Stage 10 완료, verification checklist, Phase 0 카운트)
 진행률: 7/7 (100%)
 
 ### Stage 1 - On-Disk Format Decisions (IMMUTABLE after first user)
