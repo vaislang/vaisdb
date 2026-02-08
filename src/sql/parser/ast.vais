@@ -1,0 +1,249 @@
+# SQL Abstract Syntax Tree
+# All SQL statements and expressions are represented as AST nodes
+# Used by the recursive descent parser and consumed by the query planner/executor
+
+use sql/types.{SqlType, SqlValue};
+
+# ============================================================================
+# Top-level Statement
+# ============================================================================
+
+L Statement =
+    Select { query: SelectQuery } |
+    Insert { insert: InsertStmt } |
+    Update { update: UpdateStmt } |
+    Delete { delete: DeleteStmt } |
+    CreateTable { create: CreateTableStmt } |
+    DropTable { name: Str, if_exists: bool } |
+    AlterTable { alter: AlterTableStmt } |
+    CreateIndex { create: CreateIndexStmt } |
+    DropIndex { name: Str, if_exists: bool } |
+    Explain { stmt: Box<Statement>, analyze: bool } |
+    BeginTxn { isolation: Option<Str> } |
+    CommitTxn |
+    RollbackTxn |
+    SetExpr { target: SetTarget } |
+    Prepare { name: Str, stmt: Box<Statement> } |
+    Execute { name: Str, params: Vec<Expr> };
+
+# ============================================================================
+# SELECT components
+# ============================================================================
+
+S SelectQuery {
+    ctes: Vec<Cte>,
+    select_list: Vec<SelectItem>,
+    from: Option<Vec<TableRef>>,
+    where_clause: Option<Expr>,
+    group_by: Vec<Expr>,
+    having: Option<Expr>,
+    order_by: Vec<OrderByItem>,
+    limit: Option<Expr>,
+    offset: Option<Expr>,
+    distinct: bool,
+    set_op: Option<SetOperation>,
+}
+
+I SelectQuery {
+    # Create a minimal empty SelectQuery for builder-style construction
+    F empty() -> SelectQuery {
+        SelectQuery {
+            ctes: Vec.new(),
+            select_list: Vec.new(),
+            from: Option.None,
+            where_clause: Option.None,
+            group_by: Vec.new(),
+            having: Option.None,
+            order_by: Vec.new(),
+            limit: Option.None,
+            offset: Option.None,
+            distinct: false,
+            set_op: Option.None,
+        }
+    }
+}
+
+L SelectItem =
+    AllColumns |
+    AllColumnsFrom { table: Str } |
+    Expr { expr: Expr, alias: Option<Str> };
+
+S Cte {
+    name: Str,
+    columns: Vec<Str>,
+    query: SelectQuery,
+    recursive: bool,
+}
+
+S SetOperation {
+    op: SetOpKind,
+    all: bool,
+    right: Box<SelectQuery>,
+}
+
+L SetOpKind = Union | Intersect | Except;
+
+# ============================================================================
+# Table references (FROM clause)
+# ============================================================================
+
+L TableRef =
+    Table { name: Str, alias: Option<Str> } |
+    Join { join: JoinClause } |
+    Subquery { query: Box<SelectQuery>, alias: Str } |
+    CrossJoin { left: Box<TableRef>, right: Box<TableRef> };
+
+S JoinClause {
+    join_type: JoinType,
+    left: Box<TableRef>,
+    right: Box<TableRef>,
+    condition: JoinCondition,
+}
+
+L JoinType = Inner | Left | Right | Cross;
+
+L JoinCondition =
+    On { expr: Expr } |
+    Using { columns: Vec<Str> } |
+    Natural;
+
+# ============================================================================
+# Expressions
+# ============================================================================
+
+L Expr =
+    # Literals
+    Literal { value: SqlValue } |
+    # Column reference: table.column or just column
+    ColumnRef { table: Option<Str>, column: Str } |
+    # Parameter marker ($1, $2, ...)
+    Parameter { idx: u32 } |
+    # Binary operations: left op right
+    BinaryOp { left: Box<Expr>, op: BinOp, right: Box<Expr> } |
+    # Unary operations: op operand
+    UnaryOp { op: UnaryOp, operand: Box<Expr> } |
+    # IS NULL / IS NOT NULL
+    IsNull { expr: Box<Expr>, negated: bool } |
+    # BETWEEN low AND high / NOT BETWEEN
+    Between { expr: Box<Expr>, low: Box<Expr>, high: Box<Expr>, negated: bool } |
+    # IN (list) / NOT IN (list)
+    InList { expr: Box<Expr>, list: Vec<Expr>, negated: bool } |
+    # IN (subquery) / NOT IN (subquery)
+    InSubquery { expr: Box<Expr>, query: Box<SelectQuery>, negated: bool } |
+    # EXISTS (subquery) / NOT EXISTS (subquery)
+    Exists { query: Box<SelectQuery>, negated: bool } |
+    # LIKE / NOT LIKE
+    Like { expr: Box<Expr>, pattern: Box<Expr>, negated: bool } |
+    # CASE WHEN ... THEN ... ELSE ... END
+    Case { operand: Option<Box<Expr>>, when_clauses: Vec<WhenClause>, else_result: Option<Box<Expr>> } |
+    # CAST(expr AS type)
+    Cast { expr: Box<Expr>, target_type: SqlType } |
+    # Function call: name(args...) or name(DISTINCT args...)
+    FunctionCall { name: Str, args: Vec<Expr>, distinct: bool } |
+    # Window function: func() OVER (PARTITION BY ... ORDER BY ...)
+    WindowFunc { func: Box<Expr>, partition_by: Vec<Expr>, order_by: Vec<OrderByItem> } |
+    # Scalar subquery: (SELECT ...)
+    Subquery { query: Box<SelectQuery> } |
+    # String concatenation: left || right
+    Concat { left: Box<Expr>, right: Box<Expr> } |
+    # Wildcard (*) for use in COUNT(*)
+    Star;
+
+L BinOp = Add | Sub | Mul | Div | Mod |
+          Eq | Neq | Lt | Gt | Le | Ge |
+          And | Or;
+
+L UnaryOp = Neg | Not;
+
+S WhenClause { condition: Expr, result: Expr }
+
+S OrderByItem { expr: Expr, asc: bool, nulls_first: Option<bool> }
+
+# ============================================================================
+# DDL statements
+# ============================================================================
+
+S CreateTableStmt {
+    name: Str,
+    columns: Vec<ColumnDef>,
+    if_not_exists: bool,
+}
+
+S ColumnDef {
+    name: Str,
+    data_type: SqlType,
+    nullable: bool,
+    default_value: Option<Expr>,
+    is_primary_key: bool,
+    is_unique: bool,
+    check_expr: Option<Expr>,
+}
+
+I ColumnDef {
+    # Create a column definition with defaults (nullable, no constraints)
+    F new(name: Str, data_type: SqlType) -> ColumnDef {
+        ColumnDef {
+            name,
+            data_type,
+            nullable: true,
+            default_value: Option.None,
+            is_primary_key: false,
+            is_unique: false,
+            check_expr: Option.None,
+        }
+    }
+}
+
+S CreateIndexStmt {
+    name: Str,
+    table_name: Str,
+    columns: Vec<Str>,
+    unique: bool,
+    if_not_exists: bool,
+}
+
+S AlterTableStmt {
+    table_name: Str,
+    action: AlterAction,
+}
+
+L AlterAction =
+    AddColumn { column: ColumnDef } |
+    DropColumn { name: Str } |
+    RenameColumn { old_name: Str, new_name: Str } |
+    AlterColumnType { name: Str, new_type: SqlType };
+
+# ============================================================================
+# DML statements
+# ============================================================================
+
+S InsertStmt {
+    table_name: Str,
+    columns: Vec<Str>,
+    source: InsertSource,
+}
+
+L InsertSource =
+    Values { rows: Vec<Vec<Expr>> } |
+    Query { query: SelectQuery };
+
+S UpdateStmt {
+    table_name: Str,
+    assignments: Vec<Assignment>,
+    where_clause: Option<Expr>,
+}
+
+S Assignment { column: Str, value: Expr }
+
+S DeleteStmt {
+    table_name: Str,
+    where_clause: Option<Expr>,
+}
+
+# ============================================================================
+# SET statement target
+# ============================================================================
+
+L SetTarget =
+    Session { key: Str, value: Expr } |
+    Global { key: Str, value: Expr };

@@ -1,0 +1,6 @@
+# Catalog Module
+# Schema metadata management: tables, columns, indexes
+# Provides CatalogManager for DDL operations (CREATE TABLE, DROP TABLE, etc.)
+
+pub mod schema;
+pub mod manager;

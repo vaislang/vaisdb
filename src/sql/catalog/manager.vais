@@ -1,0 +1,641 @@
+# Catalog Manager
+# Manages database schema: tables, columns, indexes
+# Stores metadata in a B+Tree (catalog_root_page in meta.vdb)
+# All operations are transactional via WAL SCHEMA_CHANGE records
+#
+# Design:
+# - On-disk: catalog entries stored as serialized tuples in heap pages,
+#   indexed by a B+Tree with type-prefixed keys ("T:", "C:", "I:", "IT:")
+# - In-memory: HashMap caches for O(1) lookup of tables and indexes
+# - Columns stored in a separate Vec cache keyed by table_id
+# - At startup, load_from_disk scans the entire catalog B+Tree to populate caches
+
+use std/bytes.{ByteBuffer};
+use std/hashmap.{HashMap};
+use storage/error.{VaisError, err_internal};
+use storage/constants.{FILE_ID_DATA};
+use storage/buffer/pool.{BufferPool};
+use storage/btree/tree.{BTree};
+use storage/btree/insert.{btree_insert};
+use storage/btree/search.{search_cursor, search_lower_bound, search_first, range_scan_bounded};
+use storage/btree/key.{KeyRange};
+use storage/btree/entry.{compare_keys, KeyCmp};
+use storage/bytes.{encode_tid, decode_tid};
+use storage/page/heap.{HeapPage};
+use storage/page/tuple.{Tuple};
+use storage/page/mvcc.{MvccTupleMeta};
+use storage/wal/group_commit.{GroupCommitManager};
+use sql/catalog/schema.{
+    TableInfo, ColumnInfo, IndexInfo,
+    table_key, columns_key_prefix, columns_key_end,
+    index_key, index_key_prefix_for_table, index_key_end_for_table,
+    FIRST_USER_TABLE_ID, CATALOG_TAG_TABLE, CATALOG_TAG_COLUMN, CATALOG_TAG_INDEX,
+};
+
+# ============================================================================
+# Error Code Constants (EE=01 SQL Engine, CC=10 Catalog)
+# ============================================================================
+
+L ERR_CODE_TABLE_NOT_FOUND: Str = "VAIS-0110001";
+L ERR_CODE_COLUMN_NOT_FOUND: Str = "VAIS-0110002";
+L ERR_CODE_INDEX_NOT_FOUND: Str = "VAIS-0110003";
+L ERR_CODE_TABLE_EXISTS: Str = "VAIS-0110004";
+L ERR_CODE_INDEX_EXISTS: Str = "VAIS-0110005";
+
+# ============================================================================
+# Error Constructors
+# ============================================================================
+
+F err_table_not_found(name: Str) -> VaisError {
+    VaisError.new(
+        ERR_CODE_TABLE_NOT_FOUND,
+        "Table '{name}' does not exist"
+    )
+}
+
+F err_column_not_found(name: Str, table: Str) -> VaisError {
+    VaisError.new(
+        ERR_CODE_COLUMN_NOT_FOUND,
+        "Column '{name}' does not exist in table '{table}'"
+    )
+}
+
+F err_index_not_found(name: Str) -> VaisError {
+    VaisError.new(
+        ERR_CODE_INDEX_NOT_FOUND,
+        "Index '{name}' does not exist"
+    )
+}
+
+F err_table_exists(name: Str) -> VaisError {
+    VaisError.new(
+        ERR_CODE_TABLE_EXISTS,
+        "Table '{name}' already exists"
+    )
+}
+
+F err_index_exists(name: Str) -> VaisError {
+    VaisError.new(
+        ERR_CODE_INDEX_EXISTS,
+        "Index '{name}' already exists"
+    )
+}
+
+# ============================================================================
+# CatalogManager — Primary interface for schema management
+# ============================================================================
+
+S CatalogManager {
+    catalog_tree: BTree,                      # B+Tree for catalog entries
+    tables: HashMap<Str, TableInfo>,          # In-memory cache: name -> table
+    indexes: HashMap<Str, IndexInfo>,         # In-memory cache: name -> index
+    columns: HashMap<u32, Vec<ColumnInfo>>,   # In-memory cache: table_id -> columns
+    next_table_id: u32,
+    next_index_id: u32,
+}
+
+I CatalogManager {
+    # Create a new CatalogManager wrapping the given catalog B+Tree
+    # The caches are empty; call load_from_disk() to populate them
+    F new(catalog_tree: BTree) -> CatalogManager {
+        CatalogManager {
+            catalog_tree,
+            tables: HashMap.new(),
+            indexes: HashMap.new(),
+            columns: HashMap.new(),
+            next_table_id: FIRST_USER_TABLE_ID,
+            next_index_id: 1,
+        }
+    }
+
+    # ========================================================================
+    # Startup: Load catalog from disk
+    # ========================================================================
+
+    # Load all catalog entries from the B+Tree into in-memory caches
+    # Called once at database startup. Scans the entire catalog tree.
+    F load_from_disk(~self, pool: &~BufferPool) -> Result<(), VaisError> {
+        # Scan the entire B+Tree from first to last entry
+        ~range = KeyRange.all();
+        ~entries = range_scan_bounded(&self.catalog_tree, &range, pool)?;
+
+        ~max_table_id: u32 = FIRST_USER_TABLE_ID;
+        ~max_index_id: u32 = 0;
+
+        for (key, tid) in &entries {
+            # Decode TID to locate the tuple in the heap
+            ~(page_id, slot_id) = decode_tid(*tid);
+
+            # Read the heap page containing this catalog entry
+            ~frame_id = pool.fetch_page(FILE_ID_DATA, page_id)?;
+            ~page_data = pool.get_page(frame_id);
+            ~heap = HeapPage.from_page_data(page_data, pool.page_size)?;
+            ~tuple = heap.read_tuple(slot_id)?;
+            pool.unpin_page(frame_id, false);
+
+            # Determine entry type from the first byte of user data (catalog tag)
+            ~user_data = tuple.get_data();
+            if user_data.len() == 0 {
+                continue;
+            }
+
+            ~tag = user_data[0];
+            ~buf = ByteBuffer.from_slice(user_data.as_slice());
+
+            M tag {
+                CATALOG_TAG_TABLE => {
+                    ~info = TableInfo.deserialize(&buf)?;
+                    # Track highest table_id for next_table_id allocation
+                    if info.table_id >= max_table_id {
+                        max_table_id = info.table_id + 1;
+                    }
+                    self.tables.insert(info.name.clone(), info);
+                },
+                CATALOG_TAG_COLUMN => {
+                    ~info = ColumnInfo.deserialize(&buf)?;
+                    ~table_id = info.table_id;
+                    # Add to columns cache, creating the Vec if needed
+                    if !self.columns.contains_key(&table_id) {
+                        self.columns.insert(table_id, Vec.new());
+                    }
+                    ~col_vec = self.columns.get_mut(&table_id).unwrap();
+                    col_vec.push(info);
+                },
+                CATALOG_TAG_INDEX => {
+                    ~info = IndexInfo.deserialize(&buf)?;
+                    # Track highest index_id for next_index_id allocation
+                    if info.index_id >= max_index_id {
+                        max_index_id = info.index_id + 1;
+                    }
+                    self.indexes.insert(info.name.clone(), info);
+                },
+                _ => {
+                    # Unknown catalog entry type, skip
+                },
+            }
+        }
+
+        self.next_table_id = max_table_id;
+        self.next_index_id = max_index_id + 1;
+
+        # Sort column lists by column_index for consistent ordering
+        for (_, col_vec) in self.columns.iter_mut() {
+            col_vec.sort_by(|a, b| a.column_index.cmp(&b.column_index));
+        }
+
+        Ok(())
+    }
+
+    # ========================================================================
+    # Table Operations
+    # ========================================================================
+
+    # Create a new table with the given name and columns
+    # Returns the assigned table_id on success
+    # Errors: VAIS-0110004 if table already exists
+    F create_table(
+        ~self,
+        name: Str,
+        columns: Vec<ColumnInfo>,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<u32, VaisError> {
+        # Check that the table does not already exist
+        if self.tables.contains_key(&name) {
+            return Err(err_table_exists(name));
+        }
+
+        # Allocate a new table_id
+        ~table_id = self.get_next_table_id();
+
+        # Allocate the first heap page for this table
+        ~first_page_id = pool.allocate_page(FILE_ID_DATA)?;
+
+        # Initialize the heap page
+        ~heap = HeapPage.new(first_page_id, pool.page_size);
+        ~heap_frame = pool.fetch_page(FILE_ID_DATA, first_page_id)?;
+        ~flushed = heap.flush();
+        pool.write_page(heap_frame, flushed)?;
+        pool.unpin_page(heap_frame, true);
+
+        # Create TableInfo
+        ~table_info = TableInfo.new(table_id, name.clone(), columns.len() as u16, first_page_id);
+
+        # Serialize and insert TableInfo into catalog B+Tree
+        ~table_buf = ByteBuffer.with_capacity(256);
+        table_info.serialize(&table_buf);
+        ~table_bytes = table_buf.to_vec();
+
+        ~table_catalog_key = table_info.to_catalog_key();
+        ~table_tid = self.insert_catalog_entry(&table_catalog_key, &table_bytes, pool, gcm, txn_id)?;
+
+        # Insert each column into the catalog B+Tree
+        ~pk_columns = Vec.new();
+        ~col_infos = Vec.with_capacity(columns.len());
+
+        for i in 0..columns.len() {
+            ~col = &columns[i];
+
+            # Create ColumnInfo with the assigned table_id
+            ~col_info = ColumnInfo {
+                table_id,
+                column_index: col.column_index,
+                name: col.name.clone(),
+                data_type: col.data_type,
+                nullable: col.nullable,
+                default_value: M &col.default_value {
+                    Some(ref dv) => Some(dv.clone()),
+                    None => None,
+                },
+                is_primary_key: col.is_primary_key,
+            };
+
+            # Track primary key columns for auto-index creation
+            if col_info.is_primary_key {
+                pk_columns.push(col_info.name.clone());
+            }
+
+            # Serialize and insert column
+            ~col_buf = ByteBuffer.with_capacity(128);
+            col_info.serialize(&col_buf);
+            ~col_bytes = col_buf.to_vec();
+            ~col_catalog_key = col_info.to_catalog_key();
+            self.insert_catalog_entry(&col_catalog_key, &col_bytes, pool, gcm, txn_id)?;
+
+            col_infos.push(col_info);
+        }
+
+        # Update in-memory caches
+        self.tables.insert(name.clone(), table_info);
+        self.columns.insert(table_id, col_infos);
+
+        # Auto-create primary key index if any column is marked as primary key
+        if pk_columns.len() > 0 {
+            ~pk_index_name = "pk_{name}";
+            ~pk_root_page = pool.allocate_page(FILE_ID_DATA)?;
+
+            ~pk_index = IndexInfo.new_primary(
+                self.get_next_index_id(),
+                pk_index_name.clone(),
+                table_id,
+                pk_columns,
+                pk_root_page,
+            );
+
+            # Serialize and insert PK index
+            ~idx_buf = ByteBuffer.with_capacity(128);
+            pk_index.serialize(&idx_buf);
+            ~idx_bytes = idx_buf.to_vec();
+
+            # Insert with the primary index key "I:" + name
+            ~idx_catalog_key = pk_index.to_catalog_key();
+            self.insert_catalog_entry(&idx_catalog_key, &idx_bytes, pool, gcm, txn_id)?;
+
+            # Also insert the table-to-index reverse lookup key "IT:" + table_id + ":" + name
+            ~idx_table_key = pk_index.to_table_index_key();
+            self.insert_catalog_entry(&idx_table_key, &idx_bytes, pool, gcm, txn_id)?;
+
+            # Update index cache
+            self.indexes.insert(pk_index_name, pk_index);
+        }
+
+        Ok(table_id)
+    }
+
+    # Drop a table and all its associated columns and indexes
+    # Errors: VAIS-0110001 if table does not exist
+    F drop_table(
+        ~self,
+        name: Str,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        # Look up the table
+        ~table_info = M self.tables.get(&name) {
+            Some(info) => info.clone(),
+            None => { return Err(err_table_not_found(name)); },
+        };
+
+        ~table_id = table_info.table_id;
+
+        # Remove table entry from catalog B+Tree
+        ~table_catalog_key = table_key(&name);
+        self.delete_catalog_entry(&table_catalog_key, pool, gcm, txn_id)?;
+
+        # Remove all column entries for this table
+        ~col_start = columns_key_prefix(table_id);
+        ~col_end = columns_key_end(table_id);
+        ~col_range = KeyRange.half_open(col_start, col_end);
+        ~col_entries = range_scan_bounded(&self.catalog_tree, &col_range, pool)?;
+        for (col_key, _) in &col_entries {
+            self.delete_catalog_entry(col_key, pool, gcm, txn_id)?;
+        }
+
+        # Remove all index entries for this table
+        # First, find indexes via cache
+        ~index_names_to_drop = Vec.new();
+        for (idx_name, idx_info) in self.indexes.iter() {
+            if idx_info.table_id == table_id {
+                index_names_to_drop.push(idx_name.clone());
+            }
+        }
+
+        for idx_name in &index_names_to_drop {
+            # Remove the "I:" key
+            ~idx_key = index_key(idx_name);
+            self.delete_catalog_entry(&idx_key, pool, gcm, txn_id)?;
+
+            # Remove the "IT:" reverse lookup key
+            M self.indexes.get(idx_name) {
+                Some(idx_info) => {
+                    ~it_key = idx_info.to_table_index_key();
+                    self.delete_catalog_entry(&it_key, pool, gcm, txn_id)?;
+                },
+                None => {},
+            }
+
+            self.indexes.remove(idx_name);
+        }
+
+        # Update in-memory caches
+        self.tables.remove(&name);
+        self.columns.remove(&table_id);
+
+        Ok(())
+    }
+
+    # Look up a table by name from the in-memory cache
+    F get_table(self, name: &Str) -> Option<&TableInfo> {
+        self.tables.get(name)
+    }
+
+    # Get all columns for a table, ordered by column_index
+    F get_columns(self, table_id: u32) -> Vec<&ColumnInfo> {
+        ~result = Vec.new();
+        M self.columns.get(&table_id) {
+            Some(col_vec) => {
+                for col in col_vec {
+                    result.push(col);
+                }
+            },
+            None => {},
+        }
+        result
+    }
+
+    # Get a single column by table_id and column name
+    F get_column(self, table_id: u32, name: &Str) -> Option<&ColumnInfo> {
+        M self.columns.get(&table_id) {
+            Some(col_vec) => {
+                for col in col_vec {
+                    if &col.name == name {
+                        return Some(col);
+                    }
+                }
+                None
+            },
+            None => None,
+        }
+    }
+
+    # Get a table and all its columns together
+    # Errors: VAIS-0110001 if table does not exist
+    F get_table_schema(self, name: &Str) -> Result<(TableInfo, Vec<ColumnInfo>), VaisError> {
+        ~table = M self.tables.get(name) {
+            Some(info) => info.clone(),
+            None => { return Err(err_table_not_found(name.clone())); },
+        };
+
+        ~cols = Vec.new();
+        M self.columns.get(&table.table_id) {
+            Some(col_vec) => {
+                for col in col_vec {
+                    cols.push(col.clone());
+                }
+            },
+            None => {},
+        }
+
+        Ok((table, cols))
+    }
+
+    # Check if a table exists
+    F table_exists(self, name: &Str) -> bool {
+        self.tables.contains_key(name)
+    }
+
+    # List all tables
+    F all_tables(self) -> Vec<&TableInfo> {
+        ~result = Vec.new();
+        for (_, info) in self.tables.iter() {
+            result.push(info);
+        }
+        result
+    }
+
+    # ========================================================================
+    # Index Operations
+    # ========================================================================
+
+    # Create a new index
+    # Errors: VAIS-0110005 if index already exists
+    F create_index(
+        ~self,
+        info: IndexInfo,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        # Check that the index does not already exist
+        if self.indexes.contains_key(&info.name) {
+            return Err(err_index_exists(info.name.clone()));
+        }
+
+        # Serialize and insert into catalog B+Tree
+        ~idx_buf = ByteBuffer.with_capacity(128);
+        info.serialize(&idx_buf);
+        ~idx_bytes = idx_buf.to_vec();
+
+        # Insert with the primary key "I:" + name
+        ~idx_catalog_key = info.to_catalog_key();
+        self.insert_catalog_entry(&idx_catalog_key, &idx_bytes, pool, gcm, txn_id)?;
+
+        # Insert the table-to-index reverse lookup key "IT:" + table_id + ":" + name
+        ~idx_table_key = info.to_table_index_key();
+        self.insert_catalog_entry(&idx_table_key, &idx_bytes, pool, gcm, txn_id)?;
+
+        # Update in-memory cache
+        self.indexes.insert(info.name.clone(), info);
+
+        Ok(())
+    }
+
+    # Drop an index by name
+    # Errors: VAIS-0110003 if index does not exist
+    F drop_index(
+        ~self,
+        name: Str,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        # Look up the index
+        ~idx_info = M self.indexes.get(&name) {
+            Some(info) => info.clone(),
+            None => { return Err(err_index_not_found(name)); },
+        };
+
+        # Remove from catalog B+Tree
+        ~idx_key = index_key(&name);
+        self.delete_catalog_entry(&idx_key, pool, gcm, txn_id)?;
+
+        # Remove the table-to-index reverse lookup key
+        ~it_key = idx_info.to_table_index_key();
+        self.delete_catalog_entry(&it_key, pool, gcm, txn_id)?;
+
+        # Update in-memory cache
+        self.indexes.remove(&name);
+
+        Ok(())
+    }
+
+    # Look up an index by name from the in-memory cache
+    F get_index(self, name: &Str) -> Option<&IndexInfo> {
+        self.indexes.get(name)
+    }
+
+    # Get all indexes for a given table
+    F get_indexes_for_table(self, table_id: u32) -> Vec<&IndexInfo> {
+        ~result = Vec.new();
+        for (_, info) in self.indexes.iter() {
+            if info.table_id == table_id {
+                result.push(info);
+            }
+        }
+        result
+    }
+
+    # Check if an index exists
+    F index_exists(self, name: &Str) -> bool {
+        self.indexes.contains_key(name)
+    }
+
+    # ========================================================================
+    # ID Allocation
+    # ========================================================================
+
+    # Allocate and return the next table_id, then increment the counter
+    F get_next_table_id(~self) -> u32 {
+        ~id = self.next_table_id;
+        self.next_table_id += 1;
+        id
+    }
+
+    # Allocate and return the next index_id, then increment the counter
+    F get_next_index_id(~self) -> u32 {
+        ~id = self.next_index_id;
+        self.next_index_id += 1;
+        id
+    }
+
+    # ========================================================================
+    # Internal: Catalog B+Tree Insert/Delete Helpers
+    # ========================================================================
+
+    # Insert a catalog entry: serialize to a heap tuple, insert into a catalog page,
+    # then insert the (key -> TID) mapping into the catalog B+Tree
+    F insert_catalog_entry(
+        ~self,
+        catalog_key: &[u8],
+        serialized_data: &[u8],
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<u32, VaisError> {
+        # Create MVCC metadata for this catalog tuple
+        ~mvcc = MvccTupleMeta.new_insert(txn_id, 0);
+
+        # Create the tuple with the serialized catalog data
+        ~tuple = Tuple.new(mvcc, serialized_data.to_vec());
+
+        # Find or allocate a heap page with enough space for this tuple
+        ~tuple_size = tuple.on_page_size();
+        ~(page_id, slot_id) = self.insert_tuple_into_catalog_page(&tuple, pool, gcm, txn_id)?;
+
+        # Encode the TID from (page_id, slot_id)
+        ~tid = encode_tid(page_id, slot_id);
+
+        # Insert the key -> TID mapping into the catalog B+Tree
+        btree_insert(&self.catalog_tree, catalog_key, tid, txn_id, gcm, pool)?;
+
+        Ok(tid)
+    }
+
+    # Insert a tuple into a catalog heap page
+    # Tries to insert into the first available catalog page, allocates a new one if needed
+    # Returns (page_id, slot_id) of the inserted tuple
+    F insert_tuple_into_catalog_page(
+        ~self,
+        tuple: &Tuple,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(u32, u16), VaisError> {
+        # For simplicity, allocate a dedicated page for each catalog entry group
+        # In production, we would track a catalog_data_page list and try each
+        ~page_id = pool.allocate_page(FILE_ID_DATA)?;
+        ~frame_id = pool.fetch_page(FILE_ID_DATA, page_id)?;
+
+        # Initialize a fresh heap page
+        ~heap = HeapPage.new(page_id, pool.page_size);
+        ~slot_id = heap.insert_tuple(tuple)?;
+
+        # Flush the page
+        ~flushed = heap.flush();
+        pool.write_page(frame_id, flushed)?;
+        pool.unpin_page(frame_id, true);
+
+        Ok((page_id, slot_id))
+    }
+
+    # Delete a catalog entry by its B+Tree key
+    # Marks the corresponding heap tuple as expired and removes from B+Tree
+    F delete_catalog_entry(
+        ~self,
+        catalog_key: &[u8],
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        # Look up the TID from the B+Tree
+        M self.catalog_tree.search(catalog_key, pool)? {
+            Some(tid) => {
+                # Decode TID to locate the heap tuple
+                ~(page_id, slot_id) = decode_tid(tid);
+
+                # Mark the tuple as expired (MVCC delete)
+                ~frame_id = pool.fetch_page(FILE_ID_DATA, page_id)?;
+                ~page_data = pool.get_page(frame_id);
+                ~heap = HeapPage.from_page_data(page_data, pool.page_size)?;
+                heap.delete_tuple(slot_id, txn_id, 0)?;
+                ~flushed = heap.flush();
+                pool.write_page(frame_id, flushed)?;
+                pool.unpin_page(frame_id, true);
+
+                # Remove from B+Tree
+                # Note: btree_delete is available in storage/btree/delete module
+                # For catalog operations, we use the delete module
+                use storage/btree/delete.{btree_delete};
+                btree_delete(&self.catalog_tree, catalog_key, txn_id, gcm, pool)?;
+
+                Ok(())
+            },
+            None => {
+                # Key not found in B+Tree, nothing to delete
+                Ok(())
+            },
+        }
+    }
+}

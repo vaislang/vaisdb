@@ -41,7 +41,7 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 |-------|------|--------|----------|
 | 0 | Architecture & Design Decisions | ✅ Complete | 56/56 (100%) |
 | 1 | Storage Engine | ✅ Complete | 38/38 (100%) |
-| 2 | SQL Engine | ⏳ Planned | 0/42 (0%) |
+| 2 | SQL Engine | 🔄 In Progress | 6/17 tasks (35%) |
 | 3 | Vector Engine | ⏳ Planned | 0/24 (0%) |
 | 4 | Graph Engine | ⏳ Planned | 0/22 (0%) |
 | 5 | Full-Text Engine | ⏳ Planned | 0/16 (0%) |
@@ -352,6 +352,33 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 > **Status**: ⏳ Planned
 > **Dependency**: Phase 1 (Storage Engine)
 > **Goal**: Core SQL with MariaDB-level commonly used features + NULL 3-valued logic from day 1
+
+### Phase 2 Implementation (2026-02-09)
+모드: 자동진행
+- [x] 1. 타입 시스템 + Row 인코딩 (Opus 직접) ✅ 2026-02-09
+  변경: src/sql/types.vais (781L: SqlType, SqlValue, 산술/논리/비교/캐스팅), src/sql/row.vais (267L: Row encode/decode + null bitmap)
+- [x] 2. SQL Tokenizer (Sonnet 위임) [∥1] ✅ 2026-02-09
+  변경: src/sql/parser/token.vais (594L: 70+ 키워드, 리터럴, 연산자, $N 파라미터)
+- [x] 3. SQL Parser DDL+DML+Expressions (Opus 직접) [blockedBy: 1,2] ✅ 2026-02-09
+  변경: src/sql/parser/ast.vais (249L: Statement 16변형, Expr 18변형), src/sql/parser/parser.vais (1822L: recursive descent, 31+ 메서드)
+- [x] 4. NULL 시맨틱 + 타입 캐스팅 (Sonnet 위임) [blockedBy: 1] ✅ 2026-02-09
+  변경: src/sql/types.vais (+398L→1179L: BETWEEN/IN/LIKE, agg NULL처리, GROUP BY hash, ORDER BY NULLS FIRST/LAST, coerce_types)
+- [x] 5. 카탈로그 매니저 시스템 테이블 (Opus 직접) [blockedBy: 1,3] ✅ 2026-02-09
+  변경: src/sql/catalog/schema.vais (487L: TableInfo/ColumnInfo/IndexInfo), src/sql/catalog/manager.vais (641L: CatalogManager CRUD + cache)
+- [ ] 6. 제약조건 PK/NOT NULL/UNIQUE/DEFAULT/CHECK (Sonnet 위임) [blockedBy: 5]
+- [ ] 7. Table Scan + Index Scan Executor (Opus 직접) [blockedBy: 5]
+- [ ] 8. INSERT/UPDATE/DELETE Executor (Opus 직접) [blockedBy: 6,7]
+- [ ] 9. Join Executor NLJ+Hash (Opus 직접) [blockedBy: 7]
+- [ ] 10. Sort + Aggregation + DISTINCT (Sonnet 위임) [blockedBy: 7, ∥9]
+- [ ] 11. Window Functions (Sonnet 위임) [blockedBy: 10]
+- [ ] 12. Subquery + CTE + Set Operations (Opus 직접) [blockedBy: 9,10]
+- [ ] 13. Query Planner + Cost Model (Opus 직접) [blockedBy: 7,8,9]
+- [ ] 14. EXPLAIN / EXPLAIN ANALYZE (Sonnet 위임) [blockedBy: 13]
+- [x] 15. Prepared Statements (Sonnet 위임) [blockedBy: 3] ✅ 2026-02-09
+  변경: src/sql/parser/prepared.vais (928L: PreparedStatement, PreparedStatementCache, AST 파라미터 치환)
+- [ ] 16. ALTER TABLE + Schema Migration (Opus 직접) [blockedBy: 5,8]
+- [ ] 17. ROADMAP.md 동기화 (Sonnet 위임) [blockedBy: all]
+진행률: 6/17 (35%)
 
 ### Stage 1 - SQL Parser
 

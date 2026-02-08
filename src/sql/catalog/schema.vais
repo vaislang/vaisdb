@@ -1,0 +1,487 @@
+# Schema Metadata Structures
+# Represents table, column, and index metadata in the catalog
+# Each structure supports serialization/deserialization for on-disk catalog B+Tree storage
+# Key encoding uses prefixed strings for type-safe namespace separation:
+#   "T:" + name        for tables
+#   "C:" + table_id + ":" + column_index  for columns
+#   "I:" + name        for indexes
+#   "IT:" + table_id   for table-to-index reverse lookup
+
+use std/bytes.{ByteBuffer};
+use storage/error.{VaisError, err_internal};
+use storage/bytes.{write_string, read_string};
+use sql/types.{SqlType};
+
+# ============================================================================
+# System Table ID Constants
+# ============================================================================
+
+# System tables have fixed IDs below FIRST_USER_TABLE_ID
+L SYSTEM_TABLE_ID_TABLES: u32 = 1;
+L SYSTEM_TABLE_ID_COLUMNS: u32 = 2;
+L SYSTEM_TABLE_ID_INDEXES: u32 = 3;
+L SYSTEM_TABLE_ID_MODELS: u32 = 4;
+L SYSTEM_TABLE_ID_CONFIG: u32 = 5;
+L FIRST_USER_TABLE_ID: u32 = 100;
+
+# ============================================================================
+# Catalog Entry Type Tags (for serialization disambiguation)
+# ============================================================================
+
+L CATALOG_TAG_TABLE: u8 = 0x01;
+L CATALOG_TAG_COLUMN: u8 = 0x02;
+L CATALOG_TAG_INDEX: u8 = 0x03;
+
+# ============================================================================
+# TableInfo — Metadata for a single table
+# ============================================================================
+
+S TableInfo {
+    table_id: u32,
+    name: Str,
+    column_count: u16,
+    is_system: bool,
+    heap_file_id: u8,          # File where table data lives (0 = data.vdb)
+    first_page_id: u32,        # First heap page for this table
+    row_count_estimate: u64,   # Approximate row count for optimizer
+}
+
+I TableInfo {
+    # Create a new user table info
+    F new(table_id: u32, name: Str, column_count: u16, first_page_id: u32) -> TableInfo {
+        TableInfo {
+            table_id,
+            name,
+            column_count,
+            is_system: table_id < FIRST_USER_TABLE_ID,
+            heap_file_id: 0,
+            first_page_id,
+            row_count_estimate: 0,
+        }
+    }
+
+    # Create a system table info
+    F new_system(table_id: u32, name: Str, column_count: u16, first_page_id: u32) -> TableInfo {
+        TableInfo {
+            table_id,
+            name,
+            column_count,
+            is_system: true,
+            heap_file_id: 0,
+            first_page_id,
+            row_count_estimate: 0,
+        }
+    }
+
+    # Serialize TableInfo to ByteBuffer
+    # Format: tag(1B) + table_id(4B) + name(len-prefixed) + column_count(2B)
+    #         + is_system(1B) + heap_file_id(1B) + first_page_id(4B) + row_count_estimate(8B)
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u8(CATALOG_TAG_TABLE);
+        buf.put_u32_le(self.table_id);
+        write_string(buf, &self.name);
+        buf.put_u16_le(self.column_count);
+        buf.put_u8(if self.is_system { 1 } else { 0 });
+        buf.put_u8(self.heap_file_id);
+        buf.put_u32_le(self.first_page_id);
+        buf.put_u64_le(self.row_count_estimate);
+    }
+
+    # Deserialize TableInfo from ByteBuffer
+    # Expects the tag byte to have already been read or reads it
+    F deserialize(buf: &ByteBuffer) -> Result<TableInfo, VaisError> {
+        ~tag = buf.get_u8()?;
+        if tag != CATALOG_TAG_TABLE {
+            return Err(err_internal("Expected TABLE catalog tag 0x01, got 0x{tag:02x}"));
+        }
+
+        ~table_id = buf.get_u32_le()?;
+        ~name = read_string(buf)?;
+        ~column_count = buf.get_u16_le()?;
+        ~is_system_byte = buf.get_u8()?;
+        ~heap_file_id = buf.get_u8()?;
+        ~first_page_id = buf.get_u32_le()?;
+        ~row_count_estimate = buf.get_u64_le()?;
+
+        Ok(TableInfo {
+            table_id,
+            name,
+            column_count,
+            is_system: is_system_byte != 0,
+            heap_file_id,
+            first_page_id,
+            row_count_estimate,
+        })
+    }
+
+    # Generate B+Tree key for catalog lookup
+    # Key format: "T:" + name
+    F to_catalog_key(self) -> Vec<u8> {
+        table_key(&self.name)
+    }
+
+    # Clone this TableInfo
+    F clone(self) -> TableInfo {
+        TableInfo {
+            table_id: self.table_id,
+            name: self.name.clone(),
+            column_count: self.column_count,
+            is_system: self.is_system,
+            heap_file_id: self.heap_file_id,
+            first_page_id: self.first_page_id,
+            row_count_estimate: self.row_count_estimate,
+        }
+    }
+}
+
+# ============================================================================
+# ColumnInfo — Metadata for a single column within a table
+# ============================================================================
+
+S ColumnInfo {
+    table_id: u32,
+    column_index: u16,         # 0-based position in row
+    name: Str,
+    data_type: SqlType,
+    nullable: bool,
+    default_value: Option<Str>,  # Default expression as string
+    is_primary_key: bool,
+}
+
+I ColumnInfo {
+    # Create a new column info
+    F new(table_id: u32, column_index: u16, name: Str, data_type: SqlType) -> ColumnInfo {
+        ColumnInfo {
+            table_id,
+            column_index,
+            name,
+            data_type,
+            nullable: true,
+            default_value: None,
+            is_primary_key: false,
+        }
+    }
+
+    # Create a column marked as primary key
+    F new_primary_key(table_id: u32, column_index: u16, name: Str, data_type: SqlType) -> ColumnInfo {
+        ColumnInfo {
+            table_id,
+            column_index,
+            name,
+            data_type,
+            nullable: false,
+            default_value: None,
+            is_primary_key: true,
+        }
+    }
+
+    # Serialize ColumnInfo to ByteBuffer
+    # Format: tag(1B) + table_id(4B) + column_index(2B) + name(len-prefixed)
+    #         + data_type(via SqlType.serialize) + nullable(1B)
+    #         + has_default(1B) + [default_value(len-prefixed)] + is_primary_key(1B)
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u8(CATALOG_TAG_COLUMN);
+        buf.put_u32_le(self.table_id);
+        buf.put_u16_le(self.column_index);
+        write_string(buf, &self.name);
+        self.data_type.serialize(buf);
+        buf.put_u8(if self.nullable { 1 } else { 0 });
+        M &self.default_value {
+            Some(ref dv) => {
+                buf.put_u8(1);
+                write_string(buf, dv);
+            },
+            None => {
+                buf.put_u8(0);
+            },
+        }
+        buf.put_u8(if self.is_primary_key { 1 } else { 0 });
+    }
+
+    # Deserialize ColumnInfo from ByteBuffer
+    F deserialize(buf: &ByteBuffer) -> Result<ColumnInfo, VaisError> {
+        ~tag = buf.get_u8()?;
+        if tag != CATALOG_TAG_COLUMN {
+            return Err(err_internal("Expected COLUMN catalog tag 0x02, got 0x{tag:02x}"));
+        }
+
+        ~table_id = buf.get_u32_le()?;
+        ~column_index = buf.get_u16_le()?;
+        ~name = read_string(buf)?;
+        ~data_type = SqlType.deserialize(buf)?;
+        ~nullable_byte = buf.get_u8()?;
+        ~has_default = buf.get_u8()?;
+        ~default_value = if has_default != 0 {
+            Some(read_string(buf)?)
+        } else {
+            None
+        };
+        ~is_pk_byte = buf.get_u8()?;
+
+        Ok(ColumnInfo {
+            table_id,
+            column_index,
+            name,
+            data_type,
+            nullable: nullable_byte != 0,
+            default_value,
+            is_primary_key: is_pk_byte != 0,
+        })
+    }
+
+    # Generate B+Tree key for catalog lookup
+    # Key format: "C:" + table_id(4 bytes LE) + ":" + column_index(2 bytes LE)
+    F to_catalog_key(self) -> Vec<u8> {
+        ~key = Vec.with_capacity(9);
+        # Prefix "C:"
+        key.push(0x43);  # 'C'
+        key.push(0x3A);  # ':'
+        # table_id as 4 bytes big-endian (for correct sort order)
+        key.push(((self.table_id >> 24) & 0xFF) as u8);
+        key.push(((self.table_id >> 16) & 0xFF) as u8);
+        key.push(((self.table_id >> 8) & 0xFF) as u8);
+        key.push((self.table_id & 0xFF) as u8);
+        # Separator
+        key.push(0x3A);  # ':'
+        # column_index as 2 bytes big-endian
+        key.push(((self.column_index >> 8) & 0xFF) as u8);
+        key.push((self.column_index & 0xFF) as u8);
+        key
+    }
+
+    # Clone this ColumnInfo
+    F clone(self) -> ColumnInfo {
+        ColumnInfo {
+            table_id: self.table_id,
+            column_index: self.column_index,
+            name: self.name.clone(),
+            data_type: self.data_type,
+            nullable: self.nullable,
+            default_value: M &self.default_value {
+                Some(ref dv) => Some(dv.clone()),
+                None => None,
+            },
+            is_primary_key: self.is_primary_key,
+        }
+    }
+}
+
+# ============================================================================
+# IndexInfo — Metadata for a single index
+# ============================================================================
+
+S IndexInfo {
+    index_id: u32,
+    name: Str,
+    table_id: u32,
+    columns: Vec<Str>,         # Column names in index order
+    is_unique: bool,
+    is_primary: bool,
+    root_page_id: u32,         # B+Tree root page for this index
+}
+
+I IndexInfo {
+    # Create a new index info
+    F new(index_id: u32, name: Str, table_id: u32, columns: Vec<Str>, root_page_id: u32) -> IndexInfo {
+        IndexInfo {
+            index_id,
+            name,
+            table_id,
+            columns,
+            is_unique: false,
+            is_primary: false,
+            root_page_id,
+        }
+    }
+
+    # Create a primary key index
+    F new_primary(index_id: u32, name: Str, table_id: u32, columns: Vec<Str>, root_page_id: u32) -> IndexInfo {
+        IndexInfo {
+            index_id,
+            name,
+            table_id,
+            columns,
+            is_unique: true,
+            is_primary: true,
+            root_page_id,
+        }
+    }
+
+    # Serialize IndexInfo to ByteBuffer
+    # Format: tag(1B) + index_id(4B) + name(len-prefixed) + table_id(4B)
+    #         + column_count(2B) + [column_name(len-prefixed)]...
+    #         + is_unique(1B) + is_primary(1B) + root_page_id(4B)
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u8(CATALOG_TAG_INDEX);
+        buf.put_u32_le(self.index_id);
+        write_string(buf, &self.name);
+        buf.put_u32_le(self.table_id);
+        buf.put_u16_le(self.columns.len() as u16);
+        for col in &self.columns {
+            write_string(buf, col);
+        }
+        buf.put_u8(if self.is_unique { 1 } else { 0 });
+        buf.put_u8(if self.is_primary { 1 } else { 0 });
+        buf.put_u32_le(self.root_page_id);
+    }
+
+    # Deserialize IndexInfo from ByteBuffer
+    F deserialize(buf: &ByteBuffer) -> Result<IndexInfo, VaisError> {
+        ~tag = buf.get_u8()?;
+        if tag != CATALOG_TAG_INDEX {
+            return Err(err_internal("Expected INDEX catalog tag 0x03, got 0x{tag:02x}"));
+        }
+
+        ~index_id = buf.get_u32_le()?;
+        ~name = read_string(buf)?;
+        ~table_id = buf.get_u32_le()?;
+        ~col_count = buf.get_u16_le()? as usize;
+        ~columns = Vec.with_capacity(col_count);
+        for _ in 0..col_count {
+            columns.push(read_string(buf)?);
+        }
+        ~is_unique_byte = buf.get_u8()?;
+        ~is_primary_byte = buf.get_u8()?;
+        ~root_page_id = buf.get_u32_le()?;
+
+        Ok(IndexInfo {
+            index_id,
+            name,
+            table_id,
+            columns,
+            is_unique: is_unique_byte != 0,
+            is_primary: is_primary_byte != 0,
+            root_page_id,
+        })
+    }
+
+    # Generate B+Tree key for catalog lookup
+    # Key format: "I:" + name
+    F to_catalog_key(self) -> Vec<u8> {
+        index_key(&self.name)
+    }
+
+    # Generate secondary B+Tree key for table-to-index reverse lookup
+    # Key format: "IT:" + table_id(4 bytes BE) + ":" + index_name
+    F to_table_index_key(self) -> Vec<u8> {
+        ~key = Vec.with_capacity(8 + self.name.len());
+        # Prefix "IT:"
+        key.push(0x49);  # 'I'
+        key.push(0x54);  # 'T'
+        key.push(0x3A);  # ':'
+        # table_id as 4 bytes big-endian (for correct sort order)
+        key.push(((self.table_id >> 24) & 0xFF) as u8);
+        key.push(((self.table_id >> 16) & 0xFF) as u8);
+        key.push(((self.table_id >> 8) & 0xFF) as u8);
+        key.push((self.table_id & 0xFF) as u8);
+        # Separator
+        key.push(0x3A);  # ':'
+        # Index name
+        for b in self.name.as_bytes() {
+            key.push(b);
+        }
+        key
+    }
+
+    # Clone this IndexInfo
+    F clone(self) -> IndexInfo {
+        IndexInfo {
+            index_id: self.index_id,
+            name: self.name.clone(),
+            table_id: self.table_id,
+            columns: self.columns.clone(),
+            is_unique: self.is_unique,
+            is_primary: self.is_primary,
+            root_page_id: self.root_page_id,
+        }
+    }
+}
+
+# ============================================================================
+# Key Construction Helpers — file-level functions for building catalog keys
+# ============================================================================
+
+# Build lookup key for a table by name
+# Key format: "T:" + name (ASCII bytes)
+F table_key(name: &Str) -> Vec<u8> {
+    ~key = Vec.with_capacity(2 + name.len());
+    key.push(0x54);  # 'T'
+    key.push(0x3A);  # ':'
+    for b in name.as_bytes() {
+        key.push(b);
+    }
+    key
+}
+
+# Build prefix key for all columns of a table
+# Key format: "C:" + table_id(4 bytes BE)
+# Used as the start key in a range scan to find all columns for a table
+F columns_key_prefix(table_id: u32) -> Vec<u8> {
+    ~key = Vec.with_capacity(6);
+    key.push(0x43);  # 'C'
+    key.push(0x3A);  # ':'
+    # table_id as 4 bytes big-endian
+    key.push(((table_id >> 24) & 0xFF) as u8);
+    key.push(((table_id >> 16) & 0xFF) as u8);
+    key.push(((table_id >> 8) & 0xFF) as u8);
+    key.push((table_id & 0xFF) as u8);
+    key
+}
+
+# Build end key for column range scan (exclusive upper bound)
+# Key format: "C:" + (table_id + 1)(4 bytes BE)
+# This ensures we scan all columns for table_id but no columns for table_id+1
+F columns_key_end(table_id: u32) -> Vec<u8> {
+    ~next_id = table_id + 1;
+    ~key = Vec.with_capacity(6);
+    key.push(0x43);  # 'C'
+    key.push(0x3A);  # ':'
+    key.push(((next_id >> 24) & 0xFF) as u8);
+    key.push(((next_id >> 16) & 0xFF) as u8);
+    key.push(((next_id >> 8) & 0xFF) as u8);
+    key.push((next_id & 0xFF) as u8);
+    key
+}
+
+# Build lookup key for an index by name
+# Key format: "I:" + name (ASCII bytes)
+F index_key(name: &Str) -> Vec<u8> {
+    ~key = Vec.with_capacity(2 + name.len());
+    key.push(0x49);  # 'I'
+    key.push(0x3A);  # ':'
+    for b in name.as_bytes() {
+        key.push(b);
+    }
+    key
+}
+
+# Build prefix key for all indexes belonging to a table
+# Key format: "IT:" + table_id(4 bytes BE)
+# Used as start key in range scan to find all indexes for a table
+F index_key_prefix_for_table(table_id: u32) -> Vec<u8> {
+    ~key = Vec.with_capacity(7);
+    key.push(0x49);  # 'I'
+    key.push(0x54);  # 'T'
+    key.push(0x3A);  # ':'
+    # table_id as 4 bytes big-endian
+    key.push(((table_id >> 24) & 0xFF) as u8);
+    key.push(((table_id >> 16) & 0xFF) as u8);
+    key.push(((table_id >> 8) & 0xFF) as u8);
+    key.push((table_id & 0xFF) as u8);
+    key
+}
+
+# Build end key for index-by-table range scan (exclusive upper bound)
+# Key format: "IT:" + (table_id + 1)(4 bytes BE)
+F index_key_end_for_table(table_id: u32) -> Vec<u8> {
+    ~next_id = table_id + 1;
+    ~key = Vec.with_capacity(7);
+    key.push(0x49);  # 'I'
+    key.push(0x54);  # 'T'
+    key.push(0x3A);  # ':'
+    key.push(((next_id >> 24) & 0xFF) as u8);
+    key.push(((next_id >> 16) & 0xFF) as u8);
+    key.push(((next_id >> 8) & 0xFF) as u8);
+    key.push((next_id & 0xFF) as u8);
+    key
+}

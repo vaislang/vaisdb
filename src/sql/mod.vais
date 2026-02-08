@@ -1,2 +1,12 @@
 # SQL Engine
 # Parser, executor, optimizer, transaction manager
+
+# Type system and row encoding
+pub mod types;
+pub mod row;
+
+# Parser (tokenizer, AST, parser)
+pub mod parser;
+
+# Catalog (schema metadata: tables, columns, indexes)
+pub mod catalog;

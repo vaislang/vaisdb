@@ -1,0 +1,1822 @@
+# SQL Parser - Recursive Descent
+# Converts a token stream into an AST
+# Expression precedence (low to high):
+#   OR < AND < NOT < comparison < addition < multiplication < unary < primary
+#
+# Handles: SELECT (with CTEs, set ops, joins, subqueries, window functions),
+#          INSERT, UPDATE, DELETE, CREATE TABLE, DROP TABLE, ALTER TABLE,
+#          CREATE INDEX, DROP INDEX, EXPLAIN, BEGIN/COMMIT/ROLLBACK,
+#          SET, PREPARE, EXECUTE, CAST, CASE WHEN, BETWEEN, IN, LIKE, EXISTS
+
+use storage/error.{VaisError};
+use sql/types.{SqlType, SqlValue};
+use sql/parser/token.{Token, TokenKind, Tokenizer};
+use sql/parser/ast.{
+    Statement, SelectQuery, SelectItem, Cte, SetOperation, SetOpKind,
+    TableRef, JoinClause, JoinType, JoinCondition,
+    Expr, BinOp, UnaryOp, WhenClause, OrderByItem,
+    CreateTableStmt, ColumnDef, CreateIndexStmt, AlterTableStmt, AlterAction,
+    InsertStmt, InsertSource, UpdateStmt, Assignment, DeleteStmt,
+    SetTarget,
+};
+
+# SQL Parser
+S Parser {
+    tokens: Vec<Token>,
+    pos: usize,
+}
+
+I Parser {
+    # Create a new parser from a token stream
+    F new(tokens: Vec<Token>) -> Parser {
+        Parser { tokens, pos: 0 }
+    }
+
+    # Parse a single SQL statement
+    F parse(~self) -> Result<Statement, VaisError> {
+        let stmt = self.parse_statement()?;
+        # Consume optional trailing semicolon
+        self.match_token(TokenKind.Semicolon);
+        Ok(stmt)
+    }
+
+    # Parse multiple SQL statements separated by semicolons
+    F parse_all(~self) -> Result<Vec<Statement>, VaisError> {
+        ~let stmts = Vec.new();
+
+        while !self.is_at_end() {
+            # Skip stray semicolons between statements
+            while self.match_token(TokenKind.Semicolon) {}
+
+            if self.is_at_end() {
+                break;
+            }
+
+            let stmt = self.parse_statement()?;
+            stmts.push(stmt);
+
+            # Consume optional semicolon after statement
+            self.match_token(TokenKind.Semicolon);
+        }
+
+        Ok(stmts)
+    }
+
+    # ========================================================================
+    # Statement dispatch
+    # ========================================================================
+
+    # Dispatch to specific statement parser based on the first token
+    F parse_statement(~self) -> Result<Statement, VaisError> {
+        M self.peek() {
+            TokenKind.Select => {
+                let query = self.parse_select()?;
+                Ok(Statement.Select { query })
+            },
+            TokenKind.With => {
+                # WITH ... SELECT (CTE)
+                let query = self.parse_select()?;
+                Ok(Statement.Select { query })
+            },
+            TokenKind.Insert => {
+                self.advance();
+                let insert = self.parse_insert()?;
+                Ok(Statement.Insert { insert })
+            },
+            TokenKind.Update => {
+                self.advance();
+                let update = self.parse_update()?;
+                Ok(Statement.Update { update })
+            },
+            TokenKind.Delete => {
+                self.advance();
+                let delete = self.parse_delete()?;
+                Ok(Statement.Delete { delete })
+            },
+            TokenKind.Create => {
+                self.advance();
+                self.parse_create()
+            },
+            TokenKind.Drop => {
+                self.advance();
+                self.parse_drop()
+            },
+            TokenKind.Alter => {
+                self.advance();
+                self.expect(TokenKind.Table)?;
+                let alter = self.parse_alter_table()?;
+                Ok(Statement.AlterTable { alter })
+            },
+            TokenKind.Explain => {
+                self.advance();
+                ~let analyze = false;
+                if self.match_token(TokenKind.Analyze) {
+                    analyze = true;
+                }
+                let stmt = self.parse_statement()?;
+                Ok(Statement.Explain { stmt: Box.new(stmt), analyze })
+            },
+            TokenKind.Begin => {
+                self.advance();
+                # Optional TRANSACTION keyword
+                self.match_token(TokenKind.Transaction);
+                # Optional isolation level (parsed as identifier)
+                ~let isolation = Option.None;
+                if self.check_identifier("ISOLATION") {
+                    self.advance();
+                    # Expect "LEVEL"
+                    if self.check_identifier("LEVEL") {
+                        self.advance();
+                    }
+                    # Read isolation level name (e.g., "SERIALIZABLE", "READ COMMITTED")
+                    ~let level_str = self.expect_identifier()?;
+                    # Handle two-word levels like "READ COMMITTED" or "REPEATABLE READ"
+                    if self.check_identifier("COMMITTED") || self.check_identifier("UNCOMMITTED") || self.check_identifier("READ") {
+                        let second = self.expect_identifier()?;
+                        level_str = "{level_str} {second}";
+                    }
+                    isolation = Option.Some(level_str);
+                }
+                Ok(Statement.BeginTxn { isolation })
+            },
+            TokenKind.Commit => {
+                self.advance();
+                self.match_token(TokenKind.Transaction);
+                Ok(Statement.CommitTxn)
+            },
+            TokenKind.Rollback => {
+                self.advance();
+                self.match_token(TokenKind.Transaction);
+                Ok(Statement.RollbackTxn)
+            },
+            TokenKind.Set => {
+                self.advance();
+                self.parse_set_statement()
+            },
+            _ => {
+                # Check for contextual keywords that are identifiers
+                if self.check_identifier("PREPARE") {
+                    self.advance();
+                    return self.parse_prepare();
+                }
+                if self.check_identifier("EXECUTE") || self.check_identifier("EXEC") {
+                    self.advance();
+                    return self.parse_execute();
+                }
+                Err(self.parse_error("expected statement (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, EXPLAIN, BEGIN, COMMIT, ROLLBACK, SET, PREPARE, or EXECUTE)"))
+            },
+        }
+    }
+
+    # ========================================================================
+    # SELECT
+    # ========================================================================
+
+    # Parse a full SELECT query including CTEs and set operations
+    F parse_select(~self) -> Result<SelectQuery, VaisError> {
+        # Parse optional WITH clause (CTEs)
+        ~let ctes = Vec.new();
+        if self.match_token(TokenKind.With) {
+            ctes = self.parse_cte()?;
+        }
+
+        self.expect(TokenKind.Select)?;
+
+        # Parse optional DISTINCT
+        ~let distinct = false;
+        if self.match_token(TokenKind.Distinct) {
+            distinct = true;
+        }
+
+        # Parse select list
+        let select_list = self.parse_select_list()?;
+
+        # Parse optional FROM clause
+        ~let from = Option.None;
+        if self.match_token(TokenKind.From) {
+            let refs = self.parse_from_clause()?;
+            from = Option.Some(refs);
+        }
+
+        # Parse optional WHERE clause
+        let where_clause = self.parse_where_clause()?;
+
+        # Parse optional GROUP BY clause
+        let group_by = self.parse_group_by()?;
+
+        # Parse optional HAVING clause
+        let having = self.parse_having()?;
+
+        # Parse optional ORDER BY clause
+        let order_by = self.parse_order_by()?;
+
+        # Parse optional LIMIT/OFFSET
+        let (limit, offset) = self.parse_limit_offset()?;
+
+        # Build the query
+        ~let query = SelectQuery {
+            ctes,
+            select_list,
+            from,
+            where_clause,
+            group_by,
+            having,
+            order_by,
+            limit,
+            offset,
+            distinct,
+            set_op: Option.None,
+        };
+
+        # Parse optional set operations (UNION, INTERSECT, EXCEPT)
+        query.set_op = self.parse_set_operation()?;
+
+        Ok(query)
+    }
+
+    # Parse WITH clause containing one or more CTEs
+    F parse_cte(~self) -> Result<Vec<Cte>, VaisError> {
+        ~let ctes = Vec.new();
+
+        loop {
+            ~let recursive = false;
+            if self.match_token(TokenKind.Recursive) {
+                recursive = true;
+            }
+
+            let name = self.expect_identifier()?;
+
+            # Optional column alias list
+            ~let columns = Vec.new();
+            if self.match_token(TokenKind.LParen) {
+                loop {
+                    let col = self.expect_identifier()?;
+                    columns.push(col);
+                    if !self.match_token(TokenKind.Comma) {
+                        break;
+                    }
+                }
+                self.expect(TokenKind.RParen)?;
+            }
+
+            self.expect(TokenKind.As)?;
+            self.expect(TokenKind.LParen)?;
+            let query = self.parse_select()?;
+            self.expect(TokenKind.RParen)?;
+
+            ctes.push(Cte { name, columns, query, recursive });
+
+            if !self.match_token(TokenKind.Comma) {
+                break;
+            }
+        }
+
+        Ok(ctes)
+    }
+
+    # Parse the select list (between SELECT and FROM)
+    F parse_select_list(~self) -> Result<Vec<SelectItem>, VaisError> {
+        ~let items = Vec.new();
+
+        loop {
+            let item = self.parse_select_item()?;
+            items.push(item);
+            if !self.match_token(TokenKind.Comma) {
+                break;
+            }
+        }
+
+        Ok(items)
+    }
+
+    # Parse a single select item
+    F parse_select_item(~self) -> Result<SelectItem, VaisError> {
+        # Check for * (all columns)
+        if self.match_token(TokenKind.Star) {
+            return Ok(SelectItem.AllColumns);
+        }
+
+        # Check for table.* (all columns from table)
+        # Peek: identifier DOT STAR
+        if self.is_identifier() {
+            let saved_pos = self.pos;
+            let table_name = self.expect_identifier()?;
+            if self.match_token(TokenKind.Dot) {
+                if self.match_token(TokenKind.Star) {
+                    return Ok(SelectItem.AllColumnsFrom { table: table_name });
+                }
+                # Not table.*, backtrack
+                self.pos = saved_pos;
+            } else {
+                # No dot, backtrack and parse as expression
+                self.pos = saved_pos;
+            }
+        }
+
+        # Parse expression with optional alias
+        let expr = self.parse_expr()?;
+        ~let alias = Option.None;
+        if self.match_token(TokenKind.As) {
+            let a = self.expect_identifier()?;
+            alias = Option.Some(a);
+        } else if self.is_identifier() {
+            # Alias without AS keyword
+            let a = self.expect_identifier()?;
+            alias = Option.Some(a);
+        }
+
+        Ok(SelectItem.Expr { expr, alias })
+    }
+
+    # Parse FROM clause (comma-separated table references with joins)
+    F parse_from_clause(~self) -> Result<Vec<TableRef>, VaisError> {
+        ~let refs = Vec.new();
+
+        loop {
+            let table_ref = self.parse_table_ref()?;
+            # Check for joins attached to this table reference
+            let joined = self.parse_joins(table_ref)?;
+            refs.push(joined);
+            if !self.match_token(TokenKind.Comma) {
+                break;
+            }
+        }
+
+        Ok(refs)
+    }
+
+    # Parse a single table reference (table name, subquery, or parenthesized ref)
+    F parse_table_ref(~self) -> Result<TableRef, VaisError> {
+        # Subquery: (SELECT ...)
+        if self.match_token(TokenKind.LParen) {
+            let query = self.parse_select()?;
+            self.expect(TokenKind.RParen)?;
+            # Subquery in FROM requires an alias
+            self.match_token(TokenKind.As);
+            let alias = self.expect_identifier()?;
+            return Ok(TableRef.Subquery { query: Box.new(query), alias });
+        }
+
+        # Table name with optional alias
+        let name = self.expect_identifier()?;
+        ~let alias = Option.None;
+        if self.match_token(TokenKind.As) {
+            let a = self.expect_identifier()?;
+            alias = Option.Some(a);
+        } else if self.is_identifier() && !self.is_join_keyword() {
+            # Implicit alias (without AS) -- but not if it looks like a JOIN keyword
+            let a = self.expect_identifier()?;
+            alias = Option.Some(a);
+        }
+
+        Ok(TableRef.Table { name, alias })
+    }
+
+    # Parse zero or more joins following a table reference
+    F parse_joins(~self, left: TableRef) -> Result<TableRef, VaisError> {
+        ~let current = left;
+
+        loop {
+            if self.is_join_keyword() {
+                current = self.parse_join(current)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(current)
+    }
+
+    # Parse a single JOIN clause
+    F parse_join(~self, left: TableRef) -> Result<TableRef, VaisError> {
+        # Determine join type
+        ~let join_type = JoinType.Inner;
+        ~let is_natural = false;
+
+        # NATURAL keyword
+        if self.check_identifier("NATURAL") {
+            is_natural = true;
+            self.advance();
+        }
+
+        M self.peek() {
+            TokenKind.Inner => {
+                self.advance();
+                join_type = JoinType.Inner;
+            },
+            TokenKind.Left => {
+                self.advance();
+                join_type = JoinType.Left;
+                # Optional OUTER keyword
+                if self.check_identifier("OUTER") {
+                    self.advance();
+                }
+            },
+            TokenKind.Right => {
+                self.advance();
+                join_type = JoinType.Right;
+                # Optional OUTER keyword
+                if self.check_identifier("OUTER") {
+                    self.advance();
+                }
+            },
+            TokenKind.Cross => {
+                self.advance();
+                join_type = JoinType.Cross;
+            },
+            TokenKind.Join => {
+                # Plain JOIN = INNER JOIN
+                join_type = JoinType.Inner;
+            },
+            _ => {
+                return Err(self.parse_error("expected JOIN keyword"));
+            },
+        }
+
+        self.expect(TokenKind.Join)?;
+
+        # Parse the right side table reference
+        let right = self.parse_table_ref()?;
+
+        # Parse join condition
+        ~let condition = JoinCondition.Natural;
+
+        if is_natural {
+            condition = JoinCondition.Natural;
+        } else {
+            M join_type {
+                JoinType.Cross => {
+                    # CROSS JOIN has no condition; use Natural as placeholder
+                    return Ok(TableRef.CrossJoin {
+                        left: Box.new(left),
+                        right: Box.new(right),
+                    });
+                },
+                _ => {
+                    if self.match_token(TokenKind.On) {
+                        let expr = self.parse_expr()?;
+                        condition = JoinCondition.On { expr };
+                    } else if self.match_token(TokenKind.Using) {
+                        self.expect(TokenKind.LParen)?;
+                        ~let columns = Vec.new();
+                        loop {
+                            let col = self.expect_identifier()?;
+                            columns.push(col);
+                            if !self.match_token(TokenKind.Comma) {
+                                break;
+                            }
+                        }
+                        self.expect(TokenKind.RParen)?;
+                        condition = JoinCondition.Using { columns };
+                    } else {
+                        return Err(self.parse_error("expected ON or USING after JOIN"));
+                    }
+                },
+            }
+        }
+
+        Ok(TableRef.Join {
+            join: JoinClause {
+                join_type,
+                left: Box.new(left),
+                right: Box.new(right),
+                condition,
+            },
+        })
+    }
+
+    # Parse optional WHERE clause
+    F parse_where_clause(~self) -> Result<Option<Expr>, VaisError> {
+        if self.match_token(TokenKind.Where) {
+            let expr = self.parse_expr()?;
+            Ok(Option.Some(expr))
+        } else {
+            Ok(Option.None)
+        }
+    }
+
+    # Parse optional GROUP BY clause
+    F parse_group_by(~self) -> Result<Vec<Expr>, VaisError> {
+        if self.match_token(TokenKind.Group) {
+            self.expect(TokenKind.By)?;
+            ~let exprs = Vec.new();
+            loop {
+                let expr = self.parse_expr()?;
+                exprs.push(expr);
+                if !self.match_token(TokenKind.Comma) {
+                    break;
+                }
+            }
+            Ok(exprs)
+        } else {
+            Ok(Vec.new())
+        }
+    }
+
+    # Parse optional HAVING clause
+    F parse_having(~self) -> Result<Option<Expr>, VaisError> {
+        if self.match_token(TokenKind.Having) {
+            let expr = self.parse_expr()?;
+            Ok(Option.Some(expr))
+        } else {
+            Ok(Option.None)
+        }
+    }
+
+    # Parse optional ORDER BY clause
+    F parse_order_by(~self) -> Result<Vec<OrderByItem>, VaisError> {
+        if self.match_token(TokenKind.Order) {
+            self.expect(TokenKind.By)?;
+            ~let items = Vec.new();
+            loop {
+                let expr = self.parse_expr()?;
+                ~let asc = true;
+                if self.match_token(TokenKind.Asc) {
+                    asc = true;
+                } else if self.match_token(TokenKind.Desc) {
+                    asc = false;
+                }
+
+                # Optional NULLS FIRST / NULLS LAST
+                ~let nulls_first = Option.None;
+                if self.match_token(TokenKind.Nulls) {
+                    if self.match_token(TokenKind.First) {
+                        nulls_first = Option.Some(true);
+                    } else if self.match_token(TokenKind.Last) {
+                        nulls_first = Option.Some(false);
+                    } else {
+                        return Err(self.parse_error("expected FIRST or LAST after NULLS"));
+                    }
+                }
+
+                items.push(OrderByItem { expr, asc, nulls_first });
+                if !self.match_token(TokenKind.Comma) {
+                    break;
+                }
+            }
+            Ok(items)
+        } else {
+            Ok(Vec.new())
+        }
+    }
+
+    # Parse optional LIMIT and OFFSET clauses
+    F parse_limit_offset(~self) -> Result<(Option<Expr>, Option<Expr>), VaisError> {
+        ~let limit = Option.None;
+        ~let offset = Option.None;
+
+        if self.match_token(TokenKind.Limit) {
+            let expr = self.parse_expr()?;
+            limit = Option.Some(expr);
+        }
+
+        if self.match_token(TokenKind.Offset) {
+            let expr = self.parse_expr()?;
+            offset = Option.Some(expr);
+        }
+
+        # Also allow LIMIT after OFFSET if LIMIT was not yet parsed
+        if limit.is_none() && self.match_token(TokenKind.Limit) {
+            let expr = self.parse_expr()?;
+            limit = Option.Some(expr);
+        }
+
+        Ok((limit, offset))
+    }
+
+    # Parse optional set operation (UNION/INTERSECT/EXCEPT)
+    F parse_set_operation(~self) -> Result<Option<SetOperation>, VaisError> {
+        ~let op_kind = Option.None;
+
+        M self.peek() {
+            TokenKind.Union => {
+                self.advance();
+                op_kind = Option.Some(SetOpKind.Union);
+            },
+            TokenKind.Intersect => {
+                self.advance();
+                op_kind = Option.Some(SetOpKind.Intersect);
+            },
+            TokenKind.Except => {
+                self.advance();
+                op_kind = Option.Some(SetOpKind.Except);
+            },
+            _ => {
+                return Ok(Option.None);
+            },
+        }
+
+        # Check for ALL
+        ~let all = false;
+        if self.match_token(TokenKind.All) {
+            all = true;
+        }
+
+        # Parse the right side query
+        let right = self.parse_select()?;
+
+        M op_kind {
+            Option.Some(op) => {
+                Ok(Option.Some(SetOperation {
+                    op,
+                    all,
+                    right: Box.new(right),
+                }))
+            },
+            Option.None => Ok(Option.None),
+        }
+    }
+
+    # ========================================================================
+    # INSERT
+    # ========================================================================
+
+    # Parse INSERT INTO table [(columns)] VALUES (...) | SELECT ...
+    F parse_insert(~self) -> Result<InsertStmt, VaisError> {
+        self.expect(TokenKind.Into)?;
+        let table_name = self.expect_identifier()?;
+
+        # Optional column list
+        ~let columns = Vec.new();
+        if self.match_token(TokenKind.LParen) {
+            loop {
+                let col = self.expect_identifier()?;
+                columns.push(col);
+                if !self.match_token(TokenKind.Comma) {
+                    break;
+                }
+            }
+            self.expect(TokenKind.RParen)?;
+        }
+
+        # VALUES (...) or SELECT ...
+        let source = if self.match_token(TokenKind.Values) {
+            ~let rows = Vec.new();
+            loop {
+                self.expect(TokenKind.LParen)?;
+                ~let row = Vec.new();
+                loop {
+                    let expr = self.parse_expr()?;
+                    row.push(expr);
+                    if !self.match_token(TokenKind.Comma) {
+                        break;
+                    }
+                }
+                self.expect(TokenKind.RParen)?;
+                rows.push(row);
+                if !self.match_token(TokenKind.Comma) {
+                    break;
+                }
+            }
+            InsertSource.Values { rows }
+        } else {
+            # INSERT ... SELECT
+            let query = self.parse_select()?;
+            InsertSource.Query { query }
+        };
+
+        Ok(InsertStmt { table_name, columns, source })
+    }
+
+    # ========================================================================
+    # UPDATE
+    # ========================================================================
+
+    # Parse UPDATE table SET col=val, ... [WHERE ...]
+    F parse_update(~self) -> Result<UpdateStmt, VaisError> {
+        let table_name = self.expect_identifier()?;
+        self.expect(TokenKind.Set)?;
+
+        ~let assignments = Vec.new();
+        loop {
+            let column = self.expect_identifier()?;
+            self.expect(TokenKind.Eq)?;
+            let value = self.parse_expr()?;
+            assignments.push(Assignment { column, value });
+            if !self.match_token(TokenKind.Comma) {
+                break;
+            }
+        }
+
+        let where_clause = self.parse_where_clause()?;
+
+        Ok(UpdateStmt { table_name, assignments, where_clause })
+    }
+
+    # ========================================================================
+    # DELETE
+    # ========================================================================
+
+    # Parse DELETE FROM table [WHERE ...]
+    F parse_delete(~self) -> Result<DeleteStmt, VaisError> {
+        self.expect(TokenKind.From)?;
+        let table_name = self.expect_identifier()?;
+        let where_clause = self.parse_where_clause()?;
+
+        Ok(DeleteStmt { table_name, where_clause })
+    }
+
+    # ========================================================================
+    # CREATE (TABLE / INDEX)
+    # ========================================================================
+
+    # Dispatch CREATE TABLE or CREATE [UNIQUE] INDEX
+    F parse_create(~self) -> Result<Statement, VaisError> {
+        # CREATE UNIQUE INDEX ...
+        if self.match_token(TokenKind.Unique) {
+            self.expect(TokenKind.Index)?;
+            let create = self.parse_create_index_body(true)?;
+            return Ok(Statement.CreateIndex { create });
+        }
+
+        M self.peek() {
+            TokenKind.Table => {
+                self.advance();
+                let create = self.parse_create_table()?;
+                Ok(Statement.CreateTable { create })
+            },
+            TokenKind.Index => {
+                self.advance();
+                let create = self.parse_create_index_body(false)?;
+                Ok(Statement.CreateIndex { create })
+            },
+            _ => {
+                Err(self.parse_error("expected TABLE or INDEX after CREATE"))
+            },
+        }
+    }
+
+    # Parse CREATE TABLE [IF NOT EXISTS] name (column_defs...)
+    F parse_create_table(~self) -> Result<CreateTableStmt, VaisError> {
+        ~let if_not_exists = false;
+
+        # Check for IF NOT EXISTS (IF is not a keyword, it is an identifier)
+        if self.check_identifier("IF") {
+            self.advance();
+            self.expect(TokenKind.Not)?;
+            if self.check_identifier("EXISTS") {
+                self.advance();
+            } else {
+                return Err(self.parse_error("expected EXISTS after NOT"));
+            }
+            if_not_exists = true;
+        }
+
+        let name = self.expect_identifier()?;
+        self.expect(TokenKind.LParen)?;
+
+        ~let columns = Vec.new();
+        loop {
+            let col = self.parse_column_def()?;
+            columns.push(col);
+            if !self.match_token(TokenKind.Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind.RParen)?;
+
+        Ok(CreateTableStmt { name, columns, if_not_exists })
+    }
+
+    # Parse a single column definition: name TYPE [constraints...]
+    F parse_column_def(~self) -> Result<ColumnDef, VaisError> {
+        let name = self.expect_identifier()?;
+        let data_type = self.parse_data_type()?;
+
+        ~let nullable = true;
+        ~let default_value = Option.None;
+        ~let is_primary_key = false;
+        ~let is_unique = false;
+        ~let check_expr = Option.None;
+
+        # Parse column constraints (can appear in any order, multiple times)
+        loop {
+            if self.match_token(TokenKind.Not) {
+                self.expect(TokenKind.Null)?;
+                nullable = false;
+            } else if self.match_token(TokenKind.Null) {
+                nullable = true;
+            } else if self.match_token(TokenKind.Primary) {
+                self.expect(TokenKind.Key)?;
+                is_primary_key = true;
+                nullable = false;  # PRIMARY KEY implies NOT NULL
+            } else if self.match_token(TokenKind.Unique) {
+                is_unique = true;
+            } else if self.match_token(TokenKind.Default) {
+                let expr = self.parse_primary()?;
+                default_value = Option.Some(expr);
+            } else if self.match_token(TokenKind.Check) {
+                self.expect(TokenKind.LParen)?;
+                let expr = self.parse_expr()?;
+                self.expect(TokenKind.RParen)?;
+                check_expr = Option.Some(expr);
+            } else if self.match_token(TokenKind.References) {
+                # REFERENCES table(column) -- parse but ignore for now
+                let _ref_table = self.expect_identifier()?;
+                if self.match_token(TokenKind.LParen) {
+                    let _ref_col = self.expect_identifier()?;
+                    self.expect(TokenKind.RParen)?;
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(ColumnDef {
+            name,
+            data_type,
+            nullable,
+            default_value,
+            is_primary_key,
+            is_unique,
+            check_expr,
+        })
+    }
+
+    # Parse a SQL data type: INT, VARCHAR(n), VECTOR(dim), FLOAT, BOOL, TEXT,
+    # BLOB, DATE, TIMESTAMP
+    F parse_data_type(~self) -> Result<SqlType, VaisError> {
+        M self.peek() {
+            TokenKind.Int_Kw => {
+                self.advance();
+                Ok(SqlType.Int)
+            },
+            TokenKind.Float_Kw => {
+                self.advance();
+                Ok(SqlType.Float)
+            },
+            TokenKind.Bool_Kw => {
+                self.advance();
+                Ok(SqlType.Bool)
+            },
+            TokenKind.Varchar => {
+                self.advance();
+                # VARCHAR requires (max_len)
+                self.expect(TokenKind.LParen)?;
+                let max_len = self.expect_int_literal()? as u32;
+                self.expect(TokenKind.RParen)?;
+                Ok(SqlType.Varchar { max_len })
+            },
+            TokenKind.Text_Kw => {
+                self.advance();
+                Ok(SqlType.Text)
+            },
+            TokenKind.Blob_Kw => {
+                self.advance();
+                Ok(SqlType.Blob)
+            },
+            TokenKind.Date_Kw => {
+                self.advance();
+                Ok(SqlType.Date)
+            },
+            TokenKind.Timestamp_Kw => {
+                self.advance();
+                Ok(SqlType.Timestamp)
+            },
+            TokenKind.Vector_Kw => {
+                self.advance();
+                # VECTOR requires (dim)
+                self.expect(TokenKind.LParen)?;
+                let dim = self.expect_int_literal()? as u32;
+                self.expect(TokenKind.RParen)?;
+                Ok(SqlType.Vector { dim })
+            },
+            _ => {
+                Err(self.parse_error("expected data type (INT, FLOAT, BOOL, VARCHAR, TEXT, BLOB, DATE, TIMESTAMP, VECTOR)"))
+            },
+        }
+    }
+
+    # Parse CREATE INDEX body (after INDEX keyword, unique flag already known)
+    F parse_create_index(~self) -> Result<CreateIndexStmt, VaisError> {
+        self.parse_create_index_body(false)
+    }
+
+    # Parse CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (columns...)
+    F parse_create_index_body(~self, unique: bool) -> Result<CreateIndexStmt, VaisError> {
+        ~let if_not_exists = false;
+
+        # Check for IF NOT EXISTS
+        if self.check_identifier("IF") {
+            self.advance();
+            self.expect(TokenKind.Not)?;
+            if self.check_identifier("EXISTS") {
+                self.advance();
+            } else {
+                return Err(self.parse_error("expected EXISTS after NOT"));
+            }
+            if_not_exists = true;
+        }
+
+        let name = self.expect_identifier()?;
+        self.expect(TokenKind.On)?;
+        let table_name = self.expect_identifier()?;
+
+        self.expect(TokenKind.LParen)?;
+        ~let columns = Vec.new();
+        loop {
+            let col = self.expect_identifier()?;
+            columns.push(col);
+            if !self.match_token(TokenKind.Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind.RParen)?;
+
+        Ok(CreateIndexStmt { name, table_name, columns, unique, if_not_exists })
+    }
+
+    # ========================================================================
+    # DROP (TABLE / INDEX)
+    # ========================================================================
+
+    # Dispatch DROP TABLE or DROP INDEX
+    F parse_drop(~self) -> Result<Statement, VaisError> {
+        M self.peek() {
+            TokenKind.Table => {
+                self.advance();
+                ~let if_exists = false;
+                if self.check_identifier("IF") {
+                    self.advance();
+                    if self.check_identifier("EXISTS") {
+                        self.advance();
+                    } else {
+                        return Err(self.parse_error("expected EXISTS after IF"));
+                    }
+                    if_exists = true;
+                }
+                let name = self.expect_identifier()?;
+                Ok(Statement.DropTable { name, if_exists })
+            },
+            TokenKind.Index => {
+                self.advance();
+                ~let if_exists = false;
+                if self.check_identifier("IF") {
+                    self.advance();
+                    if self.check_identifier("EXISTS") {
+                        self.advance();
+                    } else {
+                        return Err(self.parse_error("expected EXISTS after IF"));
+                    }
+                    if_exists = true;
+                }
+                let name = self.expect_identifier()?;
+                Ok(Statement.DropIndex { name, if_exists })
+            },
+            _ => {
+                Err(self.parse_error("expected TABLE or INDEX after DROP"))
+            },
+        }
+    }
+
+    # ========================================================================
+    # ALTER TABLE
+    # ========================================================================
+
+    # Parse ALTER TABLE table_name action
+    F parse_alter_table(~self) -> Result<AlterTableStmt, VaisError> {
+        let table_name = self.expect_identifier()?;
+
+        let action = if self.match_token(TokenKind.Add) {
+            # ADD [COLUMN] column_def
+            self.match_token(TokenKind.Column);
+            let column = self.parse_column_def()?;
+            AlterAction.AddColumn { column }
+        } else if self.match_token(TokenKind.Drop) {
+            # DROP [COLUMN] name
+            self.match_token(TokenKind.Column);
+            let name = self.expect_identifier()?;
+            AlterAction.DropColumn { name }
+        } else if self.match_token(TokenKind.Rename) {
+            # RENAME [COLUMN] old_name TO new_name
+            self.match_token(TokenKind.Column);
+            let old_name = self.expect_identifier()?;
+            # Expect TO (parsed as identifier since it is not a keyword)
+            if !self.check_identifier("TO") {
+                return Err(self.parse_error("expected TO after column name in RENAME"));
+            }
+            self.advance();
+            let new_name = self.expect_identifier()?;
+            AlterAction.RenameColumn { old_name, new_name }
+        } else if self.match_token(TokenKind.Alter) {
+            # ALTER [COLUMN] name TYPE new_type
+            self.match_token(TokenKind.Column);
+            let name = self.expect_identifier()?;
+            # Expect TYPE (parsed as identifier since not a keyword)
+            if !self.check_identifier("TYPE") {
+                return Err(self.parse_error("expected TYPE after column name in ALTER COLUMN"));
+            }
+            self.advance();
+            let new_type = self.parse_data_type()?;
+            AlterAction.AlterColumnType { name, new_type }
+        } else {
+            return Err(self.parse_error("expected ADD, DROP, RENAME, or ALTER after table name"));
+        };
+
+        Ok(AlterTableStmt { table_name, action })
+    }
+
+    # ========================================================================
+    # SET, PREPARE, EXECUTE
+    # ========================================================================
+
+    # Parse SET SESSION|GLOBAL key = value
+    F parse_set_statement(~self) -> Result<Statement, VaisError> {
+        ~let is_global = false;
+        if self.check_identifier("SESSION") {
+            self.advance();
+        } else if self.check_identifier("GLOBAL") {
+            self.advance();
+            is_global = true;
+        }
+
+        let key = self.expect_identifier()?;
+        self.expect(TokenKind.Eq)?;
+        let value = self.parse_expr()?;
+
+        let target = if is_global {
+            SetTarget.Global { key, value }
+        } else {
+            SetTarget.Session { key, value }
+        };
+
+        Ok(Statement.SetExpr { target })
+    }
+
+    # Parse PREPARE name AS statement
+    F parse_prepare(~self) -> Result<Statement, VaisError> {
+        let name = self.expect_identifier()?;
+        self.expect(TokenKind.As)?;
+        let stmt = self.parse_statement()?;
+        Ok(Statement.Prepare { name, stmt: Box.new(stmt) })
+    }
+
+    # Parse EXECUTE name [(params...)]
+    F parse_execute(~self) -> Result<Statement, VaisError> {
+        let name = self.expect_identifier()?;
+        ~let params = Vec.new();
+
+        if self.match_token(TokenKind.LParen) {
+            if !self.check(TokenKind.RParen) {
+                loop {
+                    let expr = self.parse_expr()?;
+                    params.push(expr);
+                    if !self.match_token(TokenKind.Comma) {
+                        break;
+                    }
+                }
+            }
+            self.expect(TokenKind.RParen)?;
+        }
+
+        Ok(Statement.Execute { name, params })
+    }
+
+    # ========================================================================
+    # Expression parsing (precedence climbing)
+    # ========================================================================
+
+    # Entry point for expression parsing
+    F parse_expr(~self) -> Result<Expr, VaisError> {
+        self.parse_or_expr()
+    }
+
+    # OR (lowest precedence)
+    F parse_or_expr(~self) -> Result<Expr, VaisError> {
+        ~let left = self.parse_and_expr()?;
+
+        while self.match_token(TokenKind.Or) {
+            let right = self.parse_and_expr()?;
+            left = Expr.BinaryOp {
+                left: Box.new(left),
+                op: BinOp.Or,
+                right: Box.new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    # AND
+    F parse_and_expr(~self) -> Result<Expr, VaisError> {
+        ~let left = self.parse_not_expr()?;
+
+        while self.match_token(TokenKind.And) {
+            let right = self.parse_not_expr()?;
+            left = Expr.BinaryOp {
+                left: Box.new(left),
+                op: BinOp.And,
+                right: Box.new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    # NOT (prefix unary)
+    F parse_not_expr(~self) -> Result<Expr, VaisError> {
+        if self.match_token(TokenKind.Not) {
+            let operand = self.parse_not_expr()?;
+            Ok(Expr.UnaryOp { op: UnaryOp.Not, operand: Box.new(operand) })
+        } else {
+            self.parse_comparison()
+        }
+    }
+
+    # Comparison: =, <>, <, >, <=, >=, IS [NOT] NULL, BETWEEN, IN, LIKE, EXISTS
+    F parse_comparison(~self) -> Result<Expr, VaisError> {
+        # Handle EXISTS (subquery) at comparison level
+        if self.match_token(TokenKind.Exists) {
+            self.expect(TokenKind.LParen)?;
+            let query = self.parse_select()?;
+            self.expect(TokenKind.RParen)?;
+            return Ok(Expr.Exists { query: Box.new(query), negated: false });
+        }
+
+        # Handle NOT EXISTS (subquery)
+        if self.check(TokenKind.Not) {
+            let saved_pos = self.pos;
+            self.advance();
+            if self.match_token(TokenKind.Exists) {
+                self.expect(TokenKind.LParen)?;
+                let query = self.parse_select()?;
+                self.expect(TokenKind.RParen)?;
+                return Ok(Expr.Exists { query: Box.new(query), negated: true });
+            }
+            # Not NOT EXISTS, backtrack
+            self.pos = saved_pos;
+        }
+
+        ~let expr = self.parse_addition()?;
+
+        # Check for comparison operators and postfix operators
+        loop {
+            M self.peek() {
+                TokenKind.Eq => {
+                    self.advance();
+                    let right = self.parse_addition()?;
+                    expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Eq, right: Box.new(right) };
+                },
+                TokenKind.Neq => {
+                    self.advance();
+                    let right = self.parse_addition()?;
+                    expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Neq, right: Box.new(right) };
+                },
+                TokenKind.Lt => {
+                    self.advance();
+                    let right = self.parse_addition()?;
+                    expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Lt, right: Box.new(right) };
+                },
+                TokenKind.Gt => {
+                    self.advance();
+                    let right = self.parse_addition()?;
+                    expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Gt, right: Box.new(right) };
+                },
+                TokenKind.Le => {
+                    self.advance();
+                    let right = self.parse_addition()?;
+                    expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Le, right: Box.new(right) };
+                },
+                TokenKind.Ge => {
+                    self.advance();
+                    let right = self.parse_addition()?;
+                    expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Ge, right: Box.new(right) };
+                },
+                TokenKind.Is => {
+                    self.advance();
+                    ~let negated = false;
+                    if self.match_token(TokenKind.Not) {
+                        negated = true;
+                    }
+                    self.expect(TokenKind.Null)?;
+                    expr = Expr.IsNull { expr: Box.new(expr), negated };
+                },
+                TokenKind.Between => {
+                    self.advance();
+                    let low = self.parse_addition()?;
+                    self.expect(TokenKind.And)?;
+                    let high = self.parse_addition()?;
+                    expr = Expr.Between {
+                        expr: Box.new(expr),
+                        low: Box.new(low),
+                        high: Box.new(high),
+                        negated: false,
+                    };
+                },
+                TokenKind.Not => {
+                    # NOT BETWEEN, NOT IN, NOT LIKE
+                    let saved_pos = self.pos;
+                    self.advance();
+                    M self.peek() {
+                        TokenKind.Between => {
+                            self.advance();
+                            let low = self.parse_addition()?;
+                            self.expect(TokenKind.And)?;
+                            let high = self.parse_addition()?;
+                            expr = Expr.Between {
+                                expr: Box.new(expr),
+                                low: Box.new(low),
+                                high: Box.new(high),
+                                negated: true,
+                            };
+                        },
+                        TokenKind.In => {
+                            self.advance();
+                            expr = self.parse_in_expr(expr, true)?;
+                        },
+                        TokenKind.Like => {
+                            self.advance();
+                            let pattern = self.parse_addition()?;
+                            expr = Expr.Like {
+                                expr: Box.new(expr),
+                                pattern: Box.new(pattern),
+                                negated: true,
+                            };
+                        },
+                        _ => {
+                            # Not a postfix NOT, backtrack
+                            self.pos = saved_pos;
+                            break;
+                        },
+                    }
+                },
+                TokenKind.In => {
+                    self.advance();
+                    expr = self.parse_in_expr(expr, false)?;
+                },
+                TokenKind.Like => {
+                    self.advance();
+                    let pattern = self.parse_addition()?;
+                    expr = Expr.Like {
+                        expr: Box.new(expr),
+                        pattern: Box.new(pattern),
+                        negated: false,
+                    };
+                },
+                _ => {
+                    break;
+                },
+            }
+        }
+
+        Ok(expr)
+    }
+
+    # Parse IN (list) or IN (subquery) after the IN keyword
+    F parse_in_expr(~self, left: Expr, negated: bool) -> Result<Expr, VaisError> {
+        self.expect(TokenKind.LParen)?;
+
+        # Distinguish subquery from value list by checking for SELECT/WITH
+        M self.peek() {
+            TokenKind.Select | TokenKind.With => {
+                let query = self.parse_select()?;
+                self.expect(TokenKind.RParen)?;
+                Ok(Expr.InSubquery {
+                    expr: Box.new(left),
+                    query: Box.new(query),
+                    negated,
+                })
+            },
+            _ => {
+                ~let list = Vec.new();
+                if !self.check(TokenKind.RParen) {
+                    loop {
+                        let expr = self.parse_expr()?;
+                        list.push(expr);
+                        if !self.match_token(TokenKind.Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(TokenKind.RParen)?;
+                Ok(Expr.InList {
+                    expr: Box.new(left),
+                    list,
+                    negated,
+                })
+            },
+        }
+    }
+
+    # Addition/subtraction and string concatenation (||)
+    F parse_addition(~self) -> Result<Expr, VaisError> {
+        ~let left = self.parse_multiplication()?;
+
+        loop {
+            M self.peek() {
+                TokenKind.Plus => {
+                    self.advance();
+                    let right = self.parse_multiplication()?;
+                    left = Expr.BinaryOp { left: Box.new(left), op: BinOp.Add, right: Box.new(right) };
+                },
+                TokenKind.Minus => {
+                    self.advance();
+                    let right = self.parse_multiplication()?;
+                    left = Expr.BinaryOp { left: Box.new(left), op: BinOp.Sub, right: Box.new(right) };
+                },
+                TokenKind.Pipe => {
+                    self.advance();
+                    let right = self.parse_multiplication()?;
+                    left = Expr.Concat { left: Box.new(left), right: Box.new(right) };
+                },
+                _ => {
+                    break;
+                },
+            }
+        }
+
+        Ok(left)
+    }
+
+    # Multiplication, division, modulo
+    F parse_multiplication(~self) -> Result<Expr, VaisError> {
+        ~let left = self.parse_unary()?;
+
+        loop {
+            M self.peek() {
+                TokenKind.Star => {
+                    self.advance();
+                    let right = self.parse_unary()?;
+                    left = Expr.BinaryOp { left: Box.new(left), op: BinOp.Mul, right: Box.new(right) };
+                },
+                TokenKind.Slash => {
+                    self.advance();
+                    let right = self.parse_unary()?;
+                    left = Expr.BinaryOp { left: Box.new(left), op: BinOp.Div, right: Box.new(right) };
+                },
+                TokenKind.Percent => {
+                    self.advance();
+                    let right = self.parse_unary()?;
+                    left = Expr.BinaryOp { left: Box.new(left), op: BinOp.Mod, right: Box.new(right) };
+                },
+                _ => {
+                    break;
+                },
+            }
+        }
+
+        Ok(left)
+    }
+
+    # Unary minus and NOT
+    F parse_unary(~self) -> Result<Expr, VaisError> {
+        if self.match_token(TokenKind.Minus) {
+            let operand = self.parse_unary()?;
+            return Ok(Expr.UnaryOp { op: UnaryOp.Neg, operand: Box.new(operand) });
+        }
+
+        self.parse_primary()
+    }
+
+    # Primary expressions: literals, identifiers, function calls, parenthesized
+    # expressions, CASE, CAST, subquery, parameter marker, star
+    F parse_primary(~self) -> Result<Expr, VaisError> {
+        M self.peek() {
+            # Integer literal
+            TokenKind.IntLit { .. } => {
+                let tok = self.advance();
+                M tok.kind {
+                    TokenKind.IntLit { v } => Ok(Expr.Literal { value: SqlValue.IntVal { v } }),
+                    _ => Err(self.parse_error("internal error: expected integer literal")),
+                }
+            },
+            # Float literal
+            TokenKind.FloatLit { .. } => {
+                let tok = self.advance();
+                M tok.kind {
+                    TokenKind.FloatLit { v } => Ok(Expr.Literal { value: SqlValue.FloatVal { v } }),
+                    _ => Err(self.parse_error("internal error: expected float literal")),
+                }
+            },
+            # String literal
+            TokenKind.StringLit { .. } => {
+                let tok = self.advance();
+                M tok.kind {
+                    TokenKind.StringLit { v } => Ok(Expr.Literal { value: SqlValue.StringVal { v } }),
+                    _ => Err(self.parse_error("internal error: expected string literal")),
+                }
+            },
+            # TRUE literal
+            TokenKind.True_Kw => {
+                self.advance();
+                Ok(Expr.Literal { value: SqlValue.BoolVal { v: true } })
+            },
+            # FALSE literal
+            TokenKind.False_Kw => {
+                self.advance();
+                Ok(Expr.Literal { value: SqlValue.BoolVal { v: false } })
+            },
+            # NULL literal
+            TokenKind.Null => {
+                self.advance();
+                Ok(Expr.Literal { value: SqlValue.Null })
+            },
+            # Parameter marker ($1, $2, ...)
+            TokenKind.Parameter { .. } => {
+                let tok = self.advance();
+                M tok.kind {
+                    TokenKind.Parameter { idx } => Ok(Expr.Parameter { idx }),
+                    _ => Err(self.parse_error("internal error: expected parameter")),
+                }
+            },
+            # Star (for COUNT(*))
+            TokenKind.Star => {
+                self.advance();
+                Ok(Expr.Star)
+            },
+            # CASE expression
+            TokenKind.Case => {
+                self.parse_case_expr()
+            },
+            # CAST expression
+            TokenKind.Cast => {
+                self.parse_cast_expr()
+            },
+            # EXISTS (subquery) -- also handled in comparison, but can appear as primary
+            TokenKind.Exists => {
+                self.advance();
+                self.expect(TokenKind.LParen)?;
+                let query = self.parse_select()?;
+                self.expect(TokenKind.RParen)?;
+                Ok(Expr.Exists { query: Box.new(query), negated: false })
+            },
+            # Aggregate / window function keywords: COUNT, SUM, AVG, MIN, MAX
+            TokenKind.Count | TokenKind.Sum | TokenKind.Avg |
+            TokenKind.Min | TokenKind.Max => {
+                self.parse_aggregate_function()
+            },
+            # Window function keywords: ROW_NUMBER, RANK, DENSE_RANK
+            TokenKind.Row_Number | TokenKind.Rank | TokenKind.Dense_Rank => {
+                self.parse_window_function_keyword()
+            },
+            # Parenthesized expression or scalar subquery
+            TokenKind.LParen => {
+                self.advance();
+                # Check if it is a subquery
+                M self.peek() {
+                    TokenKind.Select | TokenKind.With => {
+                        let query = self.parse_select()?;
+                        self.expect(TokenKind.RParen)?;
+                        Ok(Expr.Subquery { query: Box.new(query) })
+                    },
+                    _ => {
+                        let expr = self.parse_expr()?;
+                        self.expect(TokenKind.RParen)?;
+                        Ok(expr)
+                    },
+                }
+            },
+            # Identifier: column reference, table.column, or function call
+            TokenKind.Identifier { .. } => {
+                self.parse_identifier_expr()
+            },
+            _ => {
+                Err(self.parse_error("expected expression"))
+            },
+        }
+    }
+
+    # Parse an identifier expression: column ref, table.column, or function call
+    F parse_identifier_expr(~self) -> Result<Expr, VaisError> {
+        let name = self.expect_identifier()?;
+
+        # Check for function call: name(...)
+        if self.check(TokenKind.LParen) {
+            return self.parse_function_call(name);
+        }
+
+        # Check for table.column reference
+        if self.match_token(TokenKind.Dot) {
+            let column = self.expect_identifier()?;
+            return Ok(Expr.ColumnRef { table: Option.Some(name), column });
+        }
+
+        # Plain column reference
+        Ok(Expr.ColumnRef { table: Option.None, column: name })
+    }
+
+    # Parse a function call: name(args...) with optional DISTINCT and OVER clause
+    F parse_function_call(~self, name: Str) -> Result<Expr, VaisError> {
+        self.expect(TokenKind.LParen)?;
+
+        # Check for empty arg list
+        if self.match_token(TokenKind.RParen) {
+            let func_expr = Expr.FunctionCall { name, args: Vec.new(), distinct: false };
+            # Check for OVER clause (window function)
+            return self.maybe_parse_over(func_expr);
+        }
+
+        # Check for DISTINCT keyword
+        ~let distinct = false;
+        if self.match_token(TokenKind.Distinct) {
+            distinct = true;
+        }
+
+        # Check for * (e.g., COUNT(*))
+        if self.match_token(TokenKind.Star) {
+            self.expect(TokenKind.RParen)?;
+            let func_expr = Expr.FunctionCall {
+                name,
+                args: Vec.from([Expr.Star]),
+                distinct: false,
+            };
+            return self.maybe_parse_over(func_expr);
+        }
+
+        # Parse argument list
+        ~let args = Vec.new();
+        loop {
+            let arg = self.parse_expr()?;
+            args.push(arg);
+            if !self.match_token(TokenKind.Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind.RParen)?;
+
+        let func_expr = Expr.FunctionCall { name, args, distinct };
+        # Check for OVER clause (window function)
+        self.maybe_parse_over(func_expr)
+    }
+
+    # Parse an aggregate function keyword (COUNT, SUM, AVG, MIN, MAX)
+    F parse_aggregate_function(~self) -> Result<Expr, VaisError> {
+        let tok = self.advance();
+        let name = M tok.kind {
+            TokenKind.Count => "COUNT",
+            TokenKind.Sum => "SUM",
+            TokenKind.Avg => "AVG",
+            TokenKind.Min => "MIN",
+            TokenKind.Max => "MAX",
+            _ => "UNKNOWN",
+        };
+        self.parse_function_call(name.to_string())
+    }
+
+    # Parse a window function keyword (ROW_NUMBER, RANK, DENSE_RANK)
+    F parse_window_function_keyword(~self) -> Result<Expr, VaisError> {
+        let tok = self.advance();
+        let name = M tok.kind {
+            TokenKind.Row_Number => "ROW_NUMBER",
+            TokenKind.Rank => "RANK",
+            TokenKind.Dense_Rank => "DENSE_RANK",
+            _ => "UNKNOWN",
+        };
+        self.parse_function_call(name.to_string())
+    }
+
+    # If an OVER clause follows, wrap the expression as a WindowFunc
+    F maybe_parse_over(~self, func: Expr) -> Result<Expr, VaisError> {
+        if !self.match_token(TokenKind.Over) {
+            return Ok(func);
+        }
+
+        self.expect(TokenKind.LParen)?;
+
+        # Parse optional PARTITION BY
+        ~let partition_by = Vec.new();
+        if self.match_token(TokenKind.Partition) {
+            self.expect(TokenKind.By)?;
+            loop {
+                let expr = self.parse_expr()?;
+                partition_by.push(expr);
+                if !self.match_token(TokenKind.Comma) {
+                    break;
+                }
+            }
+        }
+
+        # Parse optional ORDER BY
+        ~let order_by = Vec.new();
+        if self.match_token(TokenKind.Order) {
+            self.expect(TokenKind.By)?;
+            loop {
+                let expr = self.parse_expr()?;
+                ~let asc = true;
+                if self.match_token(TokenKind.Asc) {
+                    asc = true;
+                } else if self.match_token(TokenKind.Desc) {
+                    asc = false;
+                }
+                ~let nulls_first = Option.None;
+                if self.match_token(TokenKind.Nulls) {
+                    if self.match_token(TokenKind.First) {
+                        nulls_first = Option.Some(true);
+                    } else if self.match_token(TokenKind.Last) {
+                        nulls_first = Option.Some(false);
+                    } else {
+                        return Err(self.parse_error("expected FIRST or LAST after NULLS"));
+                    }
+                }
+                order_by.push(OrderByItem { expr, asc, nulls_first });
+                if !self.match_token(TokenKind.Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.expect(TokenKind.RParen)?;
+
+        Ok(Expr.WindowFunc {
+            func: Box.new(func),
+            partition_by,
+            order_by,
+        })
+    }
+
+    # Parse CASE [operand] WHEN condition THEN result ... [ELSE result] END
+    F parse_case_expr(~self) -> Result<Expr, VaisError> {
+        self.expect(TokenKind.Case)?;
+
+        # Check for simple CASE (CASE expr WHEN ...) vs searched CASE (CASE WHEN ...)
+        ~let operand = Option.None;
+        if !self.check(TokenKind.When) {
+            let expr = self.parse_expr()?;
+            operand = Option.Some(Box.new(expr));
+        }
+
+        # Parse WHEN clauses
+        ~let when_clauses = Vec.new();
+        while self.match_token(TokenKind.When) {
+            let condition = self.parse_expr()?;
+            self.expect(TokenKind.Then)?;
+            let result = self.parse_expr()?;
+            when_clauses.push(WhenClause { condition, result });
+        }
+
+        if when_clauses.len() == 0 {
+            return Err(self.parse_error("CASE expression must have at least one WHEN clause"));
+        }
+
+        # Parse optional ELSE
+        ~let else_result = Option.None;
+        if self.match_token(TokenKind.Else) {
+            let expr = self.parse_expr()?;
+            else_result = Option.Some(Box.new(expr));
+        }
+
+        self.expect(TokenKind.End)?;
+
+        Ok(Expr.Case { operand, when_clauses, else_result })
+    }
+
+    # Parse CAST(expr AS type)
+    F parse_cast_expr(~self) -> Result<Expr, VaisError> {
+        self.expect(TokenKind.Cast)?;
+        self.expect(TokenKind.LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect(TokenKind.As)?;
+        let target_type = self.parse_data_type()?;
+        self.expect(TokenKind.RParen)?;
+        Ok(Expr.Cast { expr: Box.new(expr), target_type })
+    }
+
+    # ========================================================================
+    # Helper methods
+    # ========================================================================
+
+    # Peek at the current token kind without consuming it
+    F peek(self) -> &TokenKind {
+        if self.pos < self.tokens.len() {
+            &self.tokens[self.pos].kind
+        } else {
+            &TokenKind.Eof
+        }
+    }
+
+    # Advance to the next token, returning the current one
+    F advance(~self) -> &Token {
+        let tok = &self.tokens[self.pos];
+        if self.pos < self.tokens.len() {
+            self.pos += 1;
+        }
+        tok
+    }
+
+    # Consume the next token if it matches the expected kind, return error otherwise
+    F expect(~self, kind: TokenKind) -> Result<&Token, VaisError> {
+        if self.check(kind) {
+            Ok(self.advance())
+        } else {
+            Err(self.parse_error("expected {kind}, got {self.peek()}"))
+        }
+    }
+
+    # If the current token matches the given kind, consume it and return true;
+    # otherwise return false
+    F match_token(~self, kind: TokenKind) -> bool {
+        if self.check(kind) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    # Check if the current token matches the given kind (without consuming)
+    F check(self, kind: TokenKind) -> bool {
+        M (self.peek(), &kind) {
+            # For enum variants with data, we compare the discriminant only
+            (TokenKind.IntLit { .. }, TokenKind.IntLit { .. }) => true,
+            (TokenKind.FloatLit { .. }, TokenKind.FloatLit { .. }) => true,
+            (TokenKind.StringLit { .. }, TokenKind.StringLit { .. }) => true,
+            (TokenKind.Identifier { .. }, TokenKind.Identifier { .. }) => true,
+            (TokenKind.Parameter { .. }, TokenKind.Parameter { .. }) => true,
+            (a, b) => a == b,
+        }
+    }
+
+    # Check if we have reached the end of the token stream
+    F is_at_end(self) -> bool {
+        M self.peek() {
+            TokenKind.Eof => true,
+            _ => false,
+        }
+    }
+
+    # Create a parse error with position information from the current token
+    F parse_error(self, msg: Str) -> VaisError {
+        if self.pos < self.tokens.len() {
+            let tok = &self.tokens[self.pos];
+            VaisError.new(
+                "VAIS-0101001",
+                "SQL parse error at line {tok.line}, col {tok.col}: {msg}"
+            )
+        } else {
+            VaisError.new(
+                "VAIS-0101001",
+                "SQL parse error at end of input: {msg}"
+            )
+        }
+    }
+
+    # Check if the current token is an identifier
+    F is_identifier(self) -> bool {
+        M self.peek() {
+            TokenKind.Identifier { .. } => true,
+            _ => false,
+        }
+    }
+
+    # Check if the current token is an identifier with a specific value (case-insensitive)
+    F check_identifier(self, name: &str) -> bool {
+        M self.peek() {
+            TokenKind.Identifier { v } => v.to_uppercase() == name,
+            _ => false,
+        }
+    }
+
+    # Expect an identifier token and return its string value
+    F expect_identifier(~self) -> Result<Str, VaisError> {
+        M self.peek() {
+            TokenKind.Identifier { .. } => {
+                let tok = self.advance();
+                M tok.kind {
+                    TokenKind.Identifier { v } => Ok(v),
+                    _ => Err(self.parse_error("internal error: expected identifier")),
+                }
+            },
+            _ => {
+                Err(self.parse_error("expected identifier"))
+            },
+        }
+    }
+
+    # Expect an integer literal token and return its value
+    F expect_int_literal(~self) -> Result<i64, VaisError> {
+        M self.peek() {
+            TokenKind.IntLit { .. } => {
+                let tok = self.advance();
+                M tok.kind {
+                    TokenKind.IntLit { v } => Ok(v),
+                    _ => Err(self.parse_error("internal error: expected integer literal")),
+                }
+            },
+            _ => {
+                Err(self.parse_error("expected integer literal"))
+            },
+        }
+    }
+
+    # Check if the current token starts a JOIN keyword sequence
+    F is_join_keyword(self) -> bool {
+        M self.peek() {
+            TokenKind.Join | TokenKind.Inner | TokenKind.Left |
+            TokenKind.Right | TokenKind.Cross => true,
+            TokenKind.Identifier { v } => v.to_uppercase() == "NATURAL",
+            _ => false,
+        }
+    }
+}
+
+# ============================================================================
+# Convenience function: tokenize + parse in one step
+# ============================================================================
+
+# Parse a SQL string into a list of statements
+F parse_sql(sql: Str) -> Result<Vec<Statement>, VaisError> {
+    ~let tokenizer = Tokenizer.new(sql);
+    let tokens = tokenizer.tokenize_all()?;
+    ~let parser = Parser.new(tokens);
+    parser.parse_all()
+}
