@@ -1,21 +1,22 @@
-# VaisDB - RAG-Native Hybrid Database
+# VaisDB - AI-Native Hybrid Database
 ## Project Roadmap
 
 > **Version**: 0.1.0 (Design Phase)
 > **Goal**: Vector + Graph + Relational + Full-Text search in a single DB, optimized for RAG
 > **Language**: Pure Vais (with C FFI for system calls)
-> **Last Updated**: 2026-02-02
+> **Last Updated**: 2026-02-08
 
 ---
 
 ## Overview
 
-VaisDB solves the fundamental problem of RAG systems: **4 databases for 1 use case**.
+VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases for 1 use case**.
 
 ### Core Innovation
 - Single query across vector similarity + graph traversal + SQL joins + full-text search
 - ACID transactions spanning all engine types
 - RAG-native features (semantic chunking, context preservation) at the DB level
+- AI-native agent memory (episodic, semantic, procedural memory with hybrid retrieval)
 
 ### Prerequisites
 - Vais standard library enhancements (tracked in [vais ROADMAP Phase 31](https://github.com/vaislang/vais))
@@ -38,14 +39,14 @@ VaisDB solves the fundamental problem of RAG systems: **4 databases for 1 use ca
 
 | Phase | Name | Status | Progress |
 |-------|------|--------|----------|
-| 0 | Architecture & Design Decisions | ✅ Complete | 31/31 (100%) |
+| 0 | Architecture & Design Decisions | ✅ Complete | 43/43 (100%) |
 | 1 | Storage Engine | ⏳ Planned | 0/38 (0%) |
 | 2 | SQL Engine | ⏳ Planned | 0/42 (0%) |
 | 3 | Vector Engine | ⏳ Planned | 0/24 (0%) |
 | 4 | Graph Engine | ⏳ Planned | 0/22 (0%) |
 | 5 | Full-Text Engine | ⏳ Planned | 0/16 (0%) |
 | 6 | Hybrid Query Planner | ⏳ Planned | 0/20 (0%) |
-| 7 | RAG-Native Features | ⏳ Planned | 0/18 (0%) |
+| 7 | RAG & AI-Native Features | ⏳ Planned | 0/24 (0%) |
 | 8 | Server & Client | ⏳ Planned | 0/20 (0%) |
 | 9 | Production Operations | ⏳ Planned | 0/24 (0%) |
 | 10 | Security & Multi-tenancy | ⏳ Planned | 0/16 (0%) |
@@ -58,7 +59,7 @@ VaisDB solves the fundamental problem of RAG systems: **4 databases for 1 use ca
 > **Dependency**: None
 > **Goal**: Lock in all decisions that are impossible/painful to change after implementation begins
 > **Model**: Opus (fixed - architecture decisions)
-> **Design Documents**: `docs/architecture/stage1-6*.md`
+> **Design Documents**: `docs/architecture/stage1-7*.md`
 
 These decisions affect ALL subsequent phases. Getting them wrong means rewriting from scratch.
 
@@ -78,6 +79,24 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
   변경: docs/architecture/stage6-configuration.md (ALTER SYSTEM→meta.vdb, 5433포트, 5개 설정, RELOAD/SIGHUP)
 - [x] 7. ROADMAP 동기화: 파일 레이아웃, WAL 헤더, MVCC 32B, 에러코드, 설정 hierarchy (Opus 직접) ✅
   변경: ROADMAP.md (헤더 정렬, wal/ 디렉토리, 32B MVCC, 48B WAL, engine 06-07, category 06-10, SQL SET hierarchy)
+진행률: 7/7 (100%)
+
+### Stage 8 - Design Review Round 3 (2026-02-08)
+모드: 자동진행
+- [x] 1. Stage 3 AdjEntry expire_cmd_id 추가 + is_edge_visible cmd_id 로직 + CLOG 16KB/torn write (Opus 직접) ✅
+  변경: docs/architecture/stage3-mvcc-strategy.md (AdjEntry 42B, is_edge_visible 3-case 구현, CLOG 16KB/crash safety)
+- [x] 2. Stage 2 FPI WAL 레코드 등록(0x09) + Graph WAL page ref 추가 (Opus 직접) ✅
+  변경: docs/architecture/stage2-wal-design.md (FPI 0x09, Graph WAL에 file_id/page_id 추가)
+- [x] 3. Stage 5 에러코드 카운트 수정: SQL=17, Storage=8, Total=69 (Sonnet 위임) ✅
+  변경: docs/architecture/stage5-error-codes.md (SQL 16→17, Storage 7→8, Total 67→69)
+- [x] 4. Stage 6 scope 수정 + 누락 설정 4개 + cross-validation 공식 갱신 (Sonnet 위임) ✅
+  변경: docs/architecture/stage6-configuration.md (max_concurrent_queries/deadlock GLOBAL, 4설정 추가, cross-validation)
+- [x] 5. Stage 1+4 cross-doc 불일치 수정: WAL seg 32B, eviction priority, 벡터 테이블 주석 (Sonnet 위임) ✅
+  변경: docs/architecture/stage1-on-disk-format.md (WAL seg 32B), stage4 (eviction priority, checklist label)
+- [x] 6. Stage 7 직렬화 패턴 보강: MVCC tuple, AdjEntry, PostingEntry, CLOG, WAL seg header (Opus 직접) ✅
+  변경: docs/architecture/stage7-implementation-mapping.md (5개 직렬화 패턴 + ClogPage helper)
+- [x] 7. ROADMAP 동기화: Phase 0 카운트, 카테고리 코드, 메모리 범위 (Opus 직접) ✅
+  변경: ROADMAP.md (Phase 0 43/43, 카테고리 09=type/10=notfound, 메모리 범위 정렬)
 진행률: 7/7 (100%)
 
 ### Stage 1 - On-Disk Format Decisions (IMMUTABLE after first user)
@@ -103,12 +122,12 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ### Stage 2 - WAL Design (Affects crash recovery of ALL engines)
 
-- [x] **Unified WAL record header (48 bytes)** - `lsn: u64, txn_id: u64, prev_lsn: u64, record_type: u8, engine_type: u8, record_length: u32, checksum: u32, timestamp: u64, reserved: [u8; 6]`
-- [x] **Relational WAL records** - PAGE_WRITE, TUPLE_INSERT/DELETE/UPDATE, BTREE_SPLIT/MERGE
+- [x] **Unified WAL record header (48 bytes, naturally aligned)** - `lsn: u64, txn_id: u64, prev_lsn: u64, timestamp: u64, record_length: u32, checksum: u32, record_type: u8, engine_type: u8, reserved: [u8; 6]`
+- [x] **Relational WAL records** - PAGE_WRITE, TUPLE_INSERT/DELETE/UPDATE, BTREE_SPLIT/MERGE, BTREE_INSERT/DELETE
 - [x] **Vector WAL records** - HNSW_INSERT_NODE (all layer edges), HNSW_DELETE_NODE, HNSW_UPDATE_EDGES, HNSW_LAYER_PROMOTE, VECTOR_DATA_WRITE, QUANTIZATION_UPDATE
 - [x] **Graph WAL records** - GRAPH_NODE_INSERT/DELETE, GRAPH_EDGE_INSERT/DELETE (both adjacency lists!), GRAPH_PROPERTY_UPDATE, ADJ_LIST_PAGE_SPLIT
 - [x] **Full-text WAL records** - POSTING_LIST_APPEND/DELETE, DICTIONARY_INSERT/DELETE, TERM_FREQ_UPDATE
-- [x] **Meta WAL records** - TXN_BEGIN/COMMIT/ABORT, CHECKPOINT_BEGIN/END, SCHEMA_CHANGE, CLR, PAGE_ALLOC/DEALLOC
+- [x] **Meta WAL records** - TXN_BEGIN/COMMIT/ABORT, CHECKPOINT_BEGIN/END, SCHEMA_CHANGE, CLR, PAGE_ALLOC/DEALLOC, FPI
 - [x] **Physiological logging strategy** - Page-level physical + intra-page logical. Vector data uses logical logging (operation + params) since HNSW insertion is non-deterministic
 
 ### Stage 3 - MVCC Strategy Decisions
@@ -122,9 +141,9 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 ### Stage 4 - Memory Architecture
 
 - [x] **Memory budget allocation system** - Configurable split:
-  - Buffer Pool: 40-60% (relational pages, B+Tree, graph adj, posting lists)
-  - HNSW Cache: 20-30% (Layer 1+ pinned, Layer 0 via buffer pool)
-  - Full-text Dictionary Cache: 5-10%
+  - Buffer Pool: 30-60% (relational pages, B+Tree, graph adj, posting lists)
+  - HNSW Cache: 10-30% (Layer 1+ pinned, Layer 0 via buffer pool)
+  - Full-text Dictionary Cache: 2-10%
   - Query Execution Memory: 10-15% (sort buffers, hash join, intermediates)
   - System Overhead: 5% (connections, WAL buffer, metadata)
 - [x] **Adaptive memory rebalancing** - Shift budget based on workload (no vector queries → shrink HNSW cache)
@@ -135,7 +154,7 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 - [x] **Error code format** - `VAIS-EECCNNN` (EE=engine, CC=category, NNN=number)
 - [x] **Engine codes** - 00=common, 01=SQL, 02=vector, 03=graph, 04=fulltext, 05=storage, 06=server, 07=client
-- [x] **Category codes** - 01=syntax, 02=constraint, 03=resource, 04=concurrency, 05=internal, 06=auth, 07=config, 08=io, 09=protocol, 10=limit
+- [x] **Category codes** - 01=syntax, 02=constraint, 03=resource, 04=concurrency, 05=internal, 06=auth, 07=config, 08=io, 09=type, 10=notfound
 - [x] **Initial error catalog** - Define all error codes for Phase 1-2 before implementation
 
 ### Stage 6 - Configuration System Design
@@ -368,7 +387,7 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 - [ ] **Node storage** - Node ID, labels (multi-label), properties (typed key-value pairs)
 - [ ] **Edge storage** - Edge ID, source, target, type, direction, properties
-- [ ] **Adjacency list with MVCC** - Each AdjEntry: `target_node, edge_type, txn_id_create, txn_id_expire`. Visibility check per edge during traversal
+- [ ] **Adjacency list with MVCC** - Each AdjEntry (42B packed): `target_node, edge_id, edge_type, txn_id_create, txn_id_expire, cmd_id, expire_cmd_id`. Visibility check per edge during traversal
 - [ ] **Label index** - B+Tree index on node/edge labels for fast label-based lookup
 - [ ] **Bidirectional WAL** - Edge insert/delete writes WAL for BOTH source and target adjacency lists
 
@@ -492,11 +511,11 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ---
 
-## Phase 7: RAG-Native Features
+## Phase 7: RAG & AI-Native Features
 
 > **Status**: ⏳ Planned
 > **Dependency**: Phase 6 (Hybrid Query Planner)
-> **Goal**: RAG pipeline built into the database
+> **Goal**: RAG pipeline and AI agent memory built into the database
 
 ### Stage 1 - Embedding Integration
 
@@ -529,6 +548,15 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 - [ ] **Source attribution** - Return source document/chunk IDs with every result
 - [ ] **Configurable pipeline** - Adjust retrieval depth, reranking weights, context window size
 
+### Stage 5 - Agent Memory Engine
+
+- [ ] **Memory type schema** - Built-in schemas for episodic (events/experiences), semantic (facts/knowledge), procedural (how-to/patterns), and working (active task context) memory types
+- [ ] **Hybrid memory retrieval** - `MEMORY_SEARCH(query, memory_types, max_tokens)` — single function that searches across vector (semantic similarity) + graph (relational context) + SQL (metadata filters) + full-text (keyword match) and fuses results
+- [ ] **Memory lifecycle management** - TTL-based expiration, importance decay (exponential decay with access-based refresh), memory consolidation (merge similar memories), and GC for expired memories
+- [ ] **Token budget management** - `max_tokens` parameter on retrieval: rank and truncate results to fit within LLM context window budget. Prioritize by recency, importance, and relevance score
+- [ ] **Memory importance scoring** - Automatic importance assignment based on access frequency, recency, explicit user marking, and cross-reference count. Importance decays over time unless refreshed
+- [ ] **Agent session continuity** - `CREATE AGENT SESSION` / `RESUME AGENT SESSION` for persistent agent state across interactions. Session graph links working memory to episodic memories created during the session
+
 ### Verification
 
 | Stage | Criteria |
@@ -537,6 +565,7 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 | 2 | Document insert → auto-chunked + embedded + graph-linked, TTL expiry works |
 | 3 | Context window includes relevant surrounding chunks via graph |
 | 4 | RAG_SEARCH returns attributed, fact-checked results with configurable pipeline |
+| 5 | MEMORY_SEARCH returns fused results within token budget, importance decay works, session continuity across reconnect |
 
 ---
 

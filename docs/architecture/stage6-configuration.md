@@ -59,6 +59,7 @@ archive_mode = "off"
 buffer_size = "16MB"
 group_commit_timeout_us = 1000
 checkpoint_interval_sec = 300
+checkpoint_wal_size = "256MB" # Trigger checkpoint when WAL exceeds this size
 
 [vector]
 hnsw_m = 16               # IMMUTABLE per index
@@ -79,6 +80,8 @@ transaction_timeout_sec = 300
 gc_io_limit_mbps = 50
 gc_cpu_limit_percent = 10
 gc_min_interval_sec = 60
+gc_schedule = ""              # Optional preferred GC window, e.g., "02:00-06:00"
+undo_log_max_size = "1GB"     # GC trigger threshold for undo log size
 
 [temp]
 directory = "auto"
@@ -201,6 +204,7 @@ wal.archive_mode          off         WAL archiving for PITR
 wal_buffer_size           16MB        WAL write buffer size. Larger values improve throughput for write-heavy workloads.
 temp_file_directory       auto        auto = <db_dir>/tmp/. Directory for temporary files (sort spill, hash join spill).
 log_file                  vaisdb.log  Log file path
+clog_cache_pages              8           CLOG memory cache size (pages). See Stage 3 CLOG design.
 tls_cert_file             (none)      TLS certificate path
 tls_key_file              (none)      TLS private key path
 ```
@@ -220,13 +224,16 @@ oversample_factor               2.0         SESSION  HNSW MVCC post-filter overs
 query_memory_limit              256MB       SESSION  Per-query memory cap
 query_timeout_sec               30          SESSION  Query execution timeout
 transaction_timeout_sec         300         SESSION  Transaction timeout
-max_concurrent_queries          auto        SESSION  auto = CPU cores * 2. Maximum simultaneously executing queries. Controls active query memory allocation.
-deadlock_detection_interval_ms  1000        SESSION  Interval between deadlock detection cycles (100-10000 ms)
+max_concurrent_queries          auto        GLOBAL   auto = CPU cores * 2. Maximum simultaneously executing queries. Server-wide limit, not session-overridable.
+deadlock_detection_interval_ms  1000        GLOBAL   Interval between deadlock detection cycles (100-10000 ms). Server-wide background process.
 slow_query_threshold_ms         1000        GLOBAL   Slow query log threshold
 default_isolation               snapshot    SESSION  Isolation level
 gc_io_limit_mbps                50          GLOBAL   GC I/O throttle
 gc_cpu_limit_percent            10          GLOBAL   GC CPU throttle
 gc_min_interval_sec             60          GLOBAL   GC frequency
+gc_schedule                         ""          GLOBAL   Preferred GC window, e.g., "02:00-06:00". Empty = anytime.
+undo_log_max_size                   1GB         GLOBAL   GC trigger: undo log size threshold
+wal_checkpoint_wal_size             256MB       GLOBAL   Trigger checkpoint when WAL exceeds size
 log_level                       info        GLOBAL   Log verbosity
 slow_query_log                  true        GLOBAL   Enable/disable slow query log
 group_commit_timeout_us         1000        GLOBAL   Group commit window
@@ -255,24 +262,28 @@ checkpoint_interval_sec         300         GLOBAL   Checkpoint frequency
 │ wal_buffer_size              │           │    ✓     │         │         │
 │ temp_file_directory          │           │    ✓     │         │         │
 │ log_file                     │           │    ✓     │         │         │
+│ clog_cache_pages             │           │    ✓     │         │         │
 │ tls_cert_file / tls_key_file │           │    ✓     │         │         │
 ├──────────────────────────────┼───────────┼──────────┼─────────┼─────────┤
 │ memory_budget                │           │          │    ✓    │         │
 │ *_percent (memory split)     │           │          │    ✓    │         │
 │ slow_query_threshold_ms      │           │          │    ✓    │         │
 │ gc_* settings                │           │          │    ✓    │         │
+│ gc_schedule                  │           │          │    ✓    │         │
+│ undo_log_max_size            │           │          │    ✓    │         │
+│ max_concurrent_queries       │           │          │    ✓    │         │
+│ deadlock_detection_interval  │           │          │    ✓    │         │
 │ log_level                    │           │          │    ✓    │         │
 │ slow_query_log               │           │          │    ✓    │         │
 │ group_commit_timeout_us      │           │          │    ✓    │         │
 │ checkpoint_interval_sec      │           │          │    ✓    │         │
+│ wal_checkpoint_wal_size      │           │          │    ✓    │         │
 ├──────────────────────────────┼───────────┼──────────┼─────────┼─────────┤
 │ hnsw_ef_search               │           │          │    ✓    │    ✓    │
 │ oversample_factor            │           │          │    ✓    │    ✓    │
 │ query_memory_limit           │           │          │    ✓    │    ✓    │
 │ query_timeout_sec            │           │          │    ✓    │    ✓    │
 │ transaction_timeout_sec      │           │          │    ✓    │    ✓    │
-│ max_concurrent_queries       │           │          │    ✓    │    ✓    │
-│ deadlock_detection_interval  │           │          │    ✓    │    ✓    │
 │ default_isolation            │           │          │    ✓    │    ✓    │
 └──────────────────────────────┴───────────┴──────────┴─────────┴─────────┘
 ```
@@ -339,8 +350,8 @@ SHOW CONFIG SOURCE;
 buffer_pool_percent + hnsw_cache_percent + dict_cache_percent + query_memory_percent ≤ 95
   (remaining ≥ 5% for system overhead)
 
-max_connections * 4.2MB < system_overhead_allocation
-  (enough memory for all connections)
+max_connections * 200KB + max_concurrent_queries * 4MB < system_overhead_allocation
+  (idle connections 200KB each + active queries 4MB each)
 
 query_memory_limit ≤ query_memory_percent * memory_budget
   (single query can't exceed pool)

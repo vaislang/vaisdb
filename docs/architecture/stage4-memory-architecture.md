@@ -184,7 +184,7 @@ I/O for HNSW Cache: Direct file read from vectors.vdb using mmap or buffered I/O
 
 Undo log pages are cached within the buffer pool allocation. Under heavy write workloads, undo pages may consume up to 10-15% of the buffer pool.
 
-Buffer pool eviction priority treats undo pages at priority 3 (between data pages at 2 and B+Tree leaf pages at 4): hot undo pages for active transactions are retained, expired undo pages are evicted first.
+Buffer pool eviction priority treats undo pages between clean data pages (priority 1) and B+Tree leaf pages (priority 2) in the eviction order: hot undo pages for active transactions are retained, expired undo pages are evicted first.
 
 ### Out-of-Memory Handling
 
@@ -306,6 +306,71 @@ wal_buffer_size: 16MB (default)
 
 ---
 
+## 7. Vais Memory Management Strategy
+
+### Component Allocation Strategy
+
+Each VaisDB component uses a memory allocation strategy tailored to its lifetime and access pattern:
+
+| Component | Allocator | Lifetime | Rationale |
+|-----------|-----------|----------|-----------|
+| Buffer Pool | PoolAllocator | Process | Fixed-size 8KB/16KB page slots, pre-allocated at startup. No fragmentation. |
+| Query Execution | Arena (per-query) | Query | Bulk-free on query completion. No per-object free overhead. Matches PostgreSQL MemoryContext pattern. |
+| WAL Buffer | Fixed malloc | Process | Single 16MB contiguous buffer. Allocated once, never resized during operation. |
+| Undo Log | BumpAllocator (per-txn) | Transaction | Fast sequential allocation for undo entries. Bulk-free on GC. |
+| HNSW Cache | PoolAllocator | Process | Fixed-size node slots for Layer 1+ pinned nodes. |
+| Sort/Hash Buffers | Arena (per-operator) | Operator | Allocated from query arena, released when operator completes. |
+| Connection State | malloc + defer | Connection | Small, long-lived. `defer` ensures cleanup on disconnect. |
+| Temporary Results | Arena (per-query) | Query | Intermediate results freed with query arena. |
+
+### Resource Cleanup with `defer`
+
+Vais's `defer` statement guarantees resource cleanup on all exit paths (normal return, early return, error propagation via `?`). This is critical for error-path correctness:
+
+```vais
+F open_and_process(path: Str) -> Result<(), Error> {
+    ~file = File.open(path)?;
+    defer file.close();
+
+    ~page = buffer_pool.fetch_page(page_id)?;
+    defer buffer_pool.release_page(page);
+
+    // Even if process() returns Err, both page and file are released
+    process(page)?;
+    Ok(())
+}
+```
+
+All buffer pool page acquisitions, file handles, lock acquisitions, and temporary allocations use `defer` for cleanup.
+
+### Arena-Based Query Memory (PostgreSQL MemoryContext Pattern)
+
+Each query execution creates a dedicated Arena allocator. All memory allocated during query execution (sort buffers, hash tables, intermediate results, expression evaluation temporaries) is allocated from this arena:
+
+```vais
+F execute_query(plan: &Plan, snapshot: &Snapshot) -> Result<ResultSet, Error> {
+    ~arena = Arena.new(query_memory_limit);
+    defer arena.destroy();  // Bulk-free everything at once
+
+    ~executor = Executor.new(&arena, plan, snapshot);
+    executor.run()
+}
+```
+
+Benefits:
+- **No memory leaks**: Arena destruction frees everything, regardless of error paths
+- **Fast allocation**: Bump pointer, no free-list management
+- **No fragmentation**: Arena is contiguous, freed as a whole
+- **Spill-to-disk**: When arena reaches `query_memory_limit`, operators spill to `tmp/`
+
+### Implementation References
+
+- `std/allocator.vais` — Base allocator trait, malloc/free wrappers
+- `std/arena.vais` — Arena allocator with bulk-free
+- `std/pool.vais` — Fixed-size pool allocator (for buffer pool page slots)
+
+---
+
 ## Verification Checklist
 
 | Item | Status | Notes |
@@ -317,5 +382,6 @@ wal_buffer_size: 16MB (default)
 | Adaptive rebalancing | Done | Workload-based with oscillation protection |
 | Memory pressure handling | Done | Eviction priority defined, HNSW L1+ pinned |
 | Per-query memory limit | Done | 256MB default, spill-to-disk |
-| Connection memory model | Done | ~4.2MB per connection |
+| Connection memory model | Done | ~200KB idle / ~4.2MB active per connection |
 | OOM handling | Done | Reject queries, never crash |
+| Vais memory management strategy | Done | Per-component allocators, defer cleanup, arena queries |

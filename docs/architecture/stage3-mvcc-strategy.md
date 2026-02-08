@@ -111,12 +111,13 @@ AdjEntry {
     txn_id_create:  u64,    // Transaction that created this edge
     txn_id_expire:  u64,    // Transaction that deleted this edge (0 = active)
     cmd_id:         u32,    // Command ID within creating transaction
+    expire_cmd_id:  u32,    // Command ID within deleting transaction
 }
 
-Total: 38 bytes per adjacency entry
+Total: 42 bytes per adjacency entry
 ```
 
-`cmd_id` enables correct visibility for self-referencing graph operations within a single transaction (e.g., INSERT edges from a `GRAPH_TRAVERSE` result in the same statement).
+`cmd_id` / `expire_cmd_id` enable correct visibility for self-referencing graph operations within a single transaction (e.g., INSERT edges from a `GRAPH_TRAVERSE` result in the same statement, or DELETE followed by re-traverse in the same transaction). These fields mirror `cmd_id` / `expire_cmd_id` in the tuple MVCC metadata (Stage 1) and PostingEntry (Section 5).
 
 Note: The struct uses packed/serialized layout (not C struct alignment) since it is an on-disk format. No padding bytes are added between fields.
 
@@ -139,29 +140,133 @@ fn is_edge_visible(entry: &AdjEntry, snapshot: &Snapshot) -> bool {
         return false;
     }
 
-    // If the expiring txn was aborted, the deletion was rolled back → edge is still visible
-    // (treat txn_id_expire as if it were 0)
-    let expire_is_effective = entry.txn_id_expire != 0
-                              && !is_aborted(entry.txn_id_expire);
+    let created_by = entry.txn_id_create;
+    let expired_by = entry.txn_id_expire;
+    // If the expiring txn was aborted, treat as not expired
+    let expired_by_effective = if expired_by != 0 && !is_aborted(expired_by) {
+        expired_by
+    } else {
+        0
+    };
 
-    // Created by committed txn visible to this snapshot
-    let created_visible = is_committed_before(entry.txn_id_create, snapshot)
-                          || entry.txn_id_create == snapshot.current_txn;
+    // Case 1: Created by current transaction — use cmd_id for same-txn visibility
+    if created_by == snapshot.current_txn {
+        if entry.cmd_id >= snapshot.current_cmd_id {
+            return false;  // Created by later command in same txn
+        }
+        if expired_by_effective == 0 {
+            return true;
+        }
+        if expired_by_effective == snapshot.current_txn {
+            return entry.expire_cmd_id >= snapshot.current_cmd_id;
+        }
+        return true;
+    }
 
-    // Not yet expired, or expired by uncommitted/aborted txn
-    let not_expired = !expire_is_effective
-                      || (!is_committed_before(entry.txn_id_expire, snapshot)
-                          && entry.txn_id_expire != snapshot.current_txn);
+    // Case 2: Created by committed transaction visible to this snapshot
+    if !is_committed_before(created_by, snapshot) {
+        return false;  // Creator not yet committed
+    }
 
-    created_visible && not_expired
+    // Case 3: Check expiration
+    if expired_by_effective == 0 {
+        return true;  // Not expired
+    }
+    if expired_by_effective == snapshot.current_txn {
+        return entry.expire_cmd_id >= snapshot.current_cmd_id;
+    }
+    if !is_committed_before(expired_by_effective, snapshot) {
+        return true;  // Expirer not yet committed = still visible
+    }
+    return false;  // Expired by committed transaction
 }
 ```
 
 The `is_committed_before(txn_id, snapshot)` function must consult the Transaction Status Table (CLOG equivalent) to distinguish between COMMITTED, ABORTED, and IN_PROGRESS states.
 
+> **Unified visibility pattern**: The `is_edge_visible()` function follows the same 3-case structure as the tuple `is_visible()` function in Stage 1, including `cmd_id`/`expire_cmd_id` handling for same-transaction operations. The `is_aborted()` fast-path is an optimization that short-circuits CLOG lookup for known-aborted creators. All three visibility functions (tuple, edge, posting entry) must be kept in sync — consider a single shared implementation during coding.
+
 ### Transaction Status Table (CLOG)
 
-A persistent structure mapping `txn_id` to status (`COMMITTED`, `ABORTED`, `IN_PROGRESS`). Stored in `meta.vdb`. Cached in memory for hot transactions. Required for both tuple and edge visibility checks.
+A persistent structure mapping `txn_id` to status (`COMMITTED`, `ABORTED`, `IN_PROGRESS`). Required for both tuple and edge visibility checks.
+
+#### Disk Format
+
+Each transaction status is encoded as 2 bits:
+
+```
+Value  Status
+─────  ──────
+0b00   IN_PROGRESS
+0b01   COMMITTED
+0b10   ABORTED
+0b11   RESERVED (for future use)
+```
+
+#### Page Layout
+
+CLOG data is stored in dedicated pages within `meta.vdb`:
+
+```
+CLOG uses the database's configured page size:
+
+  8KB pages (default):
+    Usable space: 8,192 - 48 (page header) = 8,144 bytes
+    Transactions per page: 8,144 × 4 = 32,576
+
+  16KB pages:
+    Usable space: 16,384 - 48 (page header) = 16,336 bytes
+    Transactions per page: 16,336 × 4 = 65,344
+
+General formula:
+  txns_per_page = (PAGE_SIZE - 48) * 4
+
+CLOG page addressing:
+  clog_page_number = txn_id / txns_per_page
+  byte_offset = (txn_id % txns_per_page) / 4
+  bit_offset = (txn_id % 4) * 2
+```
+
+#### Cache Strategy
+
+The most recent N CLOG pages are cached in memory (within the System Overhead memory budget). Hot transactions (recently committed/aborted) are almost always in the cached pages, avoiding disk reads for the common-case visibility checks.
+
+```
+Default cache: 8 pages = ~260K transaction statuses
+Configurable: clog_cache_pages (restart-required)
+```
+
+#### WAL Relationship
+
+CLOG updates are **not** separately WAL-logged. The `TXN_COMMIT` (0x01) and `TXN_ABORT` (0x02) WAL records implicitly define the CLOG state. During crash recovery, the REDO phase replays these records and reconstructs the CLOG:
+
+```
+Recovery REDO:
+  TXN_COMMIT record → set CLOG[txn_id] = COMMITTED
+  TXN_ABORT record  → set CLOG[txn_id] = ABORTED
+  No WAL record      → remains IN_PROGRESS (will be undone in UNDO phase)
+```
+
+This avoids double-writing transaction status (once in WAL, once in CLOG) and simplifies the WAL protocol.
+
+#### Garbage Collection
+
+CLOG pages for transactions below the `low_water_mark` (the oldest active transaction ID) can be truncated, since no active snapshot will ever query their status:
+
+```
+Truncation rule:
+  if all txn_ids on a CLOG page < low_water_mark:
+    page can be reclaimed (all statuses are either COMMITTED or ABORTED,
+    and no active reader cares)
+```
+
+#### File Location
+
+CLOG pages use page type `META` (0x00) with a dedicated region in `meta.vdb`. The meta page (page 0) stores the current CLOG page range (first_page, last_page) for efficient lookup.
+
+#### Crash Safety
+
+Since CLOG writes are not WAL-protected, a torn write to a CLOG page could leave incorrect transaction statuses on disk. VaisDB handles this by **reconstructing CLOG from WAL on every startup** during the REDO phase of crash recovery. The on-disk CLOG is treated as a cache that accelerates normal operation, not as the source of truth. Additionally, CLOG pages carry the standard page header checksum — if a checksum mismatch is detected during normal operation, the affected CLOG page is rebuilt by scanning the relevant WAL segment.
 
 ### Snapshot-Consistent Multi-Hop Traversal
 
@@ -280,14 +385,16 @@ PostingEntry {
     positions:      [u32],  // Term positions (variable length)
     txn_id_create:  u64,    // Transaction that created this entry
     txn_id_expire:  u64,    // Transaction that deleted this entry (0 = active)
+    cmd_id:         u32,    // Command sequence within creating transaction
+    expire_cmd_id:  u32,    // Command sequence within deleting transaction
 }
 
-MVCC overhead: 16 bytes per posting entry (txn_id_create + txn_id_expire)
+MVCC overhead: 24 bytes per posting entry (txn_id_create + txn_id_expire + cmd_id + expire_cmd_id)
 ```
 
 ### Visibility Check
 
-Visibility check is the same as tuple visibility: `is_visible(posting_entry, snapshot)`. Each posting entry's `txn_id_create` and `txn_id_expire` are evaluated against the current snapshot to determine if the entry should be included in search results.
+Visibility check is the same as tuple visibility: `is_visible(posting_entry, snapshot)`. Each posting entry's `txn_id_create`, `txn_id_expire`, `cmd_id`, and `expire_cmd_id` are evaluated against the current snapshot using the same logic as tuple visibility (including same-transaction cmd_id checks) to determine if the entry should be included in search results.
 
 ### Deletion Bitmap Optimization
 
@@ -501,10 +608,13 @@ T1: COMMIT
 |------|--------|-------|
 | In-place update + undo strategy | Done | Vector bloat prevented |
 | Vector MVCC post-filter | Done | Adaptive oversampling |
-| Graph adjacency MVCC | Done | Per-entry visibility, bitmap cache |
+| Graph adjacency MVCC | Done | Per-entry visibility (42B AdjEntry with cmd_id/expire_cmd_id), bitmap cache |
 | GC design (all engines) | Done | Low water mark, per-engine strategy |
 | GC I/O throttling | Done | Configurable limits |
 | Transaction timeout | Done | 5 min default, configurable |
 | Isolation levels | Done | Snapshot isolation default |
 | Write-write conflict | Done | First-committer-wins |
 | 10 concurrency scenarios | Done | All verified against visibility function |
+| CLOG detailed design | Done | 2-bit/txn, page layout (8KB/16KB), cache, WAL relationship, GC |
+| CLOG crash safety | Done | Reconstructed from WAL on startup; checksum-triggered rebuild |
+| Unified visibility pattern | Done | Tuple, edge, posting entry all use same 3-case + cmd_id logic |

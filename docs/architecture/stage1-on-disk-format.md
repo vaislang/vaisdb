@@ -113,7 +113,7 @@ Value  Name                Engine    Description
 0xFF   UNUSED              common    Unallocated page
 ```
 
-> **Note on WAL_SEGMENT (0x50)**: WAL segment files use their own 48-byte segment header format (see Stage 2), not the unified page header. This page type is reserved for future use if WAL data needs to be stored in the unified page format.
+> **Note on WAL_SEGMENT (0x50)**: WAL segment files use their own 32-byte segment header format (see Stage 2), not the unified page header. This page type is reserved for future use if WAL data needs to be stored in the unified page format.
 
 ### Engine Tags
 
@@ -164,6 +164,8 @@ Dimensions   Bytes (f32)   Fits in 8KB body?   Fits in 16KB body?
 1536         6,144         No (overflow)        Yes
 3072         12,288        No (overflow)        No (overflow)
 ```
+
+> **Note:** The table above shows raw vector data sizes only. Per-tuple MVCC metadata (32 bytes) and HNSW neighbor list pointers are stored separately and do not reduce the available space for vector data within the page body.
 
 ### Decision Rationale
 
@@ -330,7 +332,7 @@ fn is_visible(tuple: &Tuple, snapshot: &Snapshot) -> bool {
         return true;  // Not expired
     }
     if expired_by == snapshot.current_txn {
-        return false;  // Expired by current transaction
+        return tuple.expire_cmd_id >= snapshot.current_cmd_id;
     }
     if !is_committed_before(expired_by, snapshot) {
         return true;  // Expirer not yet committed = still visible

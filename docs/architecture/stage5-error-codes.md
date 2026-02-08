@@ -251,13 +251,13 @@ Internal errors (VAIS-00050xx) log full details to server log but return generic
 | Engine codes assigned | Done | 00-07, 08-99 reserved |
 | Category codes assigned | Done | 01-10, 11-99 reserved |
 | Common errors (EE=00) | Done | 19 error codes |
-| SQL errors (EE=01) | Done | 16 error codes |
+| SQL errors (EE=01) | Done | 17 error codes |
 | Vector errors (EE=02) | Done | 9 error codes |
 | Graph errors (EE=03) | Done | 8 error codes |
 | Full-text errors (EE=04) | Done | 4 error codes |
-| Storage errors (EE=05) | Done | 7 error codes |
+| Storage errors (EE=05) | Done | 8 error codes |
 | Server errors (EE=06) | Done | 4 error codes |
-| Total error codes | Done | 67 error codes |
+| Total error codes | Done | 69 error codes |
 | No conflicts | Done | All codes unique |
 | Extensible | Done | Reserved ranges for future |
 | Error sanitization | Done | No internal details to clients |

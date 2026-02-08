@@ -18,19 +18,19 @@ Offset  Size  Field           Type    Description
 0       8     lsn             u64     Log Sequence Number (monotonically increasing)
 8       8     txn_id          u64     Transaction that generated this record
 16      8     prev_lsn        u64     Previous LSN for this transaction (undo chain)
-24      1     record_type     u8      Type of WAL record (see registry)
-25      1     engine_type     u8      Engine that generated this record
-26      4     record_length   u32     Total record length including header and payload
-30      8     timestamp       u64     Unix timestamp in microseconds
-38      4     checksum        u32     CRC32C of entire record (header + payload)
+24      8     timestamp       u64     Unix timestamp in microseconds
+32      4     record_length   u32     Total record length including header and payload
+36      4     checksum        u32     CRC32C of entire record (header + payload)
+40      1     record_type     u8      Type of WAL record (see registry)
+41      1     engine_type     u8      Engine that generated this record
 42      6     reserved        [u8;6]  Reserved for alignment (must be 0x00)
 ```
 
 **Total header: 48 bytes**
 
-> **Alignment note:** The 42-byte header results in payload starting at a non-aligned offset. For implementation, two approaches: (a) pad header to 48 bytes with 6 reserved bytes for natural u64 alignment of payloads, or (b) use memcpy-based field access instead of pointer casts. Decision: pad to 48 bytes — add `reserved: [u8; 6]` at offset 42. This ensures all payload fields starting with u64 values are naturally aligned.
+> **Alignment note:** All fields are naturally aligned: u64 fields at 8-byte boundaries (offsets 0, 8, 16, 24), u32 fields at 4-byte boundaries (offsets 32, 36), u8 fields at any offset (40, 41). The 6 reserved bytes at offset 42 pad the header to 48 bytes, ensuring payload fields starting with u64 values are also naturally aligned. This eliminates unaligned access penalties and prevents bus errors on strict-alignment architectures (e.g., ARM).
 
-**Checksum computation:** The `checksum` field (offset 38, 4 bytes) is set to 0x00000000 before computing CRC32C over the entire record (header + payload). The computed value is then written back to the checksum field. This mirrors the same rule specified for page header checksums in Stage 1.
+**Checksum computation:** The `checksum` field (offset 36, 4 bytes) is set to 0x00000000 before computing CRC32C over the entire record (header + payload). The computed value is then written back to the checksum field. This mirrors the same rule specified for page header checksums in Stage 1.
 
 ### LSN Design
 
@@ -63,11 +63,14 @@ Value  Name                Payload
 0x06   CLR                 { original_record_type: u8, undo_next_lsn: u64, page_id: u32, file_id: u8 }
 0x07   PAGE_ALLOC          { file_id: u8, page_id: u32, page_type: u8 }
 0x08   PAGE_DEALLOC        { file_id: u8, page_id: u32 }
+0x09   FPI                 { file_id: u8, page_id: u32, page_data: [u8; PAGE_SIZE] }
 ```
 
 **CLR (Compensation Log Record):** Written during the UNDO phase of recovery. The `original_record_type` identifies the type of record being undone. The `undo_next_lsn` points to the next record to undo, preventing re-undo of already-undone operations if a crash occurs during recovery. CLRs are redo-only records. During recovery UNDO phase, CLRs are skipped (their `undo_next_lsn` is followed instead).
 
 **PAGE_ALLOC / PAGE_DEALLOC:** Records allocation and deallocation of pages from the free list. Prevents page leaks on crash. If PAGE_ALLOC is in WAL but the page is never used (crash before data written), recovery can return it to the free list.
+
+**FPI (Full Page Image):** Written on the first modification to a page after each checkpoint (see Stage 1, Section 6). Contains the complete page image before modification. Used during crash recovery to restore torn pages: if a page's checksum fails, the most recent FPI is used as the base, then subsequent redo records are replayed. FPI is written at most once per page per checkpoint cycle.
 
 ### Relational Records (0x10-0x1F)
 
@@ -108,19 +111,22 @@ Value  Name                Payload
 ```
 Value  Name                  Payload
 ─────  ────                  ───────
-0x30   GRAPH_NODE_INSERT     { node_id: u64, labels: Vec<String>, properties: bytes }
-0x31   GRAPH_NODE_DELETE     { node_id: u64, old_labels: Vec<String>, old_properties: bytes }
-0x32   GRAPH_EDGE_INSERT     { edge_id: u64, src: u64, dst: u64, edge_type: String,
+0x30   GRAPH_NODE_INSERT     { file_id: u8, page_id: u32,
+                               node_id: u64, labels: Vec<String>, properties: bytes }
+0x31   GRAPH_NODE_DELETE     { file_id: u8, page_id: u32,
+                               node_id: u64, old_labels: Vec<String>, old_properties: bytes }
+0x32   GRAPH_EDGE_INSERT     { file_id: u8, edge_id: u64, src: u64, dst: u64, edge_type: String,
                                properties: bytes, src_adj_page: u32, dst_adj_page: u32 }
-0x33   GRAPH_EDGE_DELETE     { edge_id: u64, src: u64, dst: u64,
+0x33   GRAPH_EDGE_DELETE     { file_id: u8, edge_id: u64, src: u64, dst: u64,
                                src_adj_page: u32, dst_adj_page: u32, old_data: bytes }
-0x34   GRAPH_PROPERTY_UPDATE { entity_type: u8, entity_id: u64,
+0x34   GRAPH_PROPERTY_UPDATE { file_id: u8, page_id: u32,
+                               entity_type: u8, entity_id: u64,
                                old_properties: bytes, new_properties: bytes }
-0x35   ADJ_LIST_PAGE_SPLIT   { node_id: u64, old_page: u32, new_page: u32,
+0x35   ADJ_LIST_PAGE_SPLIT   { file_id: u8, node_id: u64, old_page: u32, new_page: u32,
                                direction: u8, split_data: bytes }
 ```
 
-**Key: Edge operations (0x32, 0x33) record BOTH adjacency list pages** (source and destination). Crash recovery must update both or neither.
+**Physical page references in graph records:** All graph records include `file_id: u8` for ARIES-style redo (graph data lives in `graph.vdb`, file_id=2). Node records (0x30, 0x31) and property updates (0x34) include `page_id: u32` identifying the affected data page. Edge records (0x32, 0x33) use `src_adj_page` and `dst_adj_page` as their page references for both adjacency list pages. **Edge operations record BOTH adjacency list pages** (source and destination). Crash recovery must update both or neither.
 
 ### Full-Text Records (0x40-0x4F)
 
@@ -384,7 +390,7 @@ All WAL record payloads follow these binary serialization rules:
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Unified WAL record header | Done | 48 bytes (42 + 6 reserved), all fields specified |
+| Unified WAL record header | Done | 48 bytes, all fields naturally aligned (u64→8B, u32→4B boundaries) |
 | Relational WAL records | Done | PAGE_WRITE, TUPLE_*, BTREE_* |
 | Vector WAL records | Done | HNSW_*, VECTOR_*, QUANTIZATION_* |
 | Graph WAL records | Done | Bidirectional edge records, ADJ_LIST_SPLIT |
@@ -400,5 +406,7 @@ All WAL record payloads follow these binary serialization rules:
 | HNSW physical page references | Done | file_id + page_id on all HNSW records |
 | Checksum zeroing rule | Done | Set to 0 before CRC32C computation |
 | PAGE_ALLOC / PAGE_DEALLOC records | Done | Meta records 0x07, 0x08 for free list tracking |
+| FPI record type | Done | Meta record 0x09, full page image for torn write protection |
+| Graph physical page references | Done | file_id on all graph records, page_id on node/property records |
 | Binary serialization format | Done | Little-endian, length-prefixed strings/bytes, LEB128 varint |
-| Header alignment padding | Done | 6 reserved bytes at offset 42 for u64 alignment |
+| Header alignment padding | Done | All fields naturally aligned; 6 reserved bytes pad to 48 bytes |
