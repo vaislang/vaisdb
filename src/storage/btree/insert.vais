@@ -8,6 +8,10 @@ use storage/buffer/pool.{BufferPool};
 use storage/btree/tree.{BTree};
 use storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
 use storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry, compare_keys, key_equal, KeyCmp};
+use storage/wal/group_commit.{GroupCommitManager};
+use storage/btree/wal_integration.{wal_btree_insert, wal_btree_split};
+use storage/page/header.{PageHeader};
+use storage/page/flags.{PageFlags};
 
 # Result of an insert that may need to propagate upward
 L InsertResult =
@@ -20,6 +24,8 @@ F btree_insert(
     tree: &~BTree,
     key: &[u8],
     tid: u32,
+    txn_id: u64,
+    gcm: &~GroupCommitManager,
     pool: &~BufferPool,
 ) -> Result<bool, VaisError> {
     # Check for duplicate key first
@@ -39,6 +45,9 @@ F btree_insert(
 
     if leaf.can_fit(key.len() as u32) {
         # Simple case: leaf has space
+        # WAL-first: write WAL record before modifying page
+        ~tid_bytes = tid.to_le_bytes();
+        wal_btree_insert(gcm, txn_id, tree.file_id, leaf_info.page_id, key, &tid_bytes)?;
         leaf.insert(key, tid)?;
         ~flushed = leaf.flush();
         pool.write_page(leaf_frame, flushed)?;
@@ -49,13 +58,13 @@ F btree_insert(
 
     # Leaf is full, need to split
     # First do the split, then propagate separator up
-    ~split_result = split_leaf(tree, &leaf, key, tid, leaf_frame, pool)?;
+    ~split_result = split_leaf(tree, &leaf, key, tid, txn_id, gcm, leaf_frame, pool)?;
 
     # Propagate split up through internal nodes
     M split_result {
         InsertResult.Done => {},
         InsertResult.NeedsSplit(separator, new_page_id) => {
-            propagate_split(tree, &path, separator, new_page_id, pool)?;
+            propagate_split(tree, &path, separator, new_page_id, txn_id, gcm, pool)?;
         },
     }
 
@@ -126,6 +135,8 @@ F split_leaf(
     leaf: &BTreeLeafNode,
     key: &[u8],
     tid: u32,
+    txn_id: u64,
+    gcm: &~GroupCommitManager,
     leaf_frame: u32,
     pool: &~BufferPool,
 ) -> Result<InsertResult, VaisError> {
@@ -134,6 +145,13 @@ F split_leaf(
 
     # Allocate a new page for the right sibling
     ~new_page_id = pool.allocate_page(tree.file_id)?;
+
+    # WAL-first: write PAGE_ALLOC + BTREE_SPLIT before modifying pages
+    wal_btree_split(
+        gcm, txn_id, tree.file_id, leaf.header.page_id,
+        new_page_id, key, 1,  # direction=right
+    )?;
+
     ~new_frame = pool.fetch_page(tree.file_id, new_page_id)?;
 
     # Create the new leaf node
@@ -213,6 +231,8 @@ F propagate_split(
     path: &[PathEntry],
     separator: Vec<u8>,
     new_child_page: u32,
+    txn_id: u64,
+    gcm: &~GroupCommitManager,
     pool: &~BufferPool,
 ) -> Result<(), VaisError> {
     ~current_sep = separator;
@@ -238,7 +258,7 @@ F propagate_split(
 
         # Parent is full, need to split internal node
         ~(new_sep, new_internal_page) = split_internal(
-            tree, &internal, &current_sep, current_child, parent_frame, pool
+            tree, &internal, &current_sep, current_child, txn_id, gcm, parent_frame, pool
         )?;
         pool.unpin_page(parent_frame, true);
 
@@ -248,7 +268,7 @@ F propagate_split(
     }
 
     # If we get here, the root itself was split — need a new root
-    create_new_root(tree, &current_sep, tree.root_page_id, current_child, pool)?;
+    create_new_root(tree, &current_sep, tree.root_page_id, current_child, txn_id, gcm, pool)?;
 
     Ok(())
 }
@@ -260,6 +280,8 @@ F split_internal(
     internal: &BTreeInternalNode,
     new_key: &[u8],
     new_child: u32,
+    txn_id: u64,
+    gcm: &~GroupCommitManager,
     internal_frame: u32,
     pool: &~BufferPool,
 ) -> Result<(Vec<u8>, u32), VaisError> {
@@ -292,6 +314,13 @@ F split_internal(
 
     # Allocate new internal node
     ~new_page_id = pool.allocate_page(tree.file_id)?;
+
+    # WAL-first: write PAGE_ALLOC + BTREE_SPLIT before modifying pages
+    wal_btree_split(
+        gcm, txn_id, tree.file_id, internal.header.page_id,
+        new_page_id, &push_up_key, 1,
+    )?;
+
     ~new_frame = pool.fetch_page(tree.file_id, new_page_id)?;
 
     # Left internal: keys [0..mid], children [0..mid+1]
@@ -325,9 +354,18 @@ F create_new_root(
     separator: &[u8],
     left_child: u32,
     right_child: u32,
+    txn_id: u64,
+    gcm: &~GroupCommitManager,
     pool: &~BufferPool,
 ) -> Result<(), VaisError> {
     ~new_root_page = pool.allocate_page(tree.file_id)?;
+
+    # WAL-first: log the new root allocation
+    wal_btree_split(
+        gcm, txn_id, tree.file_id, left_child,
+        new_root_page, separator, 1,
+    )?;
+
     ~new_root_frame = pool.fetch_page(tree.file_id, new_root_page)?;
 
     ~root = BTreeInternalNode.new(new_root_page, tree.page_size, true);
@@ -338,8 +376,15 @@ F create_new_root(
     pool.write_page(new_root_frame, flushed)?;
     pool.unpin_page(new_root_frame, true);
 
-    # Clear root flag on old root
-    # (handled at higher level or by page type)
+    # Clear IS_ROOT flag on the old root node
+    ~old_root_frame = pool.fetch_page(tree.file_id, left_child)?;
+    ~old_root_data = pool.get_page(old_root_frame);
+    ~old_header = PageHeader.from_bytes(old_root_data)?;
+    ~old_flags = old_header.get_flags();
+    old_flags.set_root(false);
+    old_header.set_flags(old_flags);
+    old_header.serialize_into(old_root_data);
+    pool.unpin_page(old_root_frame, true);
 
     tree.set_root(new_root_page);
     Ok(())

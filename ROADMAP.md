@@ -4,7 +4,7 @@
 > **Version**: 0.1.0 (Design Phase)
 > **Goal**: Vector + Graph + Relational + Full-Text search in a single DB, optimized for RAG
 > **Language**: Pure Vais (with C FFI for system calls)
-> **Last Updated**: 2026-02-08
+> **Last Updated**: 2026-02-09
 
 ---
 
@@ -217,6 +217,22 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 > **Dependency**: Phase 0 (Architecture Decisions) + Vais Phase 31 (fsync, mmap, flock)
 > **Goal**: Unified storage layer shared by all 4 engines, WAL-based ACID
 > **Completed**: 2026-02-08
+
+### Phase 1 Review Fixes (2026-02-09)
+모드: 자동진행
+- [x] 1. 상수 추가 + fulltext WAL file_id 추가 (Sonnet 위임) ✅ 2026-02-09
+  변경: src/storage/constants.vais (DEFAULT_CHECKPOINT_WAL_SIZE 추가), src/storage/wal/record_fulltext.vais (PostingListAppend/DeletePayload에 file_id:u8 추가)
+- [x] 2. Group Commit condvar batching 구현 (Sonnet 위임) ✅ 2026-02-09
+  변경: src/storage/wal/group_commit.vais (즉시 flush → condvar wait_timeout 배치 처리)
+- [x] 3. B+Tree insert WAL-first 순서 + root flag fix (Opus 직접) ✅ 2026-02-09
+  변경: src/storage/btree/insert.vais (GCM 파라미터 추가, wal_btree_insert/wal_btree_split 호출, IS_ROOT 플래그 해제)
+- [x] 4. B+Tree delete redistribution 완성 (Sonnet 위임) ✅ 2026-02-09
+  변경: src/storage/btree/delete.vais (redistribute_from_left/right에서 parent separator 실제 갱신 + flush)
+- [x] 5. Buffer Pool read-ahead 통합 + FPI 호출 (Sonnet 위임) ✅ 2026-02-09
+  변경: src/storage/buffer/pool.vais (ReadAhead 통합, prefetch_pages, flush_all_dirty_pages 추가)
+- [x] 6. ROADMAP.md 동기화 (Opus 직접) ✅ 2026-02-09
+  변경: ROADMAP.md (Phase 1 Review Fixes 섹션 추가)
+진행률: 6/6 (100%)
 
 ### Stage 1 - Page Manager
 

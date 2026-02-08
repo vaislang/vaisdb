@@ -126,12 +126,20 @@ I GroupCommitManager {
             return Ok(());
         }
 
-        # Otherwise, wait for timeout or another txn to trigger flush
-        # In real implementation: condvar wait with timeout
-        # For now: just flush immediately (degenerate case)
+        # Wait for timeout or another txn to trigger flush
+        # condvar wait with timeout: batches concurrent commits into one fsync
+        ~waited = self.flush_cv.wait_timeout(guard, self.config.timeout_us as u64);
+
+        # After wakeup: check if our LSN has been flushed by another thread
+        if self.flushed_lsn >= commit_lsn {
+            drop(waited);
+            return Ok(());
+        }
+
+        # Our LSN not yet flushed — we are the flush leader for this batch
         self.do_flush()?;
 
-        drop(guard);
+        drop(waited);
         Ok(())
     }
 

@@ -13,6 +13,7 @@ use std/bytes.{ByteBuffer};
 S PostingListAppendPayload {
     term_hash: u64,
     page_id: u32,
+    file_id: u8,            # Physical file reference for ARIES redo
     entry: Vec<u8>,         # Serialized posting entry
 }
 
@@ -20,17 +21,20 @@ I PostingListAppendPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.term_hash);
         buf.put_u32_le(self.page_id);
+        buf.put_u8(self.file_id);
         write_bytes(buf, &self.entry);
     }
 
     F deserialize(buf: &ByteBuffer) -> Result<PostingListAppendPayload, VaisError> {
         ~term_hash = buf.get_u64_le()?;
         ~page_id = buf.get_u32_le()?;
+        ~file_id = buf.get_u8()?;
         ~entry = read_bytes(buf)?;
 
         Ok(PostingListAppendPayload {
             term_hash,
             page_id,
+            file_id,
             entry,
         })
     }
@@ -43,6 +47,7 @@ I PostingListAppendPayload {
 S PostingListDeletePayload {
     term_hash: u64,
     page_id: u32,
+    file_id: u8,            # Physical file reference for ARIES redo
     doc_id: u64,
 }
 
@@ -50,17 +55,20 @@ I PostingListDeletePayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.term_hash);
         buf.put_u32_le(self.page_id);
+        buf.put_u8(self.file_id);
         buf.put_u64_le(self.doc_id);
     }
 
     F deserialize(buf: &ByteBuffer) -> Result<PostingListDeletePayload, VaisError> {
         ~term_hash = buf.get_u64_le()?;
         ~page_id = buf.get_u32_le()?;
+        ~file_id = buf.get_u8()?;
         ~doc_id = buf.get_u64_le()?;
 
         Ok(PostingListDeletePayload {
             term_hash,
             page_id,
+            file_id,
             doc_id,
         })
     }

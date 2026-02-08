@@ -12,6 +12,7 @@ use storage/checksum.{calculate_page_checksum};
 use storage/buffer/frame.{BufferFrame, PageLocation, FrameState};
 use storage/buffer/clock.{ClockReplacer};
 use storage/buffer/dirty_tracker.{DirtyTracker};
+use storage/buffer/readahead.{ReadAhead};
 
 # Buffer pool: caches pages in memory to reduce disk I/O
 S BufferPool {
@@ -19,6 +20,7 @@ S BufferPool {
     page_table: HashMap<u64, u32>,  # (file_id << 32 | page_id) -> frame_id
     replacer: ClockReplacer,
     dirty_tracker: DirtyTracker,
+    readahead: ReadAhead,
     page_manager: PageManager,
     page_size: u32,
     capacity: u32,                  # Max number of frames
@@ -64,6 +66,7 @@ I BufferPool {
             page_table: HashMap.new(),
             replacer: ClockReplacer.new(capacity),
             dirty_tracker: DirtyTracker.new(),
+            readahead: ReadAhead.new(),
             page_manager,
             page_size,
             capacity,
@@ -76,9 +79,10 @@ I BufferPool {
     # Fetch a page into the buffer pool, returns frame_id
     # The page is pinned (pin_count = 1) on return
     F fetch_page(~self, file_id: u8, page_id: u32) -> Result<u32, VaisError> {
-        ~key = make_page_key(file_id, page_id);
+        # Notify read-ahead tracker of this access
+        self.readahead.notify_access(file_id, page_id);
 
-        ~guard = self.lock.lock();
+        ~key = make_page_key(file_id, page_id);
 
         # Check if page is already in buffer pool
         if self.page_table.contains_key(&key) {
@@ -117,6 +121,14 @@ I BufferPool {
         self.page_table.insert(key, frame_id);
 
         drop(guard2);
+
+        # Trigger prefetch if sequential access pattern detected
+        M self.readahead.should_prefetch(file_id, page_id) {
+            Some((start_page, count)) => {
+                self.prefetch_pages(file_id, start_page, count);
+            },
+            None => {},
+        }
 
         Ok(frame_id)
     }
@@ -184,6 +196,17 @@ I BufferPool {
         }
         self.page_manager.sync_all()?;
         Ok(())
+    }
+
+    # Flush all dirty pages and return count (used by checkpoint)
+    F flush_all_dirty_pages(~self) -> Result<u32, VaisError> {
+        ~dirty_pages = self.dirty_tracker.get_dirty_pages();
+        ~count = dirty_pages.len() as u32;
+        for entry in &dirty_pages {
+            self.flush_page(entry.frame_id)?;
+        }
+        self.page_manager.sync_all()?;
+        Ok(count)
     }
 
     # Release a page from the buffer pool (unpin + evict if needed)
@@ -260,6 +283,52 @@ I BufferPool {
     # Clear FPI flag for a frame (after FPI has been written)
     F clear_fpi(~self, frame_id: u32) {
         self.frames[frame_id as usize].set_needs_fpi(false);
+    }
+
+    # Prefetch pages asynchronously (best-effort, errors ignored)
+    F prefetch_pages(~self, file_id: u8, start_page: u32, count: u32) {
+        for i in 0..count {
+            ~pg = start_page + i;
+            ~key = make_page_key(file_id, pg);
+            # Skip if already in buffer pool
+            ~guard = self.lock.lock();
+            ~already_loaded = self.page_table.contains_key(&key);
+            drop(guard);
+            if already_loaded { continue; }
+
+            # Best-effort: silently ignore prefetch failures
+            M self.page_manager.read_page(file_id, pg) {
+                Ok(page_data) => {
+                    ~guard2 = self.lock.lock();
+                    # Recheck (race)
+                    if self.page_table.contains_key(&key) {
+                        drop(guard2);
+                        continue;
+                    }
+                    M self.get_free_frame() {
+                        Ok(fid) => {
+                            ~loc = PageLocation.new(file_id, pg);
+                            self.frames[fid as usize].load(loc, &page_data);
+                            self.page_table.insert(key, fid);
+                            # Prefetched pages start unpinned
+                            self.frames[fid as usize].unpin();
+                        },
+                        Err(_) => {
+                            # No free frames — stop prefetching
+                            drop(guard2);
+                            return;
+                        },
+                    }
+                    drop(guard2);
+                },
+                Err(_) => { return; },  # Hit end of file or error — stop
+            }
+        }
+    }
+
+    # Get read-ahead prefetcher reference
+    F get_readahead(~self) -> &~ReadAhead {
+        &self.readahead
     }
 }
 

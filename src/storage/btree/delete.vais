@@ -251,12 +251,11 @@ F redistribute_from_left(
     # Update parent separator: new separator = first key of right
     ~new_sep = right.get_key(0).to_vec();
     if child_idx > 0 {
-        ~old_entry = &parent.entries[child_idx - 1];
-        # Update the separator key in parent
-        # For simplicity, remove and re-insert
-        ~child_page = old_entry.child_page;
-        # This is a simplified approach; a full implementation would
-        # update the key in-place
+        ~sep_idx = child_idx - 1;
+        ~child_page = parent.entries[sep_idx].child_page;
+        parent.entries.remove(sep_idx);
+        parent.insert_entry(&new_sep, child_page)?;
+        parent.header.item_count = parent.entries.len() as u16;
     }
 
     # Flush all modified pages
@@ -264,6 +263,8 @@ F redistribute_from_left(
     pool.write_page(left_frame, left_flushed)?;
     ~right_flushed = right.flush();
     pool.write_page(right_frame, right_flushed)?;
+    ~parent_flushed = parent.flush();
+    pool.write_page(parent_frame, parent_flushed)?;
 
     Ok(())
 }
@@ -289,7 +290,13 @@ F redistribute_from_right(
     # Update parent separator: new separator = first key of right (after removal)
     if right.entry_count() > 0 {
         ~new_sep = right.get_key(0).to_vec();
-        # Update parent separator at child_idx
+        # The separator at child_idx points to the right sibling
+        if child_idx < parent.entries.len() {
+            ~child_page = parent.entries[child_idx].child_page;
+            parent.entries.remove(child_idx);
+            parent.insert_entry(&new_sep, child_page)?;
+            parent.header.item_count = parent.entries.len() as u16;
+        }
     }
 
     # Flush all modified pages
@@ -297,6 +304,8 @@ F redistribute_from_right(
     pool.write_page(left_frame, left_flushed)?;
     ~right_flushed = right.flush();
     pool.write_page(right_frame, right_flushed)?;
+    ~parent_flushed = parent.flush();
+    pool.write_page(parent_frame, parent_flushed)?;
 
     Ok(())
 }

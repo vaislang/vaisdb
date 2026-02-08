@@ -118,6 +118,9 @@ L DEFAULT_TXN_TIMEOUT_SEC: u32 = 300;
 # Checkpoint interval default (seconds)
 L DEFAULT_CHECKPOINT_INTERVAL_SEC: u32 = 300;
 
+# Checkpoint WAL size trigger (bytes) - 256MB
+L DEFAULT_CHECKPOINT_WAL_SIZE: u64 = 268435456;
+
 # Max TID values (compact 4-byte encoding)
 L TID_PAGE_BITS: u32 = 20;
 L TID_SLOT_BITS: u32 = 12;
