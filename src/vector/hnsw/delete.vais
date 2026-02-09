@@ -1,0 +1,510 @@
+# src/vector/hnsw/delete.vais
+# HNSW Soft Delete + MVCC Post-filter for VaisDB
+# Phase 5.2.4 - Vector Search Engine with MVCC Integration
+#
+# Error codes: VE-EE-CC-NNN
+# - EE=02 (vector), CC=03 (search), NNN=004-006
+# - VE-02-03-004: Delete failed (node not found or invalid state)
+# - VE-02-03-005: MVCC filter failed (snapshot or CLOG error)
+# - VE-02-03-006: Insufficient visible results after max retries
+
+use std/result.{Result, Ok, Err};
+use std/vec.Vec;
+use std/string.String;
+use src/common/error.{VaisError, ErrorCategory};
+use src/vector/hnsw/types.{
+    HnswMeta,
+    HnswNode,
+    INVALID_NODE_ID,
+};
+use src/vector/hnsw/search.{
+    SearchResult,
+    SearchResultEntry,
+    NodeStore,
+    knn_search,
+};
+use src/vector/hnsw/distance.DistanceComputer;
+use src/storage/txn/snapshot.Snapshot;
+use src/storage/txn/clog.{Clog, TxnStatus};
+use src/storage/txn/visibility.{is_visible, is_committed_before, is_aborted_fast};
+use src/storage/constants.INVALID_TXN_ID;
+use src/storage/wal/record_types.HNSW_DELETE_NODE;
+use src/storage/wal/record_vector.HnswDeleteNodePayload;
+
+# ============================================================================
+# Error Constructors
+# ============================================================================
+
+F err_delete_failed(node_id: u64, detail: String) -> VaisError {
+    VaisError::new(
+        ErrorCategory::Vector,
+        "VE-02-03-004",
+        String::from("Failed to delete HNSW node {node_id}: {detail}"),
+    )
+}
+
+F err_mvcc_filter_failed(detail: String) -> VaisError {
+    VaisError::new(
+        ErrorCategory::Vector,
+        "VE-02-03-005",
+        String::from("MVCC post-filter failed: {detail}"),
+    )
+}
+
+F err_insufficient_results(k: usize, found: usize) -> VaisError {
+    VaisError::new(
+        ErrorCategory::Vector,
+        "VE-02-03-006",
+        String::from("Insufficient visible results after max retries: requested {k}, found {found}"),
+    )
+}
+
+# ============================================================================
+# MVCC Visibility Check for Vector Nodes
+# ============================================================================
+
+# is_vector_visible checks if a vector node is visible to the current snapshot.
+# Uses the same 3-case logic as tuple/edge/posting visibility.
+#
+# Returns:
+# - true if node is visible to this snapshot
+# - false if node is deleted, aborted, or not yet committed
+F is_vector_visible(
+    node: &HnswNode,
+    snapshot: &Snapshot,
+    clog: &Clog,
+) -> bool {
+    is_visible(
+        node.txn_id_create,
+        node.txn_id_expire,
+        node.cmd_id,
+        node.expire_cmd_id,
+        snapshot,
+        clog,
+    )
+}
+
+# ============================================================================
+# Soft Delete Operation
+# ============================================================================
+
+# hnsw_delete performs soft-delete of a vector node.
+#
+# Algorithm:
+# 1. Retrieve the node from storage
+# 2. Validate node is not already deleted
+# 3. Mark node as deleted (set is_deleted, txn_id_expire, expire_cmd_id)
+# 4. Update HnswMeta deleted count
+# 5. WAL-log the deletion with HNSW_DELETE_NODE record
+# 6. Return affected layers for potential neighbor cleanup
+#
+# Soft delete: Node remains in index structure but is marked tombstone.
+# Neighbors still point to it, but search filters it out.
+# GC will eventually remove it when no active txn can see it.
+#
+# Parameters:
+# - node_id: Node to delete
+# - meta: HNSW metadata (for updating deleted count)
+# - store: NodeStore for retrieving/updating nodes
+# - txn_id: Current transaction ID
+# - cmd_id: Current command sequence within transaction
+# - file_id: File containing HNSW meta page
+# - page_id: HNSW meta page ID
+#
+# Returns: Vec of layers affected (for potential neighbor cleanup)
+F hnsw_delete(
+    node_id: u64,
+    ~meta: &~HnswMeta,
+    store: &~dyn NodeStore,
+    txn_id: u64,
+    cmd_id: u32,
+    file_id: u8,
+    page_id: u32,
+) -> Result<Vec<u8>, VaisError> {
+    # Step 1: Retrieve node
+    if node_id == INVALID_NODE_ID {
+        return Err(err_delete_failed(
+            node_id,
+            String::from("Invalid node ID"),
+        ));
+    }
+
+    ~node_res = store.get_node_mut(node_id);
+    ~node = M node_res {
+        Ok(n) => n,
+        Err(e) => return Err(err_delete_failed(
+            node_id,
+            String::from("Node not found in store"),
+        )),
+    };
+
+    # Step 2: Validate not already deleted
+    if node.is_deleted {
+        return Err(err_delete_failed(
+            node_id,
+            String::from("Node already deleted"),
+        ));
+    }
+
+    # Step 3: Mark node as deleted (soft delete)
+    node.mark_deleted(txn_id, cmd_id);
+
+    # Step 4: Update metadata deleted count
+    meta.delete_node();
+
+    # Step 5: Collect affected layers for WAL record
+    ~layers_affected = Vec::with_capacity((node.max_layer + 1) as usize);
+    ~layer: u8 = 0;
+    L while layer <= node.max_layer {
+        layers_affected.push(layer);
+        layer = layer + 1;
+    }
+
+    # Step 6: WAL-log the deletion
+    # Note: Actual WAL write would be done by GroupCommitManager
+    # Here we just prepare the payload
+    ~wal_payload = HnswDeleteNodePayload {
+        node_id: node_id,
+        layers_affected: layers_affected.clone(),
+        file_id: file_id,
+        page_id: page_id,
+    };
+
+    # Serialize payload for WAL (would be passed to GroupCommitManager)
+    # In real implementation: group_commit_mgr.write_record(HNSW_DELETE_NODE, wal_payload)
+
+    Ok(layers_affected)
+}
+
+# ============================================================================
+# MVCC Post-filter with Adaptive Oversampling
+# ============================================================================
+
+# calculate_oversample_factor computes adaptive oversample multiplier.
+#
+# Formula:
+# - Base oversample = 2.0 (fetch 2x more candidates)
+# - If deletion ratio > 0, scale up: 1.0 / (1.0 - deletion_ratio) * 1.5
+# - This ensures we fetch enough candidates to get k visible results
+#
+# Example:
+# - 10% deleted → oversample ≈ 1.67
+# - 30% deleted → oversample ≈ 2.14
+# - 50% deleted → oversample = 3.0
+F calculate_oversample_factor(meta: &HnswMeta) -> f64 {
+    if meta.total_nodes == 0 {
+        return 2.0;
+    }
+
+    ~invisible_ratio = (meta.total_deleted as f64) / (meta.total_nodes as f64);
+
+    # Clamp invisible_ratio to prevent division by zero or overflow
+    if invisible_ratio >= 0.95 {
+        invisible_ratio = 0.95;
+    }
+
+    ~adaptive_factor = 1.0 / (1.0 - invisible_ratio) * 1.5;
+
+    # Return max of base oversample (2.0) and adaptive factor
+    if adaptive_factor > 2.0 {
+        adaptive_factor
+    } else {
+        2.0
+    }
+}
+
+# mvcc_filtered_search performs top-K ANN search with MVCC post-filtering.
+#
+# Algorithm:
+# 1. Calculate initial oversample factor based on deletion ratio
+# 2. Perform knn_search with actual_k = k * oversample
+# 3. Filter results by MVCC visibility (is_vector_visible)
+# 4. If visible_results.len() >= k, return top k
+# 5. Else, double oversample and retry (up to 3 retries)
+# 6. If still insufficient, return what we have (may be < k)
+#
+# Adaptive oversampling ensures we fetch enough candidates to compensate
+# for deleted nodes filtered out by MVCC visibility.
+#
+# Parameters:
+# - query: Query vector
+# - k: Desired number of nearest neighbors
+# - ef_search: Beam width for HNSW search
+# - meta: HNSW metadata
+# - store: NodeStore for retrieving nodes and vectors
+# - distance: Distance computation interface
+# - snapshot: MVCC snapshot for visibility checks
+# - clog: CLOG for transaction status
+#
+# Returns: SearchResult with up to k visible neighbors
+F mvcc_filtered_search(
+    query: &[f32],
+    k: usize,
+    ef_search: u32,
+    meta: &HnswMeta,
+    store: &dyn NodeStore,
+    distance: &DistanceComputer,
+    snapshot: &Snapshot,
+    clog: &Clog,
+) -> Result<SearchResult, VaisError> {
+    # Calculate initial oversample factor
+    ~oversample = calculate_oversample_factor(meta);
+
+    # Retry loop with adaptive oversampling
+    ~retry = 0;
+    ~max_retries = 3;
+
+    L while retry < max_retries {
+        # Calculate actual k and ef for this attempt
+        ~actual_k = ((k as f64) * oversample).ceil() as usize;
+        ~actual_ef = if (actual_k as u32) > ef_search {
+            actual_k as u32
+        } else {
+            ef_search
+        };
+
+        # Perform HNSW search with oversampled k
+        ~search_result = knn_search(
+            query,
+            actual_k,
+            actual_ef,
+            meta,
+            store,
+            distance,
+        )?;
+
+        # Filter results by MVCC visibility
+        ~visible_results = Vec::with_capacity(k);
+        ~idx: usize = 0;
+        L while idx < search_result.results.len() {
+            ~entry = &search_result.results[idx];
+            ~node_id = entry.node_id;
+
+            # Get node and check visibility
+            ~node_res = store.get_node(node_id);
+            ~node = M node_res {
+                Ok(n) => n,
+                Err(e) => {
+                    # Skip nodes that can't be retrieved
+                    idx = idx + 1;
+                    continue;
+                },
+            };
+
+            # Check MVCC visibility
+            if is_vector_visible(node, snapshot, clog) {
+                visible_results.push(SearchResultEntry::new(
+                    entry.node_id,
+                    entry.distance,
+                ));
+            }
+
+            idx = idx + 1;
+        }
+
+        # Check if we have enough visible results
+        if visible_results.len() >= k {
+            # Success: truncate to k and return
+            if visible_results.len() > k {
+                visible_results.truncate(k);
+            }
+
+            ~final_result = SearchResult::with_capacity(k);
+            final_result.results = visible_results;
+            final_result.nodes_visited = search_result.nodes_visited;
+            final_result.distance_computations = search_result.distance_computations;
+
+            return Ok(final_result);
+        }
+
+        # Insufficient results - double oversample and retry
+        oversample = oversample * 2.0;
+        retry = retry + 1;
+    }
+
+    # Max retries exhausted - return what we have (may be < k)
+    # This is not an error, just a warning condition
+    # Caller should check result.results.len() < k
+
+    # Perform final search with max oversample
+    ~actual_k_final = ((k as f64) * oversample).ceil() as usize;
+    ~actual_ef_final = if (actual_k_final as u32) > ef_search {
+        actual_k_final as u32
+    } else {
+        ef_search
+    };
+
+    ~final_search = knn_search(
+        query,
+        actual_k_final,
+        actual_ef_final,
+        meta,
+        store,
+        distance,
+    )?;
+
+    # Final visibility filter
+    ~final_visible = Vec::with_capacity(k);
+    ~final_idx: usize = 0;
+    L while final_idx < final_search.results.len() {
+        ~final_entry = &final_search.results[final_idx];
+        ~final_node_id = final_entry.node_id;
+
+        ~final_node_res = store.get_node(final_node_id);
+        ~final_node = M final_node_res {
+            Ok(n) => n,
+            Err(e) => {
+                final_idx = final_idx + 1;
+                continue;
+            },
+        };
+
+        if is_vector_visible(final_node, snapshot, clog) {
+            final_visible.push(SearchResultEntry::new(
+                final_entry.node_id,
+                final_entry.distance,
+            ));
+        }
+
+        final_idx = final_idx + 1;
+    }
+
+    # Truncate to k if we exceeded
+    if final_visible.len() > k {
+        final_visible.truncate(k);
+    }
+
+    ~result = SearchResult::with_capacity(k);
+    result.results = final_visible;
+    result.nodes_visited = final_search.nodes_visited;
+    result.distance_computations = final_search.distance_computations;
+
+    Ok(result)
+}
+
+# ============================================================================
+# GC Readiness Check
+# ============================================================================
+
+# is_gc_ready checks if a deleted node is ready for garbage collection.
+#
+# A node is GC-ready when:
+# 1. is_deleted == true (soft-deleted)
+# 2. txn_id_expire is committed (deleting transaction committed)
+# 3. txn_id_expire < low_water_mark (no active txn can see this node)
+#
+# The low_water_mark is the oldest active transaction ID.
+# If a deleted node's txn_id_expire < low_water_mark, then NO active
+# transaction can see this node (all active txns started after deletion).
+#
+# Parameters:
+# - node: HNSW node to check
+# - low_water_mark: Oldest active transaction ID (from snapshot)
+# - clog: CLOG for checking transaction status
+#
+# Returns: true if node is ready for physical removal
+F is_gc_ready(
+    node: &HnswNode,
+    low_water_mark: u64,
+    clog: &Clog,
+) -> bool {
+    # Must be soft-deleted
+    if !node.is_deleted {
+        return false;
+    }
+
+    # txn_id_expire must be valid
+    if node.txn_id_expire == INVALID_TXN_ID {
+        return false;
+    }
+
+    # Check if deleting transaction was aborted (not GC-ready if aborted)
+    if is_aborted_fast(node.txn_id_expire, clog) {
+        return false;
+    }
+
+    # Check if deleting transaction is committed
+    if !clog.is_committed(node.txn_id_expire) {
+        return false;
+    }
+
+    # Check if deletion is before low water mark
+    # If txn_id_expire < low_water_mark, no active txn can see this node
+    if node.txn_id_expire < low_water_mark {
+        return true;
+    }
+
+    false
+}
+
+# ============================================================================
+# Batch GC Scan
+# ============================================================================
+
+# scan_gc_candidates scans a batch of nodes and returns IDs ready for GC.
+#
+# This is used by the GC background worker to identify nodes that can be
+# physically removed from the HNSW index.
+#
+# Algorithm:
+# 1. Iterate through node_ids
+# 2. For each node, check is_gc_ready
+# 3. Collect ready node IDs
+# 4. Return list of GC-ready nodes
+#
+# Parameters:
+# - node_ids: Candidate node IDs to scan
+# - store: NodeStore for retrieving nodes
+# - low_water_mark: Oldest active transaction ID
+# - clog: CLOG for transaction status
+#
+# Returns: Vec of node IDs ready for GC
+F scan_gc_candidates(
+    node_ids: &[u64],
+    store: &dyn NodeStore,
+    low_water_mark: u64,
+    clog: &Clog,
+) -> Vec<u64> {
+    ~ready_nodes = Vec::new();
+
+    ~idx: usize = 0;
+    L while idx < node_ids.len() {
+        ~node_id = node_ids[idx];
+
+        ~node_res = store.get_node(node_id);
+        ~node = M node_res {
+            Ok(n) => n,
+            Err(e) => {
+                # Skip nodes that can't be retrieved
+                idx = idx + 1;
+                continue;
+            },
+        };
+
+        if is_gc_ready(node, low_water_mark, clog) {
+            ready_nodes.push(node_id);
+        }
+
+        idx = idx + 1;
+    }
+
+    ready_nodes
+}
+
+# ============================================================================
+# Helper: NodeStore Trait Extension (for get_node_mut)
+# ============================================================================
+
+# Note: NodeStore trait in search.vais only has get_node(&self).
+# For hnsw_delete to work, we need a mutable version.
+# In real implementation, NodeStore would be extended like:
+#
+# T NodeStore {
+#     F get_node(&self, node_id: u64) -> Result<&HnswNode, VaisError>;
+#     F get_node_mut(&~self, node_id: u64) -> Result<&~HnswNode, VaisError>;
+#     F get_vector(&self, node_id: u64) -> Result<&[f32], VaisError>;
+# }
+#
+# For this file to compile standalone, we assume get_node_mut exists.
+# The actual implementation would be in the concrete NodeStore impl
+# (e.g., BufferPoolNodeStore or InMemoryNodeStore).

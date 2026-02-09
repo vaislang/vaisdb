@@ -1,0 +1,539 @@
+# src/vector/hnsw/search.vais
+# HNSW Top-K ANN Search Implementation
+# Phase 5.2.3 - Vector Search Engine
+#
+# Error codes: VE-EE-CC-NNN
+# - EE=02 (vector), CC=03 (search), NNN=001-003
+# - VE-02-03-001: Empty index (no entry point)
+# - VE-02-03-002: Invalid K parameter (K=0 or K > total nodes)
+# - VE-02-03-003: Search layer traversal failed
+
+use std/result.{Result, Ok, Err};
+use std/vec.Vec;
+use std/hashset.HashSet;
+use std/string.String;
+use src/common/error.{VaisError, ErrorCategory};
+use src/vector/hnsw/types.{
+    HnswMeta,
+    HnswNode,
+    HnswNeighbor,
+    SearchCandidate,
+    INVALID_NODE_ID,
+};
+use src/vector/hnsw/distance.DistanceComputer;
+
+# ============================================================================
+# Public API Structs
+# ============================================================================
+
+S SearchResultEntry {
+    node_id: u64,
+    distance: f32,
+}
+
+I SearchResultEntry {
+    F new(node_id: u64, distance: f32) -> SearchResultEntry {
+        SearchResultEntry {
+            node_id: node_id,
+            distance: distance,
+        }
+    }
+}
+
+S SearchResult {
+    results: Vec<SearchResultEntry>,
+    nodes_visited: u64,
+    distance_computations: u64,
+}
+
+I SearchResult {
+    F new() -> SearchResult {
+        SearchResult {
+            results: Vec::new(),
+            nodes_visited: 0,
+            distance_computations: 0,
+        }
+    }
+
+    F with_capacity(k: usize) -> SearchResult {
+        SearchResult {
+            results: Vec::with_capacity(k),
+            nodes_visited: 0,
+            distance_computations: 0,
+        }
+    }
+
+    F add_result(~self, entry: SearchResultEntry) {
+        self.results.push(entry);
+    }
+
+    F increment_visited(~self) {
+        self.nodes_visited = self.nodes_visited + 1;
+    }
+
+    F increment_computations(~self) {
+        self.distance_computations = self.distance_computations + 1;
+    }
+
+    F sort_by_distance(~self) {
+        # Sort results by distance in ascending order (closest first)
+        self.results.sort_by(|a, b| {
+            if a.distance < b.distance {
+                -1
+            } else if a.distance > b.distance {
+                1
+            } else {
+                0
+            }
+        });
+    }
+
+    F truncate(~self, k: usize) {
+        if self.results.len() > k {
+            self.results.truncate(k);
+        }
+    }
+}
+
+# ============================================================================
+# NodeStore Trait - Interface for retrieving nodes and vectors
+# ============================================================================
+
+T NodeStore {
+    F get_node(&self, node_id: u64) -> Result<&HnswNode, VaisError>;
+    F get_vector(&self, node_id: u64) -> Result<&[f32], VaisError>;
+}
+
+# ============================================================================
+# Priority Queue Implementation using sorted Vec
+# ============================================================================
+
+# MinHeap: sorted ascending, pop_min() removes front (smallest distance)
+S MinHeap {
+    candidates: Vec<SearchCandidate>,
+}
+
+I MinHeap {
+    F new() -> MinHeap {
+        MinHeap {
+            candidates: Vec::new(),
+        }
+    }
+
+    F with_capacity(capacity: usize) -> MinHeap {
+        MinHeap {
+            candidates: Vec::with_capacity(capacity),
+        }
+    }
+
+    F push(~self, candidate: SearchCandidate) {
+        # Insert in sorted order (ascending by distance)
+        ~inserted = false;
+        ~i: usize = 0;
+        L while i < self.candidates.len() {
+            if candidate.distance < self.candidates[i].distance {
+                self.candidates.insert(i, candidate);
+                inserted = true;
+                break;
+            }
+            i = i + 1;
+        }
+        if !inserted {
+            self.candidates.push(candidate);
+        }
+    }
+
+    F pop_min(~self) -> Option<SearchCandidate> {
+        if self.candidates.is_empty() {
+            Option::None
+        } else {
+            Option::Some(self.candidates.remove(0))
+        }
+    }
+
+    F is_empty(&self) -> bool {
+        self.candidates.is_empty()
+    }
+
+    F len(&self) -> usize {
+        self.candidates.len()
+    }
+}
+
+# MaxHeap: sorted descending, pop_max() removes front (largest distance)
+# peek_max() returns reference to front (largest distance)
+S MaxHeap {
+    candidates: Vec<SearchCandidate>,
+}
+
+I MaxHeap {
+    F new() -> MaxHeap {
+        MaxHeap {
+            candidates: Vec::new(),
+        }
+    }
+
+    F with_capacity(capacity: usize) -> MaxHeap {
+        MaxHeap {
+            candidates: Vec::with_capacity(capacity),
+        }
+    }
+
+    F push(~self, candidate: SearchCandidate) {
+        # Insert in sorted order (descending by distance)
+        ~inserted = false;
+        ~i: usize = 0;
+        L while i < self.candidates.len() {
+            if candidate.distance > self.candidates[i].distance {
+                self.candidates.insert(i, candidate);
+                inserted = true;
+                break;
+            }
+            i = i + 1;
+        }
+        if !inserted {
+            self.candidates.push(candidate);
+        }
+    }
+
+    F pop_max(~self) -> Option<SearchCandidate> {
+        if self.candidates.is_empty() {
+            Option::None
+        } else {
+            Option::Some(self.candidates.remove(0))
+        }
+    }
+
+    F peek_max(&self) -> Option<&SearchCandidate> {
+        if self.candidates.is_empty() {
+            Option::None
+        } else {
+            Option::Some(&self.candidates[0])
+        }
+    }
+
+    F is_empty(&self) -> bool {
+        self.candidates.is_empty()
+    }
+
+    F len(&self) -> usize {
+        self.candidates.len()
+    }
+
+    F to_vec(self) -> Vec<SearchCandidate> {
+        self.candidates
+    }
+}
+
+# ============================================================================
+# Search Layer - Beam search within a single HNSW layer
+# ============================================================================
+
+# search_layer_ef performs beam search at a specific layer with ef parameter.
+#
+# Algorithm:
+# 1. Initialize visited set, candidates (MinHeap), result (MaxHeap)
+# 2. Add entry points to visited, candidates, and result
+# 3. While candidates not empty:
+#    a. Pop closest candidate c from candidates
+#    b. If c.distance > farthest in result, break (can't improve)
+#    c. For each neighbor of c at this layer:
+#       - Skip if already visited or deleted
+#       - Compute distance to query
+#       - If closer than farthest in result OR result.len < ef:
+#         * Add to candidates and result
+#         * If result.len > ef, evict farthest
+# 4. Return result set
+F search_layer_ef(
+    query: &[f32],
+    entry_points: &[SearchCandidate],
+    ef: u32,
+    layer: u8,
+    store: &dyn NodeStore,
+    distance: &DistanceComputer,
+    ~stats: &~SearchResult,
+) -> Result<Vec<SearchCandidate>, VaisError> {
+    ~visited: HashSet<u64> = HashSet::new();
+    ~candidates = MinHeap::with_capacity(ef as usize);
+    ~result = MaxHeap::with_capacity(ef as usize);
+
+    # Initialize with entry points
+    ~ep_idx: usize = 0;
+    L while ep_idx < entry_points.len() {
+        ~ep = &entry_points[ep_idx];
+        visited.insert(ep.node_id);
+        candidates.push(SearchCandidate::new(ep.node_id, ep.distance));
+        result.push(SearchCandidate::new(ep.node_id, ep.distance));
+        ep_idx = ep_idx + 1;
+    }
+
+    # Beam search loop
+    L while !candidates.is_empty() {
+        ~c_opt = candidates.pop_min();
+        M c_opt {
+            Option::None => break,
+            Option::Some(c) => {
+                # Check if we can still improve result set
+                ~f_opt = result.peek_max();
+                M f_opt {
+                    Option::Some(f) => {
+                        if c.distance > f.distance {
+                            break;
+                        }
+                    },
+                    Option::None => {},
+                }
+
+                # Get current node
+                ~node = store.get_node(c.node_id)?;
+                stats.increment_visited();
+
+                # Get neighbors at this layer
+                ~neighbors = node.get_neighbors(layer)?;
+
+                # Explore each neighbor
+                ~n_idx: usize = 0;
+                L while n_idx < neighbors.len() {
+                    ~neighbor = &neighbors[n_idx];
+                    ~n_id = neighbor.node_id;
+
+                    # Skip if already visited
+                    if visited.contains(&n_id) {
+                        n_idx = n_idx + 1;
+                        continue;
+                    }
+
+                    visited.insert(n_id);
+
+                    # Get neighbor node and check if deleted
+                    ~n_node = store.get_node(n_id)?;
+                    if n_node.is_deleted {
+                        n_idx = n_idx + 1;
+                        continue;
+                    }
+
+                    # Compute distance to query
+                    ~n_vec = store.get_vector(n_id)?;
+                    ~dist_n = distance.compute(query, n_vec)?;
+                    stats.increment_computations();
+
+                    # Check if this neighbor should be added to result set
+                    ~should_add = false;
+                    ~f_dist_opt = result.peek_max();
+                    M f_dist_opt {
+                        Option::Some(f_dist) => {
+                            if dist_n < f_dist.distance || (result.len() as u32) < ef {
+                                should_add = true;
+                            }
+                        },
+                        Option::None => {
+                            should_add = true;
+                        },
+                    }
+
+                    if should_add {
+                        ~new_candidate = SearchCandidate::new(n_id, dist_n);
+                        candidates.push(SearchCandidate::new(n_id, dist_n));
+                        result.push(new_candidate);
+
+                        # Evict farthest if result set exceeds ef
+                        if (result.len() as u32) > ef {
+                            result.pop_max();
+                        }
+                    }
+
+                    n_idx = n_idx + 1;
+                }
+            },
+        }
+    }
+
+    # Return result set as Vec
+    Ok(result.to_vec())
+}
+
+# ============================================================================
+# KNN Search - Main entry point for top-K ANN search
+# ============================================================================
+
+# knn_search performs top-K approximate nearest neighbor search through HNSW graph.
+#
+# Algorithm:
+# 1. Validate parameters (non-empty index, K > 0)
+# 2. Phase 1: Greedy descent from top layer to layer 1
+#    - At each layer, search with ef=1 to find single closest node
+#    - Use that node as entry point for next lower layer
+# 3. Phase 2: Beam search at layer 0 with ef_search
+#    - Explore neighborhood with ef_search candidates
+#    - Maintain top ef_search closest nodes
+# 4. Sort final candidates by distance, return top K
+#
+# Returns: SearchResult with up to K nearest neighbors, sorted by distance
+F knn_search(
+    query: &[f32],
+    k: usize,
+    ef_search: u32,
+    meta: &HnswMeta,
+    store: &dyn NodeStore,
+    distance: &DistanceComputer,
+) -> Result<SearchResult, VaisError> {
+    # Validate parameters
+    if meta.is_empty() {
+        ~err_msg = String::from("Cannot search in empty HNSW index");
+        return Err(VaisError::new(
+            ErrorCategory::Vector,
+            "VE-02-03-001",
+            err_msg,
+        ));
+    }
+
+    if k == 0 || (k as u64) > meta.total_nodes {
+        ~err_msg = String::from("Invalid K parameter: must be 0 < K <= total_nodes");
+        return Err(VaisError::new(
+            ErrorCategory::Vector,
+            "VE-02-03-002",
+            err_msg,
+        ));
+    }
+
+    # Initialize search result with statistics tracking
+    ~result = SearchResult::with_capacity(k);
+
+    # Get entry point
+    ~ep_id = meta.entry_point;
+    if ep_id == INVALID_NODE_ID {
+        ~err_msg = String::from("Invalid entry point in HNSW meta");
+        return Err(VaisError::new(
+            ErrorCategory::Vector,
+            "VE-02-03-001",
+            err_msg,
+        ));
+    }
+
+    # Compute distance to entry point
+    ~ep_vec = store.get_vector(ep_id)?;
+    ~ep_dist = distance.compute(query, ep_vec)?;
+    result.increment_computations();
+
+    ~current_candidates = Vec::with_capacity(1);
+    current_candidates.push(SearchCandidate::new(ep_id, ep_dist));
+
+    # Phase 1: Greedy descent from max_layer down to layer 1
+    # At each upper layer, use ef=1 to find single closest node
+    ~lc = meta.max_layer;
+    L while lc >= 1 {
+        ~layer_result = search_layer_ef(
+            query,
+            &current_candidates,
+            1,  # ef=1 for greedy descent
+            lc,
+            store,
+            distance,
+            &~result,
+        )?;
+
+        if layer_result.is_empty() {
+            ~err_msg = String::from("Search layer returned empty result during descent");
+            return Err(VaisError::new(
+                ErrorCategory::Vector,
+                "VE-02-03-003",
+                err_msg,
+            ));
+        }
+
+        # Use closest node as entry point for next layer
+        current_candidates.clear();
+        current_candidates.push(layer_result[0]);
+
+        if lc == 0 {
+            break;
+        }
+        lc = lc - 1;
+    }
+
+    # Phase 2: Beam search at layer 0 with ef_search
+    ~final_candidates = search_layer_ef(
+        query,
+        &current_candidates,
+        ef_search,
+        0,  # layer 0
+        store,
+        distance,
+        &~result,
+    )?;
+
+    # Sort candidates by distance (ascending) and take top K
+    # Convert SearchCandidate to SearchResultEntry
+    ~idx: usize = 0;
+    L while idx < final_candidates.len() {
+        ~candidate = &final_candidates[idx];
+        result.add_result(SearchResultEntry::new(
+            candidate.node_id,
+            candidate.distance,
+        ));
+        idx = idx + 1;
+    }
+
+    result.sort_by_distance();
+    result.truncate(k);
+
+    Ok(result)
+}
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+# greedy_search_single performs greedy search to find single closest node at a layer.
+# Used during descent phase from top layer to layer 1.
+F greedy_search_single(
+    query: &[f32],
+    entry_point: u64,
+    layer: u8,
+    store: &dyn NodeStore,
+    distance: &DistanceComputer,
+    ~stats: &~SearchResult,
+) -> Result<SearchCandidate, VaisError> {
+    ~ep_vec = store.get_vector(entry_point)?;
+    ~current_dist = distance.compute(query, ep_vec)?;
+    stats.increment_computations();
+
+    ~current_id = entry_point;
+    ~improved = true;
+
+    # Greedy descent: keep moving to closer neighbor until local minimum
+    L while improved {
+        improved = false;
+        ~node = store.get_node(current_id)?;
+        stats.increment_visited();
+
+        ~neighbors = node.get_neighbors(layer)?;
+
+        ~n_idx: usize = 0;
+        L while n_idx < neighbors.len() {
+            ~neighbor = &neighbors[n_idx];
+            ~n_id = neighbor.node_id;
+
+            # Skip deleted nodes
+            ~n_node = store.get_node(n_id)?;
+            if n_node.is_deleted {
+                n_idx = n_idx + 1;
+                continue;
+            }
+
+            ~n_vec = store.get_vector(n_id)?;
+            ~n_dist = distance.compute(query, n_vec)?;
+            stats.increment_computations();
+
+            if n_dist < current_dist {
+                current_dist = n_dist;
+                current_id = n_id;
+                improved = true;
+            }
+
+            n_idx = n_idx + 1;
+        }
+    }
+
+    Ok(SearchCandidate::new(current_id, current_dist))
+}

@@ -1,0 +1,449 @@
+# distance.vais - Vector distance computation module
+#
+# Provides three distance metrics:
+# - Cosine distance: 1.0 - (dot(a,b) / (norm(a) * norm(b)))
+# - L2 (Euclidean) distance: sqrt(sum((a[i] - b[i])^2))
+# - Dot product distance: -dot(a,b) (negated for consistent ordering)
+#
+# Features:
+# - Pure Vais scalar implementations
+# - C FFI stubs for SIMD optimization (NEON/AVX2)
+# - Runtime dispatch based on DistanceMetric enum
+# - Dimension validation and error handling
+#
+# Error codes: VAIS-0205NNN (EE=02 vector, CC=05 internal)
+
+use std/math.{sqrt};
+use storage/error.{VaisError};
+
+# ============================================================================
+# Distance Metric Enum
+# ============================================================================
+
+# Distance metric types supported by the vector engine
+L DistanceMetric =
+    Cosine |      # Cosine distance: 1 - cos(a,b), range [0, 2]
+    L2 |          # Euclidean distance: sqrt(sum((a-b)^2))
+    DotProduct;   # Negative dot product: -dot(a,b)
+
+# ============================================================================
+# Error Handling
+# ============================================================================
+
+# Error: Vector dimension mismatch
+# Code: VAIS-0205001
+F err_dimension_mismatch(dim_a: usize, dim_b: usize) -> VaisError {
+    VaisError.new(
+        "VAIS-0205001",
+        "Vector dimension mismatch: {dim_a} vs {dim_b}"
+    )
+}
+
+# Error: Invalid vector dimension (zero or negative)
+# Code: VAIS-0205002
+F err_invalid_dimension(dim: usize) -> VaisError {
+    VaisError.new(
+        "VAIS-0205002",
+        "Invalid vector dimension: {dim}"
+    )
+}
+
+# Error: Zero vector magnitude (cannot normalize)
+# Code: VAIS-0205003
+F err_zero_magnitude() -> VaisError {
+    VaisError.new(
+        "VAIS-0205003",
+        "Cannot compute distance with zero-magnitude vector"
+    )
+}
+
+# ============================================================================
+# Dimension Validation
+# ============================================================================
+
+# Validates that two vectors have matching dimensions
+F validate_dimensions(a: &[f32], b: &[f32]) -> Result<(), VaisError> {
+    ~ dim_a = a.len();
+    ~ dim_b = b.len();
+
+    if dim_a == 0 {
+        return Err(err_invalid_dimension(dim_a));
+    }
+
+    if dim_a != dim_b {
+        return Err(err_dimension_mismatch(dim_a, dim_b));
+    }
+
+    Ok(())
+}
+
+# ============================================================================
+# Scalar Implementations
+# ============================================================================
+
+# Cosine distance (scalar implementation)
+# Formula: 1.0 - (dot(a,b) / (norm(a) * norm(b)))
+# Range: [0, 2] where 0 = identical, 2 = opposite
+F cosine_distance_scalar(a: &[f32], b: &[f32]) -> f32 {
+    ~ dot_product: f32 = 0.0;
+    ~ norm_a: f32 = 0.0;
+    ~ norm_b: f32 = 0.0;
+
+    ~ i: usize = 0;
+    L {
+        if i >= a.len() { break; }
+
+        ~ a_i = a[i];
+        ~ b_i = b[i];
+
+        dot_product = dot_product + (a_i * b_i);
+        norm_a = norm_a + (a_i * a_i);
+        norm_b = norm_b + (b_i * b_i);
+
+        i = i + 1;
+    }
+
+    # Add epsilon to avoid division by zero
+    ~ epsilon: f32 = 1e-8;
+    ~ magnitude = sqrt(norm_a) * sqrt(norm_b);
+
+    if magnitude < epsilon {
+        # Zero magnitude vector - return max distance
+        return 2.0;
+    }
+
+    ~ cosine_sim = dot_product / magnitude;
+
+    # Clamp to [-1, 1] to handle floating point errors
+    if cosine_sim > 1.0 {
+        cosine_sim = 1.0;
+    }
+    if cosine_sim < -1.0 {
+        cosine_sim = -1.0;
+    }
+
+    # Return cosine distance
+    1.0 - cosine_sim
+}
+
+# L2 (Euclidean) distance (scalar implementation)
+# Formula: sqrt(sum((a[i] - b[i])^2))
+F l2_distance_scalar(a: &[f32], b: &[f32]) -> f32 {
+    ~ sum_sq: f32 = 0.0;
+
+    ~ i: usize = 0;
+    L {
+        if i >= a.len() { break; }
+
+        ~ diff = a[i] - b[i];
+        sum_sq = sum_sq + (diff * diff);
+
+        i = i + 1;
+    }
+
+    sqrt(sum_sq)
+}
+
+# Dot product distance (scalar implementation)
+# Formula: -dot(a, b)
+# Negated so lower values = more similar (consistent with other metrics)
+F dot_product_scalar(a: &[f32], b: &[f32]) -> f32 {
+    ~ dot: f32 = 0.0;
+
+    ~ i: usize = 0;
+    L {
+        if i >= a.len() { break; }
+
+        dot = dot + (a[i] * b[i]);
+
+        i = i + 1;
+    }
+
+    # Negate for consistent ordering (lower = closer)
+    -dot
+}
+
+# ============================================================================
+# SIMD FFI Stubs (C implementations)
+# ============================================================================
+
+# NEON (ARM) optimized implementations
+extern "C" F simd_cosine_neon_f32(a: *f32, b: *f32, dim: u32) -> f32;
+extern "C" F simd_l2_neon_f32(a: *f32, b: *f32, dim: u32) -> f32;
+extern "C" F simd_dot_neon_f32(a: *f32, b: *f32, dim: u32) -> f32;
+
+# AVX2 (x86-64) optimized implementations
+extern "C" F simd_cosine_avx2_f32(a: *f32, b: *f32, dim: u32) -> f32;
+extern "C" F simd_l2_avx2_f32(a: *f32, b: *f32, dim: u32) -> f32;
+extern "C" F simd_dot_avx2_f32(a: *f32, b: *f32, dim: u32) -> f32;
+
+# ============================================================================
+# Distance Computer
+# ============================================================================
+
+# Distance computer with runtime dispatch
+S DistanceComputer {
+    metric: DistanceMetric,
+}
+
+I DistanceComputer {
+    # Create a new distance computer for the given metric
+    F new(metric: DistanceMetric) -> DistanceComputer {
+        DistanceComputer { metric: metric }
+    }
+
+    # Compute distance between two vectors
+    # Returns error if dimensions don't match or vectors are invalid
+    F compute(&self, a: &[f32], b: &[f32]) -> Result<f32, VaisError> {
+        # Validate dimensions
+        validate_dimensions(a, b)?;
+
+        # Dispatch based on metric type
+        ~ distance = M self.metric {
+            DistanceMetric::Cosine => {
+                cosine_distance_scalar(a, b)
+            },
+            DistanceMetric::L2 => {
+                l2_distance_scalar(a, b)
+            },
+            DistanceMetric::DotProduct => {
+                dot_product_scalar(a, b)
+            },
+        };
+
+        Ok(distance)
+    }
+
+    # Compute distance with SIMD optimization (if available)
+    # Falls back to scalar implementation if SIMD not supported
+    F compute_simd(&self, a: &[f32], b: &[f32]) -> Result<f32, VaisError> {
+        # Validate dimensions
+        validate_dimensions(a, b)?;
+
+        # For now, just use scalar implementation
+        # TODO: Add runtime CPU feature detection and dispatch to SIMD
+        # when C FFI implementations are available
+        self.compute(a, b)
+    }
+
+    # Get the distance metric type
+    F metric(&self) -> DistanceMetric {
+        self.metric
+    }
+}
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+# Normalize a vector to unit length
+# Returns a new vector with magnitude 1.0
+F normalize_vector(v: &[f32]) -> Result<Vec<f32>, VaisError> {
+    if v.len() == 0 {
+        return Err(err_invalid_dimension(0));
+    }
+
+    # Compute magnitude
+    ~ sum_sq: f32 = 0.0;
+    ~ i: usize = 0;
+    L {
+        if i >= v.len() { break; }
+        ~ val = v[i];
+        sum_sq = sum_sq + (val * val);
+        i = i + 1;
+    }
+
+    ~ magnitude = sqrt(sum_sq);
+    ~ epsilon: f32 = 1e-8;
+
+    if magnitude < epsilon {
+        return Err(err_zero_magnitude());
+    }
+
+    # Create normalized vector
+    ~ normalized = Vec::new();
+    i = 0;
+    L {
+        if i >= v.len() { break; }
+        normalized.push(v[i] / magnitude);
+        i = i + 1;
+    }
+
+    Ok(normalized)
+}
+
+# Normalize a vector in-place
+F normalize_vector_inplace(v: &~[f32]) -> Result<(), VaisError> {
+    if v.len() == 0 {
+        return Err(err_invalid_dimension(0));
+    }
+
+    # Compute magnitude
+    ~ sum_sq: f32 = 0.0;
+    ~ i: usize = 0;
+    L {
+        if i >= v.len() { break; }
+        ~ val = v[i];
+        sum_sq = sum_sq + (val * val);
+        i = i + 1;
+    }
+
+    ~ magnitude = sqrt(sum_sq);
+    ~ epsilon: f32 = 1e-8;
+
+    if magnitude < epsilon {
+        return Err(err_zero_magnitude());
+    }
+
+    # Normalize in-place
+    i = 0;
+    L {
+        if i >= v.len() { break; }
+        v[i] = v[i] / magnitude;
+        i = i + 1;
+    }
+
+    Ok(())
+}
+
+# Compute vector magnitude (L2 norm)
+F vector_magnitude(v: &[f32]) -> f32 {
+    ~ sum_sq: f32 = 0.0;
+
+    ~ i: usize = 0;
+    L {
+        if i >= v.len() { break; }
+        ~ val = v[i];
+        sum_sq = sum_sq + (val * val);
+        i = i + 1;
+    }
+
+    sqrt(sum_sq)
+}
+
+# Compute dot product between two vectors (without negation)
+F dot_product(a: &[f32], b: &[f32]) -> Result<f32, VaisError> {
+    validate_dimensions(a, b)?;
+
+    ~ dot: f32 = 0.0;
+    ~ i: usize = 0;
+    L {
+        if i >= a.len() { break; }
+        dot = dot + (a[i] * b[i]);
+        i = i + 1;
+    }
+
+    Ok(dot)
+}
+
+# ============================================================================
+# Batch Distance Computation
+# ============================================================================
+
+# Compute distances from a query vector to multiple candidate vectors
+# Returns a vector of distances in the same order as candidates
+F batch_compute_distances(
+    computer: &DistanceComputer,
+    query: &[f32],
+    candidates: &[&[f32]]
+) -> Result<Vec<f32>, VaisError> {
+    ~ distances = Vec::new();
+
+    ~ i: usize = 0;
+    L {
+        if i >= candidates.len() { break; }
+
+        ~ distance = computer.compute(query, candidates[i])?;
+        distances.push(distance);
+
+        i = i + 1;
+    }
+
+    Ok(distances)
+}
+
+# ============================================================================
+# Tests
+# ============================================================================
+
+#[test]
+F test_cosine_distance_identical() {
+    ~ a = vec![1.0, 0.0, 0.0];
+    ~ b = vec![1.0, 0.0, 0.0];
+    ~ dist = cosine_distance_scalar(&a, &b);
+
+    # Identical vectors should have distance ~0
+    assert!(dist < 0.001);
+}
+
+#[test]
+F test_cosine_distance_orthogonal() {
+    ~ a = vec![1.0, 0.0, 0.0];
+    ~ b = vec![0.0, 1.0, 0.0];
+    ~ dist = cosine_distance_scalar(&a, &b);
+
+    # Orthogonal vectors should have distance ~1
+    assert!((dist - 1.0).abs() < 0.001);
+}
+
+#[test]
+F test_l2_distance() {
+    ~ a = vec![0.0, 0.0, 0.0];
+    ~ b = vec![3.0, 4.0, 0.0];
+    ~ dist = l2_distance_scalar(&a, &b);
+
+    # Distance should be 5.0 (3-4-5 triangle)
+    assert!((dist - 5.0).abs() < 0.001);
+}
+
+#[test]
+F test_dot_product_distance() {
+    ~ a = vec![1.0, 2.0, 3.0];
+    ~ b = vec![4.0, 5.0, 6.0];
+    ~ dist = dot_product_scalar(&a, &b);
+
+    # dot(a,b) = 4 + 10 + 18 = 32, negated = -32
+    assert!((dist + 32.0).abs() < 0.001);
+}
+
+#[test]
+F test_normalize_vector() {
+    ~ v = vec![3.0, 4.0, 0.0];
+    ~ normalized = normalize_vector(&v).unwrap();
+
+    # Magnitude should be 1.0
+    ~ mag = vector_magnitude(&normalized);
+    assert!((mag - 1.0).abs() < 0.001);
+
+    # Values should be 0.6, 0.8, 0.0
+    assert!((normalized[0] - 0.6).abs() < 0.001);
+    assert!((normalized[1] - 0.8).abs() < 0.001);
+}
+
+#[test]
+F test_dimension_mismatch() {
+    ~ computer = DistanceComputer::new(DistanceMetric::Cosine);
+    ~ a = vec![1.0, 2.0];
+    ~ b = vec![1.0, 2.0, 3.0];
+
+    ~ result = computer.compute(&a, &b);
+    assert!(result.is_err());
+}
+
+#[test]
+F test_batch_compute() {
+    ~ computer = DistanceComputer::new(DistanceMetric::L2);
+    ~ query = vec![0.0, 0.0];
+    ~ candidates = vec![
+        &vec![1.0, 0.0],
+        &vec![0.0, 1.0],
+        &vec![1.0, 1.0],
+    ];
+
+    ~ distances = batch_compute_distances(&computer, &query, &candidates).unwrap();
+
+    assert_eq!(distances.len(), 3);
+    assert!((distances[0] - 1.0).abs() < 0.001);
+    assert!((distances[1] - 1.0).abs() < 0.001);
+    assert!((distances[2] - 1.414).abs() < 0.01);
+}
