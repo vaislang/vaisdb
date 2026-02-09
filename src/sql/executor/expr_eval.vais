@@ -1,0 +1,568 @@
+# Expression Evaluator
+# Evaluates AST Expr nodes against a row to produce SqlValue results
+# Used by WHERE clause filtering, SELECT list projection, and other contexts
+# Supports NULL propagation per SQL 3-valued logic
+
+use storage/error.{VaisError};
+use sql/types.{SqlType, SqlValue, err_type_mismatch, err_incompatible_types, coerce_types};
+use sql/row.{Row};
+use sql/parser/ast.{Expr, BinOp, UnaryOp, WhenClause};
+
+# ============================================================================
+# Column Binding — maps column references to row positions
+# ============================================================================
+
+S ColumnBinding {
+    table: Option<Str>,
+    column: Str,
+    index: usize,          # Position in the row's values array
+    data_type: SqlType,
+}
+
+I ColumnBinding {
+    F new(column: Str, index: usize, data_type: SqlType) -> ColumnBinding {
+        ColumnBinding {
+            table: None,
+            column,
+            index,
+            data_type,
+        }
+    }
+
+    F with_table(table: Str, column: Str, index: usize, data_type: SqlType) -> ColumnBinding {
+        ColumnBinding {
+            table: Some(table),
+            column,
+            index,
+            data_type,
+        }
+    }
+}
+
+# ============================================================================
+# EvalContext — bindings available during expression evaluation
+# ============================================================================
+
+S EvalContext {
+    bindings: Vec<ColumnBinding>,
+}
+
+I EvalContext {
+    F new() -> EvalContext {
+        EvalContext {
+            bindings: Vec.new(),
+        }
+    }
+
+    F add_binding(~self, binding: ColumnBinding) {
+        self.bindings.push(binding);
+    }
+
+    # Resolve a column reference to a row index
+    # Handles both qualified (table.column) and unqualified (column) references
+    F resolve(self, table: &Option<Str>, column: &Str) -> Result<usize, VaisError> {
+        M table {
+            Some(ref tbl) => {
+                # Qualified reference: match both table and column
+                for b in &self.bindings {
+                    M &b.table {
+                        Some(ref bt) => {
+                            if bt == tbl && &b.column == column {
+                                return Ok(b.index);
+                            }
+                        },
+                        None => {},
+                    }
+                }
+                Err(VaisError.new(
+                    "VAIS-0110002",
+                    "Column '{tbl}.{column}' not found"
+                ))
+            },
+            None => {
+                # Unqualified reference: match column name only
+                ~found: Option<usize> = None;
+                ~ambiguous = false;
+                for b in &self.bindings {
+                    if &b.column == column {
+                        M found {
+                            Some(_) => { ambiguous = true; },
+                            None => { found = Some(b.index); },
+                        }
+                    }
+                }
+                if ambiguous {
+                    return Err(VaisError.new(
+                        "VAIS-0101001",
+                        "Column reference '{column}' is ambiguous"
+                    ));
+                }
+                M found {
+                    Some(idx) => Ok(idx),
+                    None => Err(VaisError.new(
+                        "VAIS-0110002",
+                        "Column '{column}' not found"
+                    )),
+                }
+            },
+        }
+    }
+
+    # Build context from a table's column list
+    F from_columns(table_name: &Str, columns: &[ColumnInfo]) -> EvalContext {
+        ~ctx = EvalContext.new();
+        for i in 0..columns.len() {
+            ~col = &columns[i];
+            ctx.add_binding(ColumnBinding.with_table(
+                table_name.clone(),
+                col.name.clone(),
+                i,
+                col.data_type,
+            ));
+        }
+        ctx
+    }
+}
+
+use sql/catalog/schema.{ColumnInfo};
+
+# ============================================================================
+# Expression Evaluation — main entry point
+# ============================================================================
+
+# Evaluate an expression against a row, returning a SqlValue
+F eval_expr(expr: &Expr, row: &Row, ctx: &EvalContext) -> Result<SqlValue, VaisError> {
+    M expr {
+        # Literal value
+        Expr.Literal { value } => {
+            Ok(value.clone())
+        },
+
+        # Column reference
+        Expr.ColumnRef { table, column } => {
+            ~idx = ctx.resolve(table, column)?;
+            Ok(row.get(idx).clone())
+        },
+
+        # Binary operation
+        Expr.BinaryOp { left, op, right } => {
+            eval_binary_op(left, op, right, row, ctx)
+        },
+
+        # Unary operation
+        Expr.UnaryOp { op, operand } => {
+            eval_unary_op(op, operand, row, ctx)
+        },
+
+        # IS NULL / IS NOT NULL
+        Expr.IsNull { expr: inner, negated } => {
+            ~val = eval_expr(inner, row, ctx)?;
+            ~result = val.is_null();
+            if *negated { result = !result; }
+            Ok(SqlValue.BoolVal { v: result })
+        },
+
+        # BETWEEN
+        Expr.Between { expr: inner, low, high, negated } => {
+            ~val = eval_expr(inner, row, ctx)?;
+            ~low_val = eval_expr(low, row, ctx)?;
+            ~high_val = eval_expr(high, row, ctx)?;
+            ~result = val.between(&low_val, &high_val);
+            if *negated {
+                Ok(result.not_bool())
+            } else {
+                Ok(result)
+            }
+        },
+
+        # IN list
+        Expr.InList { expr: inner, list, negated } => {
+            ~val = eval_expr(inner, row, ctx)?;
+            ~list_vals = Vec.with_capacity(list.len());
+            for item in list {
+                list_vals.push(eval_expr(item, row, ctx)?);
+            }
+            ~result = val.in_list(list_vals.as_slice());
+            if *negated {
+                Ok(result.not_bool())
+            } else {
+                Ok(result)
+            }
+        },
+
+        # LIKE
+        Expr.Like { expr: inner, pattern, negated } => {
+            ~val = eval_expr(inner, row, ctx)?;
+            ~pat = eval_expr(pattern, row, ctx)?;
+            ~result = val.like_match(&pat);
+            if *negated {
+                Ok(result.not_bool())
+            } else {
+                Ok(result)
+            }
+        },
+
+        # CASE WHEN
+        Expr.Case { operand, when_clauses, else_result } => {
+            eval_case(operand, when_clauses, else_result, row, ctx)
+        },
+
+        # CAST
+        Expr.Cast { expr: inner, target_type } => {
+            ~val = eval_expr(inner, row, ctx)?;
+            val.cast_to(target_type)
+        },
+
+        # Function call (aggregate functions handled separately in aggregation executor)
+        Expr.FunctionCall { name, args, distinct: _ } => {
+            eval_scalar_function(name, args, row, ctx)
+        },
+
+        # String concatenation
+        Expr.Concat { left, right } => {
+            ~lv = eval_expr(left, row, ctx)?;
+            ~rv = eval_expr(right, row, ctx)?;
+
+            # NULL propagation
+            if lv.is_null() || rv.is_null() {
+                return Ok(SqlValue.Null);
+            }
+
+            ~ls = lv.to_string();
+            ~rs = rv.to_string();
+            # Remove surrounding quotes from to_string output for StringVal
+            ~left_str = M &lv {
+                SqlValue.StringVal { v } => v.clone(),
+                _ => ls,
+            };
+            ~right_str = M &rv {
+                SqlValue.StringVal { v } => v.clone(),
+                _ => rs,
+            };
+            Ok(SqlValue.StringVal { v: "{left_str}{right_str}" })
+        },
+
+        # Star (*) — used in COUNT(*), returns a non-null marker
+        Expr.Star => {
+            Ok(SqlValue.BoolVal { v: true })
+        },
+
+        # Parameter — should have been substituted by prepared statement binding
+        Expr.Parameter { idx } => {
+            Err(VaisError.new(
+                "VAIS-0105001",
+                "Unbound parameter ${idx}"
+            ))
+        },
+
+        # Subquery expressions — evaluated by higher-level executor
+        Expr.Subquery { .. } | Expr.InSubquery { .. } | Expr.Exists { .. } => {
+            Err(VaisError.new(
+                "VAIS-0105002",
+                "Subquery evaluation not yet supported in expression evaluator"
+            ))
+        },
+
+        # Window functions — handled by window executor
+        Expr.WindowFunc { .. } => {
+            Err(VaisError.new(
+                "VAIS-0105003",
+                "Window function cannot be evaluated in expression context"
+            ))
+        },
+    }
+}
+
+# ============================================================================
+# Binary Operation Evaluation
+# ============================================================================
+
+F eval_binary_op(
+    left: &Expr,
+    op: &BinOp,
+    right: &Expr,
+    row: &Row,
+    ctx: &EvalContext,
+) -> Result<SqlValue, VaisError> {
+    ~lv = eval_expr(left, row, ctx)?;
+    ~rv = eval_expr(right, row, ctx)?;
+
+    M op {
+        # Arithmetic
+        BinOp.Add => lv.add(&rv),
+        BinOp.Sub => lv.sub(&rv),
+        BinOp.Mul => lv.mul(&rv),
+        BinOp.Div => lv.div(&rv),
+        BinOp.Mod => {
+            # NULL propagation
+            if lv.is_null() || rv.is_null() {
+                return Ok(SqlValue.Null);
+            }
+            M (&lv, &rv) {
+                (SqlValue.IntVal { v: a }, SqlValue.IntVal { v: b }) => {
+                    if *b == 0 {
+                        return Err(VaisError.new("VAIS-0109003", "Division by zero"));
+                    }
+                    Ok(SqlValue.IntVal { v: *a % *b })
+                },
+                _ => Err(err_incompatible_types("modulo", lv.get_type().name(), rv.get_type().name())),
+            }
+        },
+
+        # Comparison
+        BinOp.Eq => Ok(lv.equals(&rv)),
+        BinOp.Neq => {
+            ~eq = lv.equals(&rv);
+            Ok(eq.not_bool())
+        },
+        BinOp.Lt => {
+            if lv.is_null() || rv.is_null() {
+                return Ok(SqlValue.Null);
+            }
+            ~cmp = lv.compare(&rv)?;
+            Ok(SqlValue.BoolVal { v: cmp < 0 })
+        },
+        BinOp.Gt => {
+            if lv.is_null() || rv.is_null() {
+                return Ok(SqlValue.Null);
+            }
+            ~cmp = lv.compare(&rv)?;
+            Ok(SqlValue.BoolVal { v: cmp > 0 })
+        },
+        BinOp.Le => {
+            if lv.is_null() || rv.is_null() {
+                return Ok(SqlValue.Null);
+            }
+            ~cmp = lv.compare(&rv)?;
+            Ok(SqlValue.BoolVal { v: cmp <= 0 })
+        },
+        BinOp.Ge => {
+            if lv.is_null() || rv.is_null() {
+                return Ok(SqlValue.Null);
+            }
+            ~cmp = lv.compare(&rv)?;
+            Ok(SqlValue.BoolVal { v: cmp >= 0 })
+        },
+
+        # Logical (3-valued with NULL propagation)
+        BinOp.And => Ok(lv.and_bool(&rv)),
+        BinOp.Or => Ok(lv.or_bool(&rv)),
+    }
+}
+
+# ============================================================================
+# Unary Operation Evaluation
+# ============================================================================
+
+F eval_unary_op(
+    op: &UnaryOp,
+    operand: &Expr,
+    row: &Row,
+    ctx: &EvalContext,
+) -> Result<SqlValue, VaisError> {
+    ~val = eval_expr(operand, row, ctx)?;
+
+    M op {
+        UnaryOp.Neg => val.negate(),
+        UnaryOp.Not => Ok(val.not_bool()),
+    }
+}
+
+# ============================================================================
+# CASE WHEN Evaluation
+# ============================================================================
+
+F eval_case(
+    operand: &Option<Box<Expr>>,
+    when_clauses: &[WhenClause],
+    else_result: &Option<Box<Expr>>,
+    row: &Row,
+    ctx: &EvalContext,
+) -> Result<SqlValue, VaisError> {
+    M operand {
+        Some(ref op_expr) => {
+            # Simple CASE: CASE expr WHEN val THEN result ...
+            ~op_val = eval_expr(op_expr, row, ctx)?;
+            for wc in when_clauses {
+                ~when_val = eval_expr(&wc.condition, row, ctx)?;
+                ~eq = op_val.equals(&when_val);
+                M eq {
+                    SqlValue.BoolVal { v: true } => {
+                        return eval_expr(&wc.result, row, ctx);
+                    },
+                    _ => {},
+                }
+            }
+        },
+        None => {
+            # Searched CASE: CASE WHEN condition THEN result ...
+            for wc in when_clauses {
+                ~cond = eval_expr(&wc.condition, row, ctx)?;
+                M cond {
+                    SqlValue.BoolVal { v: true } => {
+                        return eval_expr(&wc.result, row, ctx);
+                    },
+                    _ => {},
+                }
+            }
+        },
+    }
+
+    # No WHEN clause matched — return ELSE or NULL
+    M else_result {
+        Some(ref else_expr) => eval_expr(else_expr, row, ctx),
+        None => Ok(SqlValue.Null),
+    }
+}
+
+# ============================================================================
+# Scalar Function Evaluation
+# ============================================================================
+
+F eval_scalar_function(
+    name: &Str,
+    args: &[Expr],
+    row: &Row,
+    ctx: &EvalContext,
+) -> Result<SqlValue, VaisError> {
+    ~upper_name = name.to_uppercase();
+
+    M upper_name.as_str() {
+        "COALESCE" => {
+            # COALESCE(a, b, c, ...) returns first non-NULL
+            for arg in args {
+                ~val = eval_expr(arg, row, ctx)?;
+                if !val.is_null() {
+                    return Ok(val);
+                }
+            }
+            Ok(SqlValue.Null)
+        },
+
+        "NULLIF" => {
+            # NULLIF(a, b) returns NULL if a = b, else a
+            if args.len() != 2 {
+                return Err(VaisError.new("VAIS-0101002", "NULLIF requires exactly 2 arguments"));
+            }
+            ~a = eval_expr(&args[0], row, ctx)?;
+            ~b = eval_expr(&args[1], row, ctx)?;
+            M a.equals(&b) {
+                SqlValue.BoolVal { v: true } => Ok(SqlValue.Null),
+                _ => Ok(a),
+            }
+        },
+
+        "ABS" => {
+            if args.len() != 1 {
+                return Err(VaisError.new("VAIS-0101002", "ABS requires exactly 1 argument"));
+            }
+            ~val = eval_expr(&args[0], row, ctx)?;
+            if val.is_null() { return Ok(SqlValue.Null); }
+            M val {
+                SqlValue.IntVal { v } => Ok(SqlValue.IntVal { v: if v < 0 { -v } else { v } }),
+                SqlValue.FloatVal { v } => Ok(SqlValue.FloatVal { v: if v < 0.0 { -v } else { v } }),
+                _ => Err(err_type_mismatch("numeric", val.get_type().name())),
+            }
+        },
+
+        "UPPER" => {
+            if args.len() != 1 {
+                return Err(VaisError.new("VAIS-0101002", "UPPER requires exactly 1 argument"));
+            }
+            ~val = eval_expr(&args[0], row, ctx)?;
+            if val.is_null() { return Ok(SqlValue.Null); }
+            M val {
+                SqlValue.StringVal { v } => Ok(SqlValue.StringVal { v: v.to_uppercase() }),
+                _ => Err(err_type_mismatch("string", val.get_type().name())),
+            }
+        },
+
+        "LOWER" => {
+            if args.len() != 1 {
+                return Err(VaisError.new("VAIS-0101002", "LOWER requires exactly 1 argument"));
+            }
+            ~val = eval_expr(&args[0], row, ctx)?;
+            if val.is_null() { return Ok(SqlValue.Null); }
+            M val {
+                SqlValue.StringVal { v } => Ok(SqlValue.StringVal { v: v.to_lowercase() }),
+                _ => Err(err_type_mismatch("string", val.get_type().name())),
+            }
+        },
+
+        "LENGTH" => {
+            if args.len() != 1 {
+                return Err(VaisError.new("VAIS-0101002", "LENGTH requires exactly 1 argument"));
+            }
+            ~val = eval_expr(&args[0], row, ctx)?;
+            if val.is_null() { return Ok(SqlValue.Null); }
+            M val {
+                SqlValue.StringVal { v } => Ok(SqlValue.IntVal { v: v.len() as i64 }),
+                SqlValue.BlobVal { v } => Ok(SqlValue.IntVal { v: v.len() as i64 }),
+                _ => Err(err_type_mismatch("string or blob", val.get_type().name())),
+            }
+        },
+
+        "SUBSTR" | "SUBSTRING" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(VaisError.new("VAIS-0101002", "SUBSTR requires 2 or 3 arguments"));
+            }
+            ~val = eval_expr(&args[0], row, ctx)?;
+            ~start = eval_expr(&args[1], row, ctx)?;
+            if val.is_null() || start.is_null() { return Ok(SqlValue.Null); }
+
+            M (&val, &start) {
+                (SqlValue.StringVal { v: s }, SqlValue.IntVal { v: pos }) => {
+                    # SQL SUBSTR is 1-based
+                    ~start_idx = if *pos < 1 { 0usize } else { (*pos - 1) as usize };
+                    ~chars: Vec<char> = s.chars().collect();
+                    if start_idx >= chars.len() {
+                        return Ok(SqlValue.StringVal { v: "" });
+                    }
+
+                    ~end_idx = if args.len() == 3 {
+                        ~len_val = eval_expr(&args[2], row, ctx)?;
+                        if len_val.is_null() { return Ok(SqlValue.Null); }
+                        M len_val {
+                            SqlValue.IntVal { v: l } => {
+                                ~end = start_idx + (if l < 0 { 0usize } else { l as usize });
+                                if end > chars.len() { chars.len() } else { end }
+                            },
+                            _ => chars.len(),
+                        }
+                    } else {
+                        chars.len()
+                    };
+
+                    ~result: Str = chars[start_idx..end_idx].iter().collect();
+                    Ok(SqlValue.StringVal { v: result })
+                },
+                _ => Err(err_type_mismatch("string, integer", val.get_type().name())),
+            }
+        },
+
+        _ => {
+            Err(VaisError.new(
+                "VAIS-0110003",
+                "Unknown function '{name}'"
+            ))
+        },
+    }
+}
+
+# ============================================================================
+# Predicate Evaluation Helper
+# ============================================================================
+
+# Evaluate an expression and interpret the result as a boolean
+# NULL is treated as false (for WHERE clause semantics)
+F eval_predicate(expr: &Expr, row: &Row, ctx: &EvalContext) -> Result<bool, VaisError> {
+    ~val = eval_expr(expr, row, ctx)?;
+    M val {
+        SqlValue.BoolVal { v } => Ok(v),
+        SqlValue.Null => Ok(false),  # NULL in WHERE -> false
+        _ => Err(VaisError.new(
+            "VAIS-0109001",
+            "WHERE clause must evaluate to boolean, got {val.get_type().name()}"
+        )),
+    }
+}
