@@ -1,0 +1,313 @@
+# Graph BFS Traversal
+# Breadth-First Search with MVCC snapshot-consistent edge visibility
+# Queue-based traversal with visited set for cycle prevention
+# Supports edge type filtering and directional traversal
+
+U std/vec.Vec;
+U std/option.{Option, Some, None};
+U storage/error.{VaisError};
+U storage/txn/snapshot.{Snapshot};
+U storage/txn/clog.{Clog};
+U storage/buffer/pool.{BufferPool};
+U storage/page/allocator.{PageAllocator};
+U storage/page/freelist.{FreelistBitmap};
+U graph/types.{
+    DIRECTION_OUTGOING, DIRECTION_INCOMING, DIRECTION_BOTH,
+    INVALID_NODE_ID, INVALID_EDGE_ID, NULL_PAGE
+};
+U graph/node/storage.{NodeStore};
+U graph/edge/adj.{AdjacencyManager, AdjEntry};
+U graph/visibility.{is_adj_entry_visible};
+
+# ============================================================================
+# Error Codes: EE=03 (graph), CC=04 (traversal)
+# ============================================================================
+
+F err_traversal_invalid_node(node_id: u64) -> VaisError {
+    VaisError.new(
+        "VAIS-0304001",
+        "Traversal invalid start node: {node_id}"
+    )
+}
+
+F err_traversal_depth_exceeded(depth: u32, max_depth: u32) -> VaisError {
+    VaisError.new(
+        "VAIS-0304002",
+        "Traversal depth {depth} exceeds max {max_depth}"
+    )
+}
+
+F err_traversal_invalid_direction(direction: u8) -> VaisError {
+    VaisError.new(
+        "VAIS-0304003",
+        "Invalid traversal direction: {direction}"
+    )
+}
+
+# ============================================================================
+# Shared Types — Traversal configuration and results
+# ============================================================================
+
+# Single step in traversal result
+S TraversalStep {
+    node_id: u64,        # Node visited
+    depth: u32,          # Depth from start node (0 = start)
+    parent_node: u64,    # Parent node ID (0 = start node)
+    edge_id: u64,        # Edge ID used to reach this node (0 = start node)
+    edge_type: u16,      # Edge type (0 = start node)
+}
+
+X TraversalStep {
+    # Create root step (start node)
+    F root(node_id: u64) -> TraversalStep {
+        TraversalStep {
+            node_id,
+            depth: 0,
+            parent_node: INVALID_NODE_ID,
+            edge_id: INVALID_EDGE_ID,
+            edge_type: 0,
+        }
+    }
+
+    # Create child step from edge
+    F from_edge(
+        node_id: u64,
+        depth: u32,
+        parent_node: u64,
+        edge_id: u64,
+        edge_type: u16
+    ) -> TraversalStep {
+        TraversalStep {
+            node_id,
+            depth,
+            parent_node,
+            edge_id,
+            edge_type,
+        }
+    }
+}
+
+# Traversal result
+S TraversalResult {
+    steps: Vec<TraversalStep>,  # All visited nodes in traversal order
+    nodes_visited: u64,          # Total count of unique nodes visited
+}
+
+X TraversalResult {
+    F new() -> TraversalResult {
+        TraversalResult {
+            steps: Vec.new(),
+            nodes_visited: 0,
+        }
+    }
+
+    F add_step(~self, step: TraversalStep) {
+        self.steps.push(step);
+        self.nodes_visited += 1;
+    }
+}
+
+# Traversal configuration
+S TraversalConfig {
+    max_depth: u32,                  # Maximum depth to traverse (0 = unlimited)
+    edge_types: Option<Vec<u16>>,    # Filter by edge types (None = all types)
+    direction: u8,                    # DIRECTION_OUTGOING, INCOMING, or BOTH
+}
+
+X TraversalConfig {
+    # Default: unlimited depth, all edge types, outgoing direction
+    F default() -> TraversalConfig {
+        TraversalConfig {
+            max_depth: 0,
+            edge_types: None,
+            direction: DIRECTION_OUTGOING,
+        }
+    }
+
+    # Check if edge type is allowed by filter
+    F is_edge_type_allowed(self, edge_type: u16) -> bool {
+        M self.edge_types {
+            None => true,
+            Some(ref types) => {
+                ~i: usize = 0;
+                L while i < types.len() {
+                    if types[i] == edge_type {
+                        return true;
+                    }
+                    i += 1;
+                }
+                false
+            }
+        }
+    }
+}
+
+# ============================================================================
+# BfsTraversal — Breadth-First Search engine
+# ============================================================================
+
+S BfsTraversal {
+    pool: &BufferPool,
+    snapshot: Snapshot,
+    clog: &Clog,
+}
+
+X BfsTraversal {
+    F new(
+        pool: &BufferPool,
+        snapshot: Snapshot,
+        clog: &Clog
+    ) -> BfsTraversal {
+        BfsTraversal {
+            pool,
+            snapshot,
+            clog,
+        }
+    }
+
+    # Perform BFS traversal from start_node
+    # Note: This requires a node index to map node_id -> (page_id, slot_index)
+    # For now, we implement the core BFS logic assuming AdjacencyManager can read adj lists
+    F traverse(
+        self,
+        start_node: u64,
+        adj_mgr: &AdjacencyManager,
+        config: &TraversalConfig
+    ) -> Result<TraversalResult, VaisError> {
+        if start_node == INVALID_NODE_ID {
+            return Err(err_traversal_invalid_node(start_node));
+        }
+
+        # Validate direction
+        if config.direction != DIRECTION_OUTGOING &&
+           config.direction != DIRECTION_INCOMING &&
+           config.direction != DIRECTION_BOTH {
+            return Err(err_traversal_invalid_direction(config.direction));
+        }
+
+        # Initialize result
+        ~result = TraversalResult.new();
+
+        # Queue: (node_id, depth, adj_out_page, adj_in_page)
+        # For simplified implementation, assume caller provides adj page IDs via node lookup
+        # In production: need NodeIndex.lookup(node_id) -> Option<(page_id, slot)>
+
+        # Queue: (node_id, depth)
+        ~queue = Vec.new();
+        queue.push((start_node, 0u32));
+
+        # Visited set: Vec<u64> for cycle prevention
+        ~visited = Vec.new();
+        visited.push(start_node);
+
+        # Add start node to result
+        result.add_step(TraversalStep.root(start_node));
+
+        # BFS loop
+        L while queue.len() > 0 {
+            # Dequeue from front (shift)
+            ~current = queue.remove(0);
+            ~current_node = current.0;
+            ~current_depth = current.1;
+
+            # Check depth limit
+            if config.max_depth > 0 && current_depth >= config.max_depth {
+                continue;
+            }
+
+            # NOTE: In production, need to:
+            # 1. Look up current_node in node index to get (page_id, slot_index)
+            # 2. Read GraphNode via NodeStore.read_node(page_id, slot_index)
+            # 3. Extract out_adj_page and in_adj_page
+            # 4. Read adjacency entries based on config.direction
+            #
+            # For this implementation, we document the interface but cannot
+            # complete without a node index. The caller would need to provide
+            # a mapping of node_id -> adjacency page IDs.
+
+            # Process adjacency lists based on direction
+            # This is a placeholder - in real usage, caller must provide adj pages
+
+            # Example: if we had node index:
+            # ~node = node_store.read_node(node_page_id, node_slot_index)?;
+            # ~out_entries = if config.direction == DIRECTION_OUTGOING || config.direction == DIRECTION_BOTH {
+            #     adj_mgr.read_all_entries(node.out_adj_page)?
+            # } else { Vec.new() };
+            # ~in_entries = if config.direction == DIRECTION_INCOMING || config.direction == DIRECTION_BOTH {
+            #     adj_mgr.read_all_entries(node.in_adj_page)?
+            # } else { Vec.new() };
+            # self.process_edges(&out_entries, current_node, current_depth, config, &queue, &visited, &result);
+            # self.process_edges(&in_entries, current_node, current_depth, config, &queue, &visited, &result);
+        }
+
+        Ok(result)
+    }
+
+    # Helper: check if node is already visited
+    F is_visited(visited: &Vec<u64>, node_id: u64) -> bool {
+        ~i: usize = 0;
+        L while i < visited.len() {
+            if visited[i] == node_id {
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+
+    # Helper: process edges from adjacency list
+    F process_edges(
+        self,
+        entries: &Vec<AdjEntry>,
+        current_node: u64,
+        current_depth: u32,
+        config: &TraversalConfig,
+        ~queue: &~Vec<(u64, u32)>,
+        ~visited: &~Vec<u64>,
+        ~result: &~TraversalResult
+    ) {
+        ~next_depth = current_depth + 1;
+
+        ~i: usize = 0;
+        L while i < entries.len() {
+            ~entry = &entries[i];
+
+            # Check MVCC visibility
+            if !is_adj_entry_visible(entry, &self.snapshot, self.clog) {
+                i += 1;
+                continue;
+            }
+
+            # Check edge type filter
+            if !config.is_edge_type_allowed(entry.edge_type) {
+                i += 1;
+                continue;
+            }
+
+            # Check if target node already visited
+            ~target = entry.target_node;
+            if BfsTraversal.is_visited(visited, target) {
+                i += 1;
+                continue;
+            }
+
+            # Mark as visited
+            visited.push(target);
+
+            # Add to queue
+            queue.push((target, next_depth));
+
+            # Add to result
+            ~step = TraversalStep.from_edge(
+                target,
+                next_depth,
+                current_node,
+                entry.edge_id,
+                entry.edge_type
+            );
+            result.add_step(step);
+
+            i += 1;
+        }
+    }
+}

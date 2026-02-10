@@ -1,0 +1,732 @@
+# Graph Engine Core Types
+# Property graph model: nodes with labels, edges with types, both with properties
+# Based on Phase 0 Stage 3 MVCC strategy: AdjEntry 42B packed layout
+# Error codes: EE=03 (graph), CC=01-10
+
+U std/bytes.{ByteBuffer};
+U std/vec.Vec;
+U std/string.Str;
+U std/option.{Option, Some, None};
+U storage/constants.{
+    PAGE_HEADER_SIZE, INVALID_TXN_ID, NULL_UNDO_PTR,
+    NULL_PAGE, FILE_ID_GRAPH, MVCC_TUPLE_META_SIZE
+};
+U storage/error.{VaisError, ErrorSeverity};
+U storage/page/header.{PageHeader};
+U storage/page/types.{
+    PAGE_TYPE_GRAPH_NODE, PAGE_TYPE_GRAPH_ADJ, PAGE_TYPE_GRAPH_PROPERTY,
+    ENGINE_TAG_GRAPH
+};
+U storage/page/mvcc.{MvccTupleMeta};
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+# Graph format version
+L GRAPH_FORMAT_VERSION: u8 = 1;
+
+# Maximum labels per node
+L MAX_LABELS_PER_NODE: u16 = 64;
+
+# Maximum edge types (index into type table)
+L MAX_EDGE_TYPES: u16 = 4096;
+
+# AdjEntry serialized size (42 bytes packed)
+L ADJ_ENTRY_SIZE: u32 = 42;
+
+# Graph node fixed header size (before labels/properties)
+# node_id(8) + out_adj_page(4) + in_adj_page(4) + property_page(4) +
+# label_count(2) + flags(2) + MVCC(32) = 56 bytes
+L GRAPH_NODE_HEADER_SIZE: u32 = 56;
+
+# Adjacency list page body header (after 48B page header)
+# node_id(8) + direction(1) + entry_count(2) + next_adj_page(4) + reserved(1) = 16 bytes
+L ADJ_PAGE_HEADER_SIZE: u32 = 16;
+
+# Property page body header (after 48B page header)
+# entity_type(1) + entity_id(8) + prop_count(2) + next_prop_page(4) + reserved(1) = 16 bytes
+L PROP_PAGE_HEADER_SIZE: u32 = 16;
+
+# Direction constants
+L DIRECTION_OUTGOING: u8 = 0;
+L DIRECTION_INCOMING: u8 = 1;
+L DIRECTION_BOTH: u8 = 2;
+
+# Entity type constants
+L ENTITY_TYPE_NODE: u8 = 0;
+L ENTITY_TYPE_EDGE: u8 = 1;
+
+# Node flags
+L NODE_FLAG_ACTIVE: u16 = 0x0001;
+L NODE_FLAG_HAS_PROPERTIES: u16 = 0x0002;
+
+# Invalid IDs
+L INVALID_NODE_ID: u64 = 0;
+L INVALID_EDGE_ID: u64 = 0;
+
+# ============================================================================
+# Error Codes: EE=03 (graph)
+# ============================================================================
+
+F err_graph_node_not_found(node_id: u64) -> VaisError {
+    VaisError.new(
+        "VAIS-0310001",
+        "Graph node {node_id} not found"
+    )
+}
+
+F err_graph_edge_not_found(edge_id: u64) -> VaisError {
+    VaisError.new(
+        "VAIS-0310002",
+        "Graph edge {edge_id} not found"
+    )
+}
+
+F err_graph_node_corrupt(node_id: u64) -> VaisError {
+    VaisError.new(
+        "VAIS-0305001",
+        "Graph node {node_id} data corrupted"
+    ).with_severity(ErrorSeverity.Fatal)
+}
+
+F err_graph_adj_corrupt(page_id: u32) -> VaisError {
+    VaisError.new(
+        "VAIS-0305002",
+        "Adjacency list page {page_id} corrupted"
+    ).with_severity(ErrorSeverity.Fatal)
+}
+
+F err_graph_too_many_labels(count: u16) -> VaisError {
+    VaisError.new(
+        "VAIS-0302001",
+        "Too many labels: {count} exceeds max {MAX_LABELS_PER_NODE}"
+    )
+}
+
+F err_graph_invalid_edge_type(edge_type: u16) -> VaisError {
+    VaisError.new(
+        "VAIS-0309001",
+        "Invalid edge type: {edge_type}"
+    )
+}
+
+F err_graph_page_full(page_id: u32) -> VaisError {
+    VaisError.new(
+        "VAIS-0303001",
+        "Graph page {page_id} is full"
+    )
+}
+
+F err_graph_duplicate_edge(src: u64, dst: u64, edge_type: u16) -> VaisError {
+    VaisError.new(
+        "VAIS-0302002",
+        "Duplicate edge from {src} to {dst} with type {edge_type}"
+    )
+}
+
+F err_graph_self_loop(node_id: u64) -> VaisError {
+    VaisError.new(
+        "VAIS-0302003",
+        "Self-loop not allowed: node {node_id}"
+    )
+}
+
+F err_graph_engine_closed() -> VaisError {
+    VaisError.new(
+        "VAIS-0310003",
+        "Graph engine is not open"
+    )
+}
+
+# ============================================================================
+# GraphConfig — Immutable configuration
+# ============================================================================
+
+S GraphConfig {
+    max_labels_per_node: u16,    # Max labels a node can have (default 64)
+    max_edge_types: u16,         # Max distinct edge types (default 4096)
+    allow_self_loops: bool,      # Allow edges from node to itself
+    page_size: u32,              # Page size (inherited from database)
+}
+
+X GraphConfig {
+    F default(page_size: u32) -> GraphConfig {
+        GraphConfig {
+            max_labels_per_node: MAX_LABELS_PER_NODE,
+            max_edge_types: MAX_EDGE_TYPES,
+            allow_self_loops: false,
+            page_size,
+        }
+    }
+
+    # Serialize (8 bytes)
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u16_le(self.max_labels_per_node);
+        buf.put_u16_le(self.max_edge_types);
+        buf.put_u8(if self.allow_self_loops { 1 } else { 0 });
+        buf.put_u8(0);  # reserved
+        buf.put_u16_le(0);  # reserved
+    }
+
+    # Deserialize (8 bytes)
+    F deserialize(buf: &ByteBuffer, page_size: u32) -> Result<GraphConfig, VaisError> {
+        Ok(GraphConfig {
+            max_labels_per_node: buf.get_u16_le()?,
+            max_edge_types: buf.get_u16_le()?,
+            allow_self_loops: buf.get_u8()? != 0,
+            page_size: { buf.get_u8()?; buf.get_u16_le()?; page_size },
+        })
+    }
+}
+
+# ============================================================================
+# GraphMeta — Graph metadata (stored in meta page)
+# ============================================================================
+
+S GraphMeta {
+    format_version: u8,
+    total_nodes: u64,
+    total_edges: u64,
+    next_node_id: u64,     # Monotonic node ID allocator
+    next_edge_id: u64,     # Monotonic edge ID allocator
+    edge_type_count: u16,  # Number of registered edge types
+    config: GraphConfig,
+}
+
+X GraphMeta {
+    F new(config: GraphConfig) -> GraphMeta {
+        GraphMeta {
+            format_version: GRAPH_FORMAT_VERSION,
+            total_nodes: 0,
+            total_edges: 0,
+            next_node_id: 1,  # Start from 1, 0 is INVALID_NODE_ID
+            next_edge_id: 1,
+            edge_type_count: 0,
+            config,
+        }
+    }
+
+    # Allocate next node ID (monotonically increasing)
+    F alloc_node_id(~self) -> u64 {
+        ~id = self.next_node_id;
+        self.next_node_id += 1;
+        id
+    }
+
+    # Allocate next edge ID (monotonically increasing)
+    F alloc_edge_id(~self) -> u64 {
+        ~id = self.next_edge_id;
+        self.next_edge_id += 1;
+        id
+    }
+
+    # Serialize to ByteBuffer
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u8(self.format_version);
+        buf.put_u64_le(self.total_nodes);
+        buf.put_u64_le(self.total_edges);
+        buf.put_u64_le(self.next_node_id);
+        buf.put_u64_le(self.next_edge_id);
+        buf.put_u16_le(self.edge_type_count);
+        self.config.serialize(buf);
+    }
+
+    # Deserialize from ByteBuffer
+    F deserialize(buf: &ByteBuffer, page_size: u32) -> Result<GraphMeta, VaisError> {
+        ~format_version = buf.get_u8()?;
+        Ok(GraphMeta {
+            format_version,
+            total_nodes: buf.get_u64_le()?,
+            total_edges: buf.get_u64_le()?,
+            next_node_id: buf.get_u64_le()?,
+            next_edge_id: buf.get_u64_le()?,
+            edge_type_count: buf.get_u16_le()?,
+            config: GraphConfig.deserialize(buf, page_size)?,
+        })
+    }
+}
+
+# ============================================================================
+# EdgeTypeTable — Maps edge type strings to u16 IDs
+# ============================================================================
+
+S EdgeTypeTable {
+    types: Vec<Str>,   # Index = edge_type u16
+}
+
+X EdgeTypeTable {
+    F new() -> EdgeTypeTable {
+        EdgeTypeTable { types: Vec.new() }
+    }
+
+    # Get or create edge type ID for a string
+    F get_or_create(~self, type_name: &Str) -> Result<u16, VaisError> {
+        # Search existing
+        ~i: usize = 0;
+        L while i < self.types.len() {
+            if self.types[i] == *type_name {
+                return Ok(i as u16);
+            }
+            i += 1;
+        }
+
+        # Create new
+        if self.types.len() >= MAX_EDGE_TYPES as usize {
+            return Err(err_graph_invalid_edge_type(self.types.len() as u16));
+        }
+        ~id = self.types.len() as u16;
+        self.types.push(type_name.clone());
+        Ok(id)
+    }
+
+    # Lookup edge type name by ID
+    F get_name(self, edge_type: u16) -> Option<&Str> {
+        if (edge_type as usize) < self.types.len() {
+            Some(&self.types[edge_type as usize])
+        } else {
+            None
+        }
+    }
+
+    # Serialize
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u16_le(self.types.len() as u16);
+        ~i: usize = 0;
+        L while i < self.types.len() {
+            buf.put_string(&self.types[i]);
+            i += 1;
+        }
+    }
+
+    # Deserialize
+    F deserialize(buf: &ByteBuffer) -> Result<EdgeTypeTable, VaisError> {
+        ~count = buf.get_u16_le()? as usize;
+        ~types = Vec.with_capacity(count);
+        ~i: usize = 0;
+        L while i < count {
+            types.push(buf.get_string()?);
+            i += 1;
+        }
+        Ok(EdgeTypeTable { types })
+    }
+}
+
+# ============================================================================
+# AdjEntry — Adjacency list entry (42 bytes packed)
+# Per Phase 0 Stage 3: MVCC-aware edge in adjacency list
+# ============================================================================
+
+S AdjEntry {
+    target_node: u64,       # Destination (outgoing) or source (incoming) node ID
+    edge_id: u64,           # Edge ID for property lookup
+    edge_type: u16,         # Edge type (index into EdgeTypeTable)
+    txn_id_create: u64,     # Transaction that created this edge
+    txn_id_expire: u64,     # Transaction that deleted this edge (0 = active)
+    cmd_id: u32,            # Command ID within creating transaction
+    expire_cmd_id: u32,     # Command ID within deleting transaction
+}
+
+X AdjEntry {
+    # Create new adjacency entry for edge insertion
+    F new(
+        target_node: u64,
+        edge_id: u64,
+        edge_type: u16,
+        txn_id: u64,
+        cmd_id: u32
+    ) -> AdjEntry {
+        AdjEntry {
+            target_node,
+            edge_id,
+            edge_type,
+            txn_id_create: txn_id,
+            txn_id_expire: INVALID_TXN_ID,
+            cmd_id,
+            expire_cmd_id: 0,
+        }
+    }
+
+    # Serialize to ByteBuffer (42 bytes packed, no padding)
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u64_le(self.target_node);
+        buf.put_u64_le(self.edge_id);
+        buf.put_u16_le(self.edge_type);
+        buf.put_u64_le(self.txn_id_create);
+        buf.put_u64_le(self.txn_id_expire);
+        buf.put_u32_le(self.cmd_id);
+        buf.put_u32_le(self.expire_cmd_id);
+    }
+
+    # Deserialize from ByteBuffer (42 bytes)
+    F deserialize(buf: &ByteBuffer) -> Result<AdjEntry, VaisError> {
+        Ok(AdjEntry {
+            target_node: buf.get_u64_le()?,
+            edge_id: buf.get_u64_le()?,
+            edge_type: buf.get_u16_le()?,
+            txn_id_create: buf.get_u64_le()?,
+            txn_id_expire: buf.get_u64_le()?,
+            cmd_id: buf.get_u32_le()?,
+            expire_cmd_id: buf.get_u32_le()?,
+        })
+    }
+
+    # Mark as expired (soft delete)
+    F set_expired(~self, txn_id: u64, cmd_id: u32) {
+        self.txn_id_expire = txn_id;
+        self.expire_cmd_id = cmd_id;
+    }
+
+    # Check if entry is active (not expired)
+    F is_active(self) -> bool {
+        self.txn_id_expire == INVALID_TXN_ID
+    }
+
+    # Clear expiration (rollback)
+    F clear_expired(~self) {
+        self.txn_id_expire = INVALID_TXN_ID;
+        self.expire_cmd_id = 0;
+    }
+}
+
+# ============================================================================
+# GraphNode — Node with labels and MVCC metadata
+# ============================================================================
+
+S GraphNode {
+    node_id: u64,
+    out_adj_page: u32,     # First outgoing adjacency list page
+    in_adj_page: u32,      # First incoming adjacency list page
+    property_page: u32,    # First property page (0 = no properties)
+    labels: Vec<u16>,      # Label IDs
+    flags: u16,
+
+    # MVCC metadata (32 bytes)
+    txn_id_create: u64,
+    txn_id_expire: u64,
+    undo_ptr: u64,
+    cmd_id: u32,
+    expire_cmd_id: u32,
+}
+
+X GraphNode {
+    # Create new node
+    F new(
+        node_id: u64,
+        labels: Vec<u16>,
+        txn_id: u64,
+        cmd_id: u32
+    ) -> GraphNode {
+        GraphNode {
+            node_id,
+            out_adj_page: NULL_PAGE,
+            in_adj_page: NULL_PAGE,
+            property_page: NULL_PAGE,
+            labels,
+            flags: NODE_FLAG_ACTIVE,
+            txn_id_create: txn_id,
+            txn_id_expire: INVALID_TXN_ID,
+            undo_ptr: NULL_UNDO_PTR,
+            cmd_id,
+            expire_cmd_id: 0,
+        }
+    }
+
+    # Serialize node (variable size: header 56B + labels 2B each)
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u64_le(self.node_id);
+        buf.put_u32_le(self.out_adj_page);
+        buf.put_u32_le(self.in_adj_page);
+        buf.put_u32_le(self.property_page);
+        buf.put_u16_le(self.labels.len() as u16);
+        buf.put_u16_le(self.flags);
+
+        # MVCC metadata (32 bytes)
+        buf.put_u64_le(self.txn_id_create);
+        buf.put_u64_le(self.txn_id_expire);
+        buf.put_u64_le(self.undo_ptr);
+        buf.put_u32_le(self.cmd_id);
+        buf.put_u32_le(self.expire_cmd_id);
+
+        # Labels (variable)
+        ~i: usize = 0;
+        L while i < self.labels.len() {
+            buf.put_u16_le(self.labels[i]);
+            i += 1;
+        }
+    }
+
+    # Deserialize node
+    F deserialize(buf: &ByteBuffer) -> Result<GraphNode, VaisError> {
+        ~node_id = buf.get_u64_le()?;
+        ~out_adj_page = buf.get_u32_le()?;
+        ~in_adj_page = buf.get_u32_le()?;
+        ~property_page = buf.get_u32_le()?;
+        ~label_count = buf.get_u16_le()? as usize;
+        ~flags = buf.get_u16_le()?;
+
+        # MVCC metadata
+        ~txn_id_create = buf.get_u64_le()?;
+        ~txn_id_expire = buf.get_u64_le()?;
+        ~undo_ptr = buf.get_u64_le()?;
+        ~cmd_id = buf.get_u32_le()?;
+        ~expire_cmd_id = buf.get_u32_le()?;
+
+        # Labels
+        ~labels = Vec.with_capacity(label_count);
+        ~i: usize = 0;
+        L while i < label_count {
+            labels.push(buf.get_u16_le()?);
+            i += 1;
+        }
+
+        Ok(GraphNode {
+            node_id,
+            out_adj_page,
+            in_adj_page,
+            property_page,
+            labels,
+            flags,
+            txn_id_create,
+            txn_id_expire,
+            undo_ptr,
+            cmd_id,
+            expire_cmd_id,
+        })
+    }
+
+    # Mark node as deleted (set expire)
+    F mark_deleted(~self, txn_id: u64, cmd_id: u32) {
+        self.txn_id_expire = txn_id;
+        self.expire_cmd_id = cmd_id;
+        self.flags = self.flags & !NODE_FLAG_ACTIVE;
+    }
+
+    # Check if node is active
+    F is_active(self) -> bool {
+        (self.flags & NODE_FLAG_ACTIVE) != 0
+    }
+
+    # Check if node has properties
+    F has_properties(self) -> bool {
+        self.property_page != NULL_PAGE
+    }
+
+    # Calculate serialized size
+    F serialized_size(self) -> u32 {
+        GRAPH_NODE_HEADER_SIZE + (self.labels.len() as u32 * 2)
+    }
+
+    # Has label
+    F has_label(self, label_id: u16) -> bool {
+        ~i: usize = 0;
+        L while i < self.labels.len() {
+            if self.labels[i] == label_id {
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+}
+
+# ============================================================================
+# PropertyMap — Key-value property storage
+# ============================================================================
+
+# Property value types
+L PROP_TYPE_NULL: u8 = 0;
+L PROP_TYPE_INT: u8 = 1;
+L PROP_TYPE_FLOAT: u8 = 2;
+L PROP_TYPE_STRING: u8 = 3;
+L PROP_TYPE_BOOL: u8 = 4;
+L PROP_TYPE_BYTES: u8 = 5;
+
+S PropertyValue {
+    prop_type: u8,
+    int_val: i64,
+    float_val: f64,
+    string_val: Str,
+    bool_val: bool,
+    bytes_val: Vec<u8>,
+}
+
+X PropertyValue {
+    F null() -> PropertyValue {
+        PropertyValue { prop_type: PROP_TYPE_NULL, int_val: 0, float_val: 0.0, string_val: "", bool_val: false, bytes_val: Vec.new() }
+    }
+
+    F from_int(v: i64) -> PropertyValue {
+        PropertyValue { prop_type: PROP_TYPE_INT, int_val: v, float_val: 0.0, string_val: "", bool_val: false, bytes_val: Vec.new() }
+    }
+
+    F from_float(v: f64) -> PropertyValue {
+        PropertyValue { prop_type: PROP_TYPE_FLOAT, int_val: 0, float_val: v, string_val: "", bool_val: false, bytes_val: Vec.new() }
+    }
+
+    F from_string(v: Str) -> PropertyValue {
+        PropertyValue { prop_type: PROP_TYPE_STRING, int_val: 0, float_val: 0.0, string_val: v, bool_val: false, bytes_val: Vec.new() }
+    }
+
+    F from_bool(v: bool) -> PropertyValue {
+        PropertyValue { prop_type: PROP_TYPE_BOOL, int_val: 0, float_val: 0.0, string_val: "", bool_val: v, bytes_val: Vec.new() }
+    }
+
+    # Serialize property value
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u8(self.prop_type);
+        M self.prop_type {
+            PROP_TYPE_NULL => {},
+            PROP_TYPE_INT => buf.put_i64_le(self.int_val),
+            PROP_TYPE_FLOAT => buf.put_f64_le(self.float_val),
+            PROP_TYPE_STRING => buf.put_string(&self.string_val),
+            PROP_TYPE_BOOL => buf.put_u8(if self.bool_val { 1 } else { 0 }),
+            PROP_TYPE_BYTES => {
+                buf.put_u32_le(self.bytes_val.len() as u32);
+                ~i: usize = 0;
+                L while i < self.bytes_val.len() {
+                    buf.put_u8(self.bytes_val[i]);
+                    i += 1;
+                }
+            },
+            _ => {},
+        }
+    }
+
+    # Deserialize property value
+    F deserialize(buf: &ByteBuffer) -> Result<PropertyValue, VaisError> {
+        ~prop_type = buf.get_u8()?;
+        M prop_type {
+            PROP_TYPE_NULL => Ok(PropertyValue.null()),
+            PROP_TYPE_INT => Ok(PropertyValue.from_int(buf.get_i64_le()?)),
+            PROP_TYPE_FLOAT => Ok(PropertyValue.from_float(buf.get_f64_le()?)),
+            PROP_TYPE_STRING => Ok(PropertyValue.from_string(buf.get_string()?)),
+            PROP_TYPE_BOOL => Ok(PropertyValue.from_bool(buf.get_u8()? != 0)),
+            PROP_TYPE_BYTES => {
+                ~len = buf.get_u32_le()? as usize;
+                ~data = Vec.with_capacity(len);
+                ~i: usize = 0;
+                L while i < len {
+                    data.push(buf.get_u8()?);
+                    i += 1;
+                }
+                Ok(PropertyValue { prop_type: PROP_TYPE_BYTES, int_val: 0, float_val: 0.0, string_val: "", bool_val: false, bytes_val: data })
+            },
+            _ => Err(VaisError.new("VAIS-0309002", "Unknown property type: {prop_type}")),
+        }
+    }
+}
+
+# Property entry: key-value pair
+S PropertyEntry {
+    key: Str,
+    value: PropertyValue,
+}
+
+X PropertyEntry {
+    F new(key: Str, value: PropertyValue) -> PropertyEntry {
+        PropertyEntry { key, value }
+    }
+
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_string(&self.key);
+        self.value.serialize(buf);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<PropertyEntry, VaisError> {
+        Ok(PropertyEntry {
+            key: buf.get_string()?,
+            value: PropertyValue.deserialize(buf)?,
+        })
+    }
+}
+
+# PropertyMap: collection of property entries
+S PropertyMap {
+    entries: Vec<PropertyEntry>,
+}
+
+X PropertyMap {
+    F new() -> PropertyMap {
+        PropertyMap { entries: Vec.new() }
+    }
+
+    F set(~self, key: Str, value: PropertyValue) {
+        # Update existing or add new
+        ~i: usize = 0;
+        L while i < self.entries.len() {
+            if self.entries[i].key == key {
+                self.entries[i].value = value;
+                return;
+            }
+            i += 1;
+        }
+        self.entries.push(PropertyEntry.new(key, value));
+    }
+
+    F get(self, key: &Str) -> Option<&PropertyValue> {
+        ~i: usize = 0;
+        L while i < self.entries.len() {
+            if self.entries[i].key == *key {
+                return Some(&self.entries[i].value);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    F remove(~self, key: &Str) -> bool {
+        ~i: usize = 0;
+        L while i < self.entries.len() {
+            if self.entries[i].key == *key {
+                self.entries.remove(i);
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+
+    F len(self) -> usize {
+        self.entries.len()
+    }
+
+    F is_empty(self) -> bool {
+        self.entries.is_empty()
+    }
+
+    # Serialize entire property map to bytes
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u32_le(self.entries.len() as u32);
+        ~i: usize = 0;
+        L while i < self.entries.len() {
+            self.entries[i].serialize(buf);
+            i += 1;
+        }
+    }
+
+    # Deserialize property map from bytes
+    F deserialize(buf: &ByteBuffer) -> Result<PropertyMap, VaisError> {
+        ~count = buf.get_u32_le()? as usize;
+        ~entries = Vec.with_capacity(count);
+        ~i: usize = 0;
+        L while i < count {
+            entries.push(PropertyEntry.deserialize(buf)?);
+            i += 1;
+        }
+        Ok(PropertyMap { entries })
+    }
+
+    # Serialize to standalone byte vector
+    F to_bytes(self) -> Vec<u8> {
+        ~buf = ByteBuffer.new(256);
+        self.serialize(&buf);
+        buf.to_vec()
+    }
+
+    # Deserialize from standalone byte vector
+    F from_bytes(data: &[u8]) -> Result<PropertyMap, VaisError> {
+        ~buf = ByteBuffer.wrap_readonly(data);
+        PropertyMap.deserialize(&buf)
+    }
+}

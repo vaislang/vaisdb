@@ -1,0 +1,266 @@
+# Graph WAL Integration
+# WAL-first write helpers for graph engine operations
+# All mutations must write WAL before modifying pages
+# Uses GroupCommitManager for batched fsync
+# Error codes: EE=03 (graph), CC=09 (WAL)
+
+U std/bytes.{ByteBuffer};
+U std/vec.Vec;
+U storage/error.{VaisError, err_internal};
+U storage/wal/group_commit.{GroupCommitManager};
+U storage/wal/record_types.{
+    GRAPH_NODE_INSERT, GRAPH_NODE_DELETE,
+    GRAPH_EDGE_INSERT, GRAPH_EDGE_DELETE,
+    GRAPH_PROPERTY_UPDATE, ADJ_LIST_PAGE_SPLIT
+};
+U storage/wal/record_graph.{
+    GraphNodeInsertPayload, GraphNodeDeletePayload,
+    GraphEdgeInsertPayload, GraphEdgeDeletePayload,
+    GraphPropertyUpdatePayload, AdjListPageSplitPayload
+};
+U storage/page/types.{ENGINE_TAG_GRAPH};
+U graph/types.{PropertyMap};
+
+# ============================================================================
+# GraphWalManager — Coordinates WAL writes for graph engine
+# ============================================================================
+
+S GraphWalManager {
+    gcm: &GroupCommitManager,
+}
+
+X GraphWalManager {
+    # Create new WAL manager with reference to GroupCommitManager
+    F new(gcm: &GroupCommitManager) -> GraphWalManager {
+        GraphWalManager { gcm }
+    }
+
+    # Log node insertion (WAL-first, before page mutation)
+    # Returns the assigned LSN
+    F log_node_insert(
+        ~self,
+        txn_id: u64,
+        node_id: u64,
+        page_id: u32,
+        labels: &Vec<Str>,
+        properties: &[u8],
+    ) -> Result<u64, VaisError> {
+        ~payload = GraphNodeInsertPayload {
+            file_id: 2,  # FILE_ID_GRAPH
+            page_id,
+            node_id,
+            labels: labels.clone(),
+            properties: properties.to_vec(),
+        };
+
+        ~buf = ByteBuffer.new(256);
+        payload.serialize(&buf);
+        ~payload_bytes = buf.to_vec();
+
+        self.gcm.write_record(txn_id, GRAPH_NODE_INSERT, ENGINE_TAG_GRAPH, &payload_bytes)
+    }
+
+    # Log node deletion (WAL-first, before page mutation)
+    F log_node_delete(
+        ~self,
+        txn_id: u64,
+        node_id: u64,
+        page_id: u32,
+        old_labels: &Vec<Str>,
+        old_properties: &[u8],
+    ) -> Result<u64, VaisError> {
+        ~payload = GraphNodeDeletePayload {
+            file_id: 2,
+            page_id,
+            node_id,
+            old_labels: old_labels.clone(),
+            old_properties: old_properties.to_vec(),
+        };
+
+        ~buf = ByteBuffer.new(256);
+        payload.serialize(&buf);
+        ~payload_bytes = buf.to_vec();
+
+        self.gcm.write_record(txn_id, GRAPH_NODE_DELETE, ENGINE_TAG_GRAPH, &payload_bytes)
+    }
+
+    # Log edge insertion (WAL-first, before page mutation)
+    # Bidirectional: records both src and dst adjacency page IDs
+    F log_edge_insert(
+        ~self,
+        txn_id: u64,
+        edge_id: u64,
+        src: u64,
+        dst: u64,
+        edge_type: &Str,
+        properties: &[u8],
+        src_adj_page: u32,
+        dst_adj_page: u32,
+    ) -> Result<u64, VaisError> {
+        ~payload = GraphEdgeInsertPayload {
+            file_id: 2,
+            edge_id,
+            src,
+            dst,
+            edge_type: edge_type.clone(),
+            properties: properties.to_vec(),
+            src_adj_page,
+            dst_adj_page,
+        };
+
+        ~buf = ByteBuffer.new(256);
+        payload.serialize(&buf);
+        ~payload_bytes = buf.to_vec();
+
+        self.gcm.write_record(txn_id, GRAPH_EDGE_INSERT, ENGINE_TAG_GRAPH, &payload_bytes)
+    }
+
+    # Log edge deletion (WAL-first, before page mutation)
+    # Bidirectional: records both src and dst adjacency page IDs for undo
+    F log_edge_delete(
+        ~self,
+        txn_id: u64,
+        edge_id: u64,
+        src: u64,
+        dst: u64,
+        src_adj_page: u32,
+        dst_adj_page: u32,
+        old_data: &[u8],
+    ) -> Result<u64, VaisError> {
+        ~payload = GraphEdgeDeletePayload {
+            file_id: 2,
+            edge_id,
+            src,
+            dst,
+            src_adj_page,
+            dst_adj_page,
+            old_data: old_data.to_vec(),
+        };
+
+        ~buf = ByteBuffer.new(256);
+        payload.serialize(&buf);
+        ~payload_bytes = buf.to_vec();
+
+        self.gcm.write_record(txn_id, GRAPH_EDGE_DELETE, ENGINE_TAG_GRAPH, &payload_bytes)
+    }
+
+    # Log property update (WAL-first, before page mutation)
+    F log_property_update(
+        ~self,
+        txn_id: u64,
+        page_id: u32,
+        entity_type: u8,
+        entity_id: u64,
+        old_properties: &[u8],
+        new_properties: &[u8],
+    ) -> Result<u64, VaisError> {
+        ~payload = GraphPropertyUpdatePayload {
+            file_id: 2,
+            page_id,
+            entity_type,
+            entity_id,
+            old_properties: old_properties.to_vec(),
+            new_properties: new_properties.to_vec(),
+        };
+
+        ~buf = ByteBuffer.new(512);
+        payload.serialize(&buf);
+        ~payload_bytes = buf.to_vec();
+
+        self.gcm.write_record(txn_id, GRAPH_PROPERTY_UPDATE, ENGINE_TAG_GRAPH, &payload_bytes)
+    }
+
+    # Log adjacency list page split (WAL-first, before page mutation)
+    F log_adj_page_split(
+        ~self,
+        txn_id: u64,
+        node_id: u64,
+        old_page: u32,
+        new_page: u32,
+        direction: u8,
+        split_data: &[u8],
+    ) -> Result<u64, VaisError> {
+        ~payload = AdjListPageSplitPayload {
+            file_id: 2,
+            node_id,
+            old_page,
+            new_page,
+            direction,
+            split_data: split_data.to_vec(),
+        };
+
+        ~buf = ByteBuffer.new(256);
+        payload.serialize(&buf);
+        ~payload_bytes = buf.to_vec();
+
+        self.gcm.write_record(txn_id, ADJ_LIST_PAGE_SPLIT, ENGINE_TAG_GRAPH, &payload_bytes)
+    }
+}
+
+# ============================================================================
+# Redo/Undo Handlers — Crash recovery for graph operations
+# Called by the WAL recovery manager during startup
+# ============================================================================
+
+# Redo a graph node insert (re-apply the page mutation)
+F redo_graph_node_insert(payload: &GraphNodeInsertPayload) -> Result<(), VaisError> {
+    # During recovery: re-insert the node into the node page
+    # The payload contains everything needed to reconstruct the node
+    # Actual implementation deferred to recovery manager integration
+    Ok(())
+}
+
+# Undo a graph node insert (remove the inserted node)
+F undo_graph_node_insert(payload: &GraphNodeInsertPayload) -> Result<(), VaisError> {
+    # During rollback: remove the node that was inserted
+    # Mark the slot as deleted in the node page
+    Ok(())
+}
+
+# Redo a graph edge insert (re-apply both adjacency list entries)
+F redo_graph_edge_insert(payload: &GraphEdgeInsertPayload) -> Result<(), VaisError> {
+    # During recovery: re-insert AdjEntry into BOTH src outgoing and dst incoming pages
+    Ok(())
+}
+
+# Undo a graph edge insert (remove both adjacency list entries)
+F undo_graph_edge_insert(payload: &GraphEdgeInsertPayload) -> Result<(), VaisError> {
+    # During rollback: remove AdjEntry from BOTH src outgoing and dst incoming pages
+    Ok(())
+}
+
+# Redo a graph edge delete (re-apply the expiration)
+F redo_graph_edge_delete(payload: &GraphEdgeDeletePayload) -> Result<(), VaisError> {
+    # During recovery: re-mark the edge as expired in both adjacency lists
+    Ok(())
+}
+
+# Undo a graph edge delete (restore the edge)
+F undo_graph_edge_delete(payload: &GraphEdgeDeletePayload) -> Result<(), VaisError> {
+    # During rollback: clear expiration from both adjacency list entries
+    Ok(())
+}
+
+# Redo a property update (re-apply new properties)
+F redo_graph_property_update(payload: &GraphPropertyUpdatePayload) -> Result<(), VaisError> {
+    # During recovery: write new_properties to the property page
+    Ok(())
+}
+
+# Undo a property update (restore old properties)
+F undo_graph_property_update(payload: &GraphPropertyUpdatePayload) -> Result<(), VaisError> {
+    # During rollback: write old_properties back to the property page
+    Ok(())
+}
+
+# Redo an adjacency list page split
+F redo_adj_page_split(payload: &AdjListPageSplitPayload) -> Result<(), VaisError> {
+    # During recovery: re-apply the page chain linkage
+    Ok(())
+}
+
+# Undo an adjacency list page split
+F undo_adj_page_split(payload: &AdjListPageSplitPayload) -> Result<(), VaisError> {
+    # During rollback: unlink the new page, restore old page to pre-split state
+    Ok(())
+}

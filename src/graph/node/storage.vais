@@ -1,0 +1,332 @@
+# Graph Node Storage
+# Manages graph node pages: slotted page layout for GraphNode structs
+# Page type: PAGE_TYPE_GRAPH_NODE (0x30), engine: ENGINE_TAG_GRAPH (0x03)
+
+U std/bytes.{ByteBuffer};
+U std/vec.Vec;
+U std/option.{Option, Some, None};
+U storage/constants.{
+    PAGE_HEADER_SIZE, DEFAULT_PAGE_SIZE, NULL_PAGE,
+    FILE_ID_GRAPH, MVCC_TUPLE_META_SIZE, INVALID_TXN_ID
+};
+U storage/error.{VaisError, err_internal};
+U storage/page/header.{PageHeader};
+U storage/page/types.{PAGE_TYPE_GRAPH_NODE, ENGINE_TAG_GRAPH};
+U storage/buffer/pool.{BufferPool};
+U storage/page/allocator.{PageAllocator};
+U storage/page/freelist.{FreelistBitmap};
+U graph/types.{
+    GraphNode, GraphMeta, GraphConfig,
+    GRAPH_NODE_HEADER_SIZE, INVALID_NODE_ID,
+    err_graph_node_not_found, err_graph_node_corrupt, err_graph_page_full
+};
+
+# Node page body header (after 48B page header)
+# node_count(2) + next_free_offset(2) + flags(2) + reserved(2) = 8 bytes
+L NODE_PAGE_BODY_HEADER_SIZE: u32 = 8;
+
+# Slot directory entry: offset(2) + length(2) = 4 bytes
+L NODE_SLOT_SIZE: u32 = 4;
+
+# ============================================================================
+# NodeSlot — Slot directory entry for a node in a page
+# ============================================================================
+
+S NodeSlot {
+    offset: u16,   # Offset within page body to node data
+    length: u16,   # Length of serialized node data
+}
+
+X NodeSlot {
+    F serialize(self, buf: &~ByteBuffer) {
+        buf.put_u16_le(self.offset);
+        buf.put_u16_le(self.length);
+    }
+
+    F deserialize(buf: &ByteBuffer) -> Result<NodeSlot, VaisError> {
+        Ok(NodeSlot {
+            offset: buf.get_u16_le()?,
+            length: buf.get_u16_le()?,
+        })
+    }
+
+    # Check if slot is deleted (tombstone marker)
+    F is_deleted(self) -> bool {
+        self.length == 0
+    }
+}
+
+# ============================================================================
+# NodePage — A single page storing multiple GraphNode entries
+# Slotted page layout: [PageHeader 48B] [NodePageHeader 8B] [Slots...] [FreeSpace] [NodeData ← bottom-up]
+# ============================================================================
+
+S NodePage {
+    page_id: u32,
+    node_count: u16,
+    next_free_offset: u16,   # Top-down: next slot dir position
+    flags: u16,
+    slots: Vec<NodeSlot>,
+    page_data: Vec<u8>,
+    page_size: u32,
+}
+
+X NodePage {
+    # Create new empty node page
+    F new(page_id: u32, page_size: u32) -> NodePage {
+        ~start_offset = (PAGE_HEADER_SIZE + NODE_PAGE_BODY_HEADER_SIZE) as u16;
+        NodePage {
+            page_id,
+            node_count: 0,
+            next_free_offset: start_offset,
+            flags: 0,
+            slots: Vec.new(),
+            page_data: vec![0u8; page_size as usize],
+            page_size,
+        }
+    }
+
+    # Load from page buffer
+    F load(page_id: u32, page_data: &[u8], page_size: u32) -> Result<NodePage, VaisError> {
+        ~header = PageHeader.read_from_page(page_data)?;
+        if header.page_type != PAGE_TYPE_GRAPH_NODE {
+            return Err(err_graph_node_corrupt(0));
+        }
+
+        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as usize..]);
+        ~node_count = buf.get_u16_le()?;
+        ~next_free_offset = buf.get_u16_le()?;
+        ~flags = buf.get_u16_le()?;
+        buf.get_u16_le()?;  # reserved
+
+        # Read slot directory
+        ~slots = Vec.with_capacity(node_count as usize);
+        ~i: usize = 0;
+        L while i < node_count as usize {
+            slots.push(NodeSlot.deserialize(&buf)?);
+            i += 1;
+        }
+
+        Ok(NodePage {
+            page_id,
+            node_count,
+            next_free_offset,
+            flags,
+            slots,
+            page_data: page_data.to_vec(),
+            page_size,
+        })
+    }
+
+    # Calculate available free space for new node data
+    F available_space(self) -> u32 {
+        # Slot directory grows top-down, node data grows bottom-up
+        ~slot_dir_end = PAGE_HEADER_SIZE + NODE_PAGE_BODY_HEADER_SIZE +
+                        (self.node_count as u32 * NODE_SLOT_SIZE);
+        ~data_start = self.find_lowest_data_offset();
+        if data_start > slot_dir_end + NODE_SLOT_SIZE {
+            data_start - slot_dir_end - NODE_SLOT_SIZE
+        } else {
+            0
+        }
+    }
+
+    # Find lowest offset of existing node data (bottom-up growth)
+    F find_lowest_data_offset(self) -> u32 {
+        ~lowest = self.page_size;
+        ~i: usize = 0;
+        L while i < self.slots.len() {
+            if !self.slots[i].is_deleted() && (self.slots[i].offset as u32) < lowest {
+                lowest = self.slots[i].offset as u32;
+            }
+            i += 1;
+        }
+        lowest
+    }
+
+    # Add node to page (returns slot index)
+    F add_node(~self, node: &GraphNode) -> Result<u16, VaisError> {
+        # Serialize node to temp buffer
+        ~temp_buf = ByteBuffer.new(node.serialized_size() as usize);
+        node.serialize(&temp_buf);
+        ~node_bytes = temp_buf.to_vec();
+        ~node_size = node_bytes.len() as u32;
+
+        # Check space
+        if self.available_space() < node_size {
+            return Err(err_graph_page_full(self.page_id));
+        }
+
+        # Write node data bottom-up
+        ~data_offset = self.find_lowest_data_offset() - node_size;
+        ~i: usize = 0;
+        L while i < node_bytes.len() {
+            self.page_data[(data_offset as usize) + i] = node_bytes[i];
+            i += 1;
+        }
+
+        # Add slot entry
+        ~slot_index = self.node_count;
+        self.slots.push(NodeSlot {
+            offset: data_offset as u16,
+            length: node_size as u16,
+        });
+        self.node_count += 1;
+
+        Ok(slot_index)
+    }
+
+    # Read node at slot index
+    F read_node(self, slot_index: u16) -> Result<GraphNode, VaisError> {
+        if slot_index >= self.node_count {
+            return Err(err_graph_node_not_found(0));
+        }
+
+        ~slot = &self.slots[slot_index as usize];
+        if slot.is_deleted() {
+            return Err(err_graph_node_not_found(0));
+        }
+
+        ~buf = ByteBuffer.wrap_readonly(
+            &self.page_data[slot.offset as usize..(slot.offset + slot.length) as usize]
+        );
+        GraphNode.deserialize(&buf)
+    }
+
+    # Update node at slot index (must fit in same or smaller space)
+    F update_node(~self, slot_index: u16, node: &GraphNode) -> Result<(), VaisError> {
+        if slot_index >= self.node_count {
+            return Err(err_graph_node_not_found(0));
+        }
+
+        ~slot = &self.slots[slot_index as usize];
+        ~temp_buf = ByteBuffer.new(node.serialized_size() as usize);
+        node.serialize(&temp_buf);
+        ~node_bytes = temp_buf.to_vec();
+
+        if node_bytes.len() > slot.length as usize {
+            return Err(err_graph_page_full(self.page_id));
+        }
+
+        # Overwrite existing data
+        ~i: usize = 0;
+        L while i < node_bytes.len() {
+            self.page_data[(slot.offset as usize) + i] = node_bytes[i];
+            i += 1;
+        }
+
+        Ok(())
+    }
+
+    # Write page to buffer (for flushing to buffer pool)
+    F write_to_buffer(self, page_lsn: u64, txn_id: u64) -> Vec<u8> {
+        ~out = vec![0u8; self.page_size as usize];
+
+        # Write page header
+        ~header = PageHeader.new(self.page_id, PAGE_TYPE_GRAPH_NODE, ENGINE_TAG_GRAPH);
+        header.page_lsn = page_lsn;
+        header.txn_id = txn_id;
+        header.item_count = self.node_count;
+        header.write_to_page(&out);
+
+        # Write node page body header
+        ~buf = ByteBuffer.wrap(&out);
+        buf.set_position(PAGE_HEADER_SIZE as usize);
+        buf.put_u16_le(self.node_count);
+        buf.put_u16_le(self.next_free_offset);
+        buf.put_u16_le(self.flags);
+        buf.put_u16_le(0);  # reserved
+
+        # Write slot directory
+        ~i: usize = 0;
+        L while i < self.slots.len() {
+            self.slots[i].serialize(&buf);
+            i += 1;
+        }
+
+        # Copy node data area (bottom-up region)
+        ~lowest = self.find_lowest_data_offset() as usize;
+        ~j: usize = lowest;
+        L while j < self.page_size as usize {
+            out[j] = self.page_data[j];
+            j += 1;
+        }
+
+        # Update checksum
+        PageHeader.update_checksum(&out);
+
+        out
+    }
+}
+
+# ============================================================================
+# NodeStore — High-level node storage interface via buffer pool
+# ============================================================================
+
+S NodeStore {
+    pool: &BufferPool,
+    allocator: &PageAllocator,
+    bitmap: &FreelistBitmap,
+    page_size: u32,
+}
+
+X NodeStore {
+    F new(
+        pool: &BufferPool,
+        allocator: &PageAllocator,
+        bitmap: &FreelistBitmap,
+        page_size: u32
+    ) -> NodeStore {
+        NodeStore { pool, allocator, bitmap, page_size }
+    }
+
+    # Write a new node, allocating a page if needed
+    # Returns (page_id, slot_index)
+    F write_node(~self, node: &GraphNode, txn_id: u64) -> Result<(u32, u16), VaisError> {
+        # Allocate new page (simple strategy: one node per page for now)
+        ~page_id = self.allocator.allocate_page(FILE_ID_GRAPH, self.bitmap)?;
+        ~npage = NodePage.new(page_id, self.page_size);
+        ~slot_index = npage.add_node(node)?;
+
+        # Write to buffer pool
+        ~page_buffer = npage.write_to_buffer(0, txn_id);
+        ~frame_id = self.pool.fetch_page(FILE_ID_GRAPH, page_id)?;
+        ~frame_data = self.pool.get_page_mut(frame_id);
+        ~i: usize = 0;
+        L while i < page_buffer.len() {
+            frame_data[i] = page_buffer[i];
+            i += 1;
+        }
+        self.pool.unpin_page(frame_id, true);
+
+        Ok((page_id, slot_index))
+    }
+
+    # Read a node from storage
+    F read_node(self, page_id: u32, slot_index: u16) -> Result<GraphNode, VaisError> {
+        ~frame_id = self.pool.fetch_page(FILE_ID_GRAPH, page_id)?;
+        ~page_data = self.pool.get_page(frame_id);
+        ~npage = NodePage.load(page_id, page_data, self.page_size)?;
+        ~node = npage.read_node(slot_index)?;
+        self.pool.unpin_page(frame_id, false);
+        Ok(node)
+    }
+
+    # Update a node in storage
+    F update_node(~self, page_id: u32, slot_index: u16, node: &GraphNode, txn_id: u64) -> Result<(), VaisError> {
+        ~frame_id = self.pool.fetch_page(FILE_ID_GRAPH, page_id)?;
+        ~page_data = self.pool.get_page_mut(frame_id);
+        ~npage = NodePage.load(page_id, page_data, self.page_size)?;
+        npage.update_node(slot_index, node)?;
+
+        # Write back
+        ~page_buffer = npage.write_to_buffer(0, txn_id);
+        ~i: usize = 0;
+        L while i < page_buffer.len() {
+            page_data[i] = page_buffer[i];
+            i += 1;
+        }
+        self.pool.unpin_page(frame_id, true);
+        Ok(())
+    }
+}
