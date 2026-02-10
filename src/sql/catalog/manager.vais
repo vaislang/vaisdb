@@ -10,22 +10,22 @@
 # - Columns stored in a separate Vec cache keyed by table_id
 # - At startup, load_from_disk scans the entire catalog B+Tree to populate caches
 
-use std/bytes.{ByteBuffer};
-use std/hashmap.{HashMap};
-use storage/error.{VaisError, err_internal};
-use storage/constants.{FILE_ID_DATA};
-use storage/buffer/pool.{BufferPool};
-use storage/btree/tree.{BTree};
-use storage/btree/insert.{btree_insert};
-use storage/btree/search.{search_cursor, search_lower_bound, search_first, range_scan_bounded};
-use storage/btree/key.{KeyRange};
-use storage/btree/entry.{compare_keys, KeyCmp};
-use storage/bytes.{encode_tid, decode_tid};
-use storage/page/heap.{HeapPage};
-use storage/page/tuple.{Tuple};
-use storage/page/mvcc.{MvccTupleMeta};
-use storage/wal/group_commit.{GroupCommitManager};
-use sql/catalog/schema.{
+U std/bytes.{ByteBuffer};
+U std/hashmap.{HashMap};
+U storage/error.{VaisError, err_internal};
+U storage/constants.{FILE_ID_DATA};
+U storage/buffer/pool.{BufferPool};
+U storage/btree/tree.{BTree};
+U storage/btree/insert.{btree_insert};
+U storage/btree/search.{search_cursor, search_lower_bound, search_first, range_scan_bounded};
+U storage/btree/key.{KeyRange};
+U storage/btree/entry.{compare_keys, KeyCmp};
+U storage/bytes.{encode_tid, decode_tid};
+U storage/page/heap.{HeapPage};
+U storage/page/tuple.{Tuple};
+U storage/page/mvcc.{MvccTupleMeta};
+U storage/wal/group_commit.{GroupCommitManager};
+U sql/catalog/schema.{
     TableInfo, ColumnInfo, IndexInfo,
     table_key, columns_key_prefix, columns_key_end,
     index_key, index_key_prefix_for_table, index_key_end_for_table,
@@ -94,7 +94,7 @@ S CatalogManager {
     next_index_id: u32,
 }
 
-I CatalogManager {
+X CatalogManager {
     # Create a new CatalogManager wrapping the given catalog B+Tree
     # The caches are empty; call load_from_disk() to populate them
     F new(catalog_tree: BTree) -> CatalogManager {

@@ -3,12 +3,12 @@
 # Avoids top-down insert overhead by building bottom-up
 # Used for CREATE INDEX, COPY, and initial data load
 
-use storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
-use storage/error.{VaisError, err_internal};
-use storage/buffer/pool.{BufferPool};
-use storage/btree/tree.{BTree};
-use storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
-use storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry};
+U storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
+U storage/error.{VaisError, err_internal};
+U storage/buffer/pool.{BufferPool};
+U storage/btree/tree.{BTree};
+U storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
+U storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry};
 
 # Bulk load entry: pre-sorted (key, tid) pair
 S BulkLoadEntry {
@@ -16,7 +16,7 @@ S BulkLoadEntry {
     tid: u32,
 }
 
-I BulkLoadEntry {
+X BulkLoadEntry {
     F new(key: Vec<u8>, tid: u32) -> BulkLoadEntry {
         BulkLoadEntry { key, tid }
     }

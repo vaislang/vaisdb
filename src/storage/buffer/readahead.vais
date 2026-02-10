@@ -2,8 +2,8 @@
 # Detects sequential access patterns and prefetches pages
 # Improves performance for sequential scans (table scans, index scans)
 
-use std/sync.{Mutex};
-use std/hashmap.{HashMap};
+U std/sync.{Mutex};
+U std/hashmap.{HashMap};
 
 # Access history for a single file
 S FileAccessHistory {
@@ -13,7 +13,7 @@ S FileAccessHistory {
     prefetch_distance: u32,       # How many pages to prefetch ahead (default: 8)
 }
 
-I FileAccessHistory {
+X FileAccessHistory {
     F new(file_id: u8) -> FileAccessHistory {
         FileAccessHistory {
             file_id,
@@ -81,7 +81,7 @@ S ReadAhead {
     prefetch_distance: u32,   # Default prefetch distance
 }
 
-I ReadAhead {
+X ReadAhead {
     # Create a new read-ahead prefetcher
     F new() -> ReadAhead {
         ReadAhead {

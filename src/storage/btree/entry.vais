@@ -2,9 +2,9 @@
 # Internal node entries (8B directory + variable key) and leaf entries (8B + variable key)
 # Based on Stage 1 Section 9 and Stage 7 Patterns
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{BTREE_INTERNAL_ENTRY_SIZE, BTREE_LEAF_ENTRY_SIZE, TID_PAGE_BITS, TID_SLOT_BITS};
-use storage/error.{VaisError};
+U std/bytes.{ByteBuffer};
+U storage/constants.{BTREE_INTERNAL_ENTRY_SIZE, BTREE_LEAF_ENTRY_SIZE, TID_PAGE_BITS, TID_SLOT_BITS};
+U storage/error.{VaisError};
 
 # Internal node key directory entry (8 bytes)
 S BTreeInternalEntry {
@@ -13,7 +13,7 @@ S BTreeInternalEntry {
     child_page: u32,   # Child page ID to the RIGHT of this key
 }
 
-I BTreeInternalEntry {
+X BTreeInternalEntry {
     F new(key_off: u16, key_len: u16, child_page: u32) -> BTreeInternalEntry {
         BTreeInternalEntry { key_off, key_len, child_page }
     }
@@ -44,7 +44,7 @@ S BTreeLeafEntry {
     tid: u32,          # Tuple ID: page_id (upper 20 bits) + slot (lower 12 bits)
 }
 
-I BTreeLeafEntry {
+X BTreeLeafEntry {
     F new(key_off: u16, key_len: u16, tid: u32) -> BTreeLeafEntry {
         BTreeLeafEntry { key_off, key_len, tid }
     }

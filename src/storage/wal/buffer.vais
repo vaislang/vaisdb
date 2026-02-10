@@ -3,9 +3,9 @@
 # Based on Stage 2: WAL Design - Group Commit
 # Default buffer size: 16MB for throughput optimization
 
-use storage/error.{VaisError, err_wal_buffer_full};
-use storage/constants.{DEFAULT_WAL_BUFFER_SIZE};
-use std/bytes.{ByteBuffer};
+U storage/error.{VaisError, err_wal_buffer_full};
+U storage/constants.{DEFAULT_WAL_BUFFER_SIZE};
+U std/bytes.{ByteBuffer};
 
 # WAL Write Buffer for group commit batching
 S WalBuffer {
@@ -15,7 +15,7 @@ S WalBuffer {
     record_count: u32,       # Number of records in buffer
 }
 
-I WalBuffer {
+X WalBuffer {
     # Create a new WAL buffer with default size (16MB)
     F new() -> WalBuffer {
         WalBuffer.with_size(DEFAULT_WAL_BUFFER_SIZE)

@@ -46,19 +46,19 @@ pub mod quantize;
 pub use quantize/mod.{QuantizationManager, QuantizationStrategy};
 
 # Dependencies
-use std/option.{Option, Some, None};
-use std/vec.Vec;
-use std/string.Str;
-use storage/error.{VaisError, ErrorSeverity};
-use storage/buffer/pool.{BufferPool};
-use storage/page/allocator.{PageAllocator};
-use storage/wal/group_commit.{GroupCommitManager};
-use storage/txn/snapshot.{Snapshot};
-use storage/constants.{FILE_ID_VECTORS, PAGE_TYPE_HNSW_META, NULL_PAGE};
-use sql/catalog/manager.{CatalogManager};
-use sql/catalog/schema.{IndexInfo, INDEX_TYPE_HNSW};
-use sql/types.{Expr};
-use sql/executor/mod.{ExecContext};
+U std/option.{Option, Some, None};
+U std/vec.Vec;
+U std/string.Str;
+U storage/error.{VaisError, ErrorSeverity};
+U storage/buffer/pool.{BufferPool};
+U storage/page/allocator.{PageAllocator};
+U storage/wal/group_commit.{GroupCommitManager};
+U storage/txn/snapshot.{Snapshot};
+U storage/constants.{FILE_ID_VECTORS, PAGE_TYPE_HNSW_META, NULL_PAGE};
+U sql/catalog/manager.{CatalogManager};
+U sql/catalog/schema.{IndexInfo, INDEX_TYPE_HNSW};
+U sql/types.{Expr};
+U sql/executor/mod.{ExecContext};
 
 # ============================================================================
 # Error Codes: EE=02 (vector), CC=10 (module), NNN=001-003
@@ -107,7 +107,7 @@ S VectorEngine {
     gcm: &GroupCommitManager,        # Shared group commit manager
 }
 
-I VectorEngine {
+X VectorEngine {
     # ========================================================================
     # Constructor — Create new vector engine instance
     # ========================================================================

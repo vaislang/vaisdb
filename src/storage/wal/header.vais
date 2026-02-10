@@ -2,10 +2,10 @@
 # Based on Stage 2: WAL Design
 # All fields naturally aligned for ARM/strict-alignment architectures
 
-use storage/error.{VaisError, err_wal_corruption};
-use storage/constants.{WAL_RECORD_HEADER_SIZE};
-use storage/checksum.{calculate_wal_checksum, verify_wal_checksum};
-use std/bytes.{ByteBuffer};
+U storage/error.{VaisError, err_wal_corruption};
+U storage/constants.{WAL_RECORD_HEADER_SIZE};
+U storage/checksum.{calculate_wal_checksum, verify_wal_checksum};
+U std/bytes.{ByteBuffer};
 
 # WAL Record Header Structure (48 bytes)
 S WalRecordHeader {
@@ -20,7 +20,7 @@ S WalRecordHeader {
     reserved: [u8; 6],      # 42-47: Reserved (must be 0)
 }
 
-I WalRecordHeader {
+X WalRecordHeader {
     # Create a new WAL record header
     F new(
         lsn: u64,

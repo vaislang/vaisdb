@@ -4,13 +4,13 @@
 # Default batching window: 1ms (1000μs)
 # Reduces fsync calls from 1-per-txn to 1-per-batch
 
-use std/sync.{Mutex, CondVar};
-use std/file.{fsync};
+U std/sync.{Mutex, CondVar};
+U std/file.{fsync};
 
-use storage/error.{VaisError, err_internal};
-use storage/constants.{DEFAULT_GROUP_COMMIT_TIMEOUT_US};
-use storage/wal/writer.{WalWriter};
-use storage/wal/lsn.{NULL_LSN};
+U storage/error.{VaisError, err_internal};
+U storage/constants.{DEFAULT_GROUP_COMMIT_TIMEOUT_US};
+U storage/wal/writer.{WalWriter};
+U storage/wal/lsn.{NULL_LSN};
 
 # Sync mode configuration
 L SyncMode = Fsync | Fdatasync | Async;
@@ -22,7 +22,7 @@ S GroupCommitConfig {
     max_batch_size: u32,     # Max records per batch before forced flush
 }
 
-I GroupCommitConfig {
+X GroupCommitConfig {
     F default() -> GroupCommitConfig {
         GroupCommitConfig {
             sync_mode: SyncMode.Fsync,
@@ -63,7 +63,7 @@ S GroupCommitManager {
     flush_cv: CondVar,       # Signal when flush completes
 }
 
-I GroupCommitManager {
+X GroupCommitManager {
     # Create a new group commit manager
     F new(config: GroupCommitConfig, writer: WalWriter) -> GroupCommitManager {
         GroupCommitManager {

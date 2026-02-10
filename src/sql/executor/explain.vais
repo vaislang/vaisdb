@@ -12,13 +12,13 @@
 #     Sort (2 keys) (cost=10.00..12.00, rows=100..100, time=1.5ms)
 #       SeqScan on users (cost=5.00..8.00, rows=1000..950, time=5.1ms)
 
-use storage/error.{VaisError};
-use sql/parser/ast.{Statement, SelectQuery};
-use sql/planner/mod.{build_plan, estimate_cost, PlanNode, CostEstimate};
-use sql/executor/mod.{ExecContext, ExecStats};
-use sql/catalog/manager.{CatalogManager};
-use sql/row.{Row};
-use sql/types.{SqlValue};
+U storage/error.{VaisError};
+U sql/parser/ast.{Statement, SelectQuery};
+U sql/planner/mod.{build_plan, estimate_cost, PlanNode, CostEstimate};
+U sql/executor/mod.{ExecContext, ExecStats};
+U sql/catalog/manager.{CatalogManager};
+U sql/row.{Row};
+U sql/types.{SqlValue};
 
 # ============================================================================
 # Error Code Constants (EE=01 SQL Engine, CC=10 Explain)
@@ -63,7 +63,7 @@ S ExplainResult {
     rows: Vec<Row>,
 }
 
-I ExplainResult {
+X ExplainResult {
     F new() -> ExplainResult {
         ExplainResult {
             rows: Vec.new(),
@@ -325,7 +325,7 @@ S NodeStats {
     elapsed_ms: f64,
 }
 
-I NodeStats {
+X NodeStats {
     F new() -> NodeStats {
         NodeStats {
             rows_produced: 0,
@@ -343,7 +343,7 @@ S AnalyzeCollector {
     current_node: usize,
 }
 
-I AnalyzeCollector {
+X AnalyzeCollector {
     F new() -> AnalyzeCollector {
         AnalyzeCollector {
             stats_map: Vec.new(),

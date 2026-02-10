@@ -3,27 +3,27 @@
 # IndexScan: B+Tree range scan → TID lookup → heap tuple fetch + MVCC visibility
 # Both produce ExecutorRow one at a time (Volcano iterator model)
 
-use storage/error.{VaisError, err_internal};
-use storage/constants.{FILE_ID_DATA, NULL_PAGE};
-use storage/buffer/pool.{BufferPool};
-use storage/page/heap.{HeapPage};
-use storage/page/tuple.{Tuple};
-use storage/page/mvcc.{MvccTupleMeta};
-use storage/txn/visibility.{is_tuple_visible};
-use storage/txn/snapshot.{Snapshot};
-use storage/txn/clog.{Clog};
-use storage/btree/tree.{BTree};
-use storage/btree/search.{search_lower_bound, search_first, search_cursor};
-use storage/btree/cursor.{BTreeCursor};
-use storage/btree/entry.{compare_keys, KeyCmp};
-use storage/btree/key.{KeyRange};
-use storage/bytes.{decode_tid};
-use sql/types.{SqlType, SqlValue};
-use sql/row.{Row};
-use sql/catalog/schema.{TableInfo, ColumnInfo, IndexInfo};
-use sql/executor/mod.{ExecutorRow, ExecContext, ExecStats};
-use sql/executor/expr_eval.{Expr, EvalContext, eval_predicate};
-use sql/parser/ast.{Expr};
+U storage/error.{VaisError, err_internal};
+U storage/constants.{FILE_ID_DATA, NULL_PAGE};
+U storage/buffer/pool.{BufferPool};
+U storage/page/heap.{HeapPage};
+U storage/page/tuple.{Tuple};
+U storage/page/mvcc.{MvccTupleMeta};
+U storage/txn/visibility.{is_tuple_visible};
+U storage/txn/snapshot.{Snapshot};
+U storage/txn/clog.{Clog};
+U storage/btree/tree.{BTree};
+U storage/btree/search.{search_lower_bound, search_first, search_cursor};
+U storage/btree/cursor.{BTreeCursor};
+U storage/btree/entry.{compare_keys, KeyCmp};
+U storage/btree/key.{KeyRange};
+U storage/bytes.{decode_tid};
+U sql/types.{SqlType, SqlValue};
+U sql/row.{Row};
+U sql/catalog/schema.{TableInfo, ColumnInfo, IndexInfo};
+U sql/executor/mod.{ExecutorRow, ExecContext, ExecStats};
+U sql/executor/expr_eval.{Expr, EvalContext, eval_predicate};
+U sql/parser/ast.{Expr};
 
 # ============================================================================
 # TableScanExecutor — Full table scan
@@ -49,7 +49,7 @@ S TableScanExecutor {
     stats: ExecStats,
 }
 
-I TableScanExecutor {
+X TableScanExecutor {
     # Create a new table scan executor
     F new(
         table_info: TableInfo,
@@ -254,7 +254,7 @@ S IndexScanExecutor {
     stats: ExecStats,
 }
 
-I IndexScanExecutor {
+X IndexScanExecutor {
     # Create a new index scan executor
     F new(
         table_info: TableInfo,
@@ -576,7 +576,7 @@ L ProjectionItem =
     ColumnIndex { idx: usize } |
     Expression { expr: Expr, alias: Option<Str> };
 
-I ProjectionExecutor {
+X ProjectionExecutor {
     F new(projections: Vec<ProjectionItem>, eval_ctx: EvalContext) -> ProjectionExecutor {
         ProjectionExecutor {
             projections,
@@ -602,4 +602,4 @@ I ProjectionExecutor {
     }
 }
 
-use sql/executor/expr_eval.{eval_expr};
+U sql/executor/expr_eval.{eval_expr};

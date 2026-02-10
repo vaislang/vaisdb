@@ -19,9 +19,9 @@
 #
 # Error codes: VAIS-0206NNN (EE=02 vector, CC=06 quantize)
 
-use std/bytes.{ByteBuffer};
-use std/math.{sqrt};
-use storage/error.{VaisError};
+U std/bytes.{ByteBuffer};
+U std/math.{sqrt};
+U storage/error.{VaisError};
 
 # ============================================================================
 # Error Handling
@@ -67,7 +67,7 @@ S ScalarQuantizer {
     trained: bool,         # Whether quantizer has been trained
 }
 
-I ScalarQuantizer {
+X ScalarQuantizer {
     # Create a new untrained quantizer for the given dimension
     F new(dim: u32) -> ScalarQuantizer {
         ScalarQuantizer {

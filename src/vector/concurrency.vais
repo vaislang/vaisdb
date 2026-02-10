@@ -2,10 +2,10 @@
 # VaisDB Vector Engine - Concurrency Control
 # Single-writer + multiple-reader lock management for HNSW index
 
-use std/sync.{RwLock, Mutex, MutexGuard, RwLockReadGuard, RwLockWriteGuard, AtomicU64, Ordering};
-use crate/common/error.{VaisError, ErrorCategory, error_code};
-use crate/vector/types.{HnswMeta, HnswConfig, VectorId};
-use crate/vector/search.SearchResult;
+U std/sync.{RwLock, Mutex, MutexGuard, RwLockReadGuard, RwLockWriteGuard, AtomicU64, Ordering};
+U crate/common/error.{VaisError, ErrorCategory, error_code};
+U crate/vector/types.{HnswMeta, HnswConfig, VectorId};
+U crate/vector/search.SearchResult;
 
 # Error codes: EE=02 (vector), CC=07 (concurrency)
 const ERROR_LOCK_POISONED: u32 = error_code(2, 7, 1);      # 02-07-001
@@ -29,7 +29,7 @@ S HnswLock {
     active_writer: AtomicU64,      # Current writer txn_id (0 = none)
 }
 
-I HnswLock {
+X HnswLock {
     # Create new lock manager
     F new() -> HnswLock {
         HnswLock {
@@ -190,7 +190,7 @@ S HnswReadGuard<'a> {
     _guard: RwLockReadGuard<'a, ()>,
 }
 
-I Drop for HnswReadGuard<'_> {
+X Drop for HnswReadGuard<'_> {
     F drop(&~self) {
         self.lock.decrement_readers();
     }
@@ -203,7 +203,7 @@ S HnswWriteGuard<'a> {
     _guard: RwLockWriteGuard<'a, ()>,
 }
 
-I Drop for HnswWriteGuard<'_> {
+X Drop for HnswWriteGuard<'_> {
     F drop(&~self) {
         self.lock.release_writer(self.txn_id);
     }
@@ -222,7 +222,7 @@ S ConcurrencyStats {
     write_conflicts: AtomicU64,        # Number of write conflicts
 }
 
-I ConcurrencyStats {
+X ConcurrencyStats {
     F new() -> ConcurrencyStats {
         ConcurrencyStats {
             total_reads: AtomicU64::new(0),
@@ -303,7 +303,7 @@ S ConcurrentHnswIndex {
     stats: ConcurrencyStats,
 }
 
-I ConcurrentHnswIndex {
+X ConcurrentHnswIndex {
     # Create new concurrent HNSW index
     F new(meta: HnswMeta) -> ConcurrentHnswIndex {
         ConcurrentHnswIndex {

@@ -2,9 +2,9 @@
 # Implements first-writer-wins for Snapshot Isolation
 # Based on Stage 3 Section 7: Write-Write Conflict Detection
 
-use std/sync.{Mutex};
-use std/hashmap.{HashMap};
-use storage/error.{VaisError, err_write_conflict};
+U std/sync.{Mutex};
+U std/hashmap.{HashMap};
+U storage/error.{VaisError, err_write_conflict};
 
 # Conflict detector: tracks which rows are locked by which transactions
 S ConflictDetector {
@@ -13,7 +13,7 @@ S ConflictDetector {
     lock: Mutex,
 }
 
-I ConflictDetector {
+X ConflictDetector {
     # Create a new conflict detector
     F new() -> ConflictDetector {
         ConflictDetector {

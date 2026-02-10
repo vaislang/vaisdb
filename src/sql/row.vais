@@ -4,17 +4,17 @@
 # - null_bitmap: ceil(col_count/8) bytes, bit=1 means NULL
 # - value_data: for each non-NULL column, serialized SqlValue data (no type tag, schema knows types)
 
-use std/bytes.{ByteBuffer};
-use storage/error.{VaisError};
-use storage/bytes.{write_string, read_string, write_bytes, read_bytes};
-use sql/types.{SqlType, SqlValue};
+U std/bytes.{ByteBuffer};
+U storage/error.{VaisError};
+U storage/bytes.{write_string, read_string, write_bytes, read_bytes};
+U sql/types.{SqlType, SqlValue};
 
 # A row is an ordered list of SQL values corresponding to a table schema
 S Row {
     values: Vec<SqlValue>,
 }
 
-I Row {
+X Row {
     # Create a new row from a vector of values
     F new(values: Vec<SqlValue>) -> Row {
         Row { values }

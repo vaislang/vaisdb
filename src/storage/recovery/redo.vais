@@ -10,29 +10,29 @@
 #   - Restores ALL changes (committed and uncommitted)
 #   - Engine tag routes record to correct engine's redo handler
 
-use std/file.{File, OpenMode};
-use std/bytes.{ByteBuffer};
-use std/hashmap.{HashMap};
+U std/file.{File, OpenMode};
+U std/bytes.{ByteBuffer};
+U std/hashmap.{HashMap};
 
-use storage/error.{VaisError, err_internal, err_wal_corruption};
-use storage/constants.{
+U storage/error.{VaisError, err_internal, err_wal_corruption};
+U storage/constants.{
     WAL_RECORD_HEADER_SIZE, WAL_SEGMENT_HEADER_SIZE, PAGE_HEADER_SIZE,
 };
-use storage/wal/header.{
+U storage/wal/header.{
     WalRecordHeader,
     ENGINE_META, ENGINE_RELATIONAL, ENGINE_VECTOR, ENGINE_GRAPH, ENGINE_FULLTEXT,
 };
-use storage/wal/record_types.{
+U storage/wal/record_types.{
     TXN_BEGIN, TXN_COMMIT, TXN_ABORT,
     CHECKPOINT_BEGIN, CHECKPOINT_END, CLR, FPI,
     PAGE_ALLOC, PAGE_DEALLOC,
     CheckpointBeginPayload, ClrPayload, FpiPayload,
     PageAllocPayload, PageDeallocPayload,
 };
-use storage/wal/segment.{WalSegmentHeader, segment_filename};
-use storage/wal/lsn.{NULL_LSN, lsn_segment, lsn_offset, lsn_compare};
-use storage/buffer/pool.{BufferPool};
-use storage/page/header.{PageHeader};
+U storage/wal/segment.{WalSegmentHeader, segment_filename};
+U storage/wal/lsn.{NULL_LSN, lsn_segment, lsn_offset, lsn_compare};
+U storage/buffer/pool.{BufferPool};
+U storage/page/header.{PageHeader};
 
 # Transaction state during recovery
 L RecoveryTxnState = Active | Committed | Aborted;
@@ -46,7 +46,7 @@ S RecoveryTxnEntry {
     undo_next_lsn: u64,     # Next LSN to undo (for CLR support)
 }
 
-I RecoveryTxnEntry {
+X RecoveryTxnEntry {
     F new(txn_id: u64, lsn: u64) -> RecoveryTxnEntry {
         RecoveryTxnEntry {
             txn_id,
@@ -81,7 +81,7 @@ S WalRecordIterator {
     segment_header: Option<WalSegmentHeader>,
 }
 
-I WalRecordIterator {
+X WalRecordIterator {
     # Create iterator starting from a specific LSN
     F from_lsn(wal_dir: Str, start_lsn: u64) -> Result<WalRecordIterator, VaisError> {
         ~segment = if start_lsn == NULL_LSN { 1u32 } else { lsn_segment(start_lsn) };

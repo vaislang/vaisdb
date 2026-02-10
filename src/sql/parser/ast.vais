@@ -2,7 +2,7 @@
 # All SQL statements and expressions are represented as AST nodes
 # Used by the recursive descent parser and consumed by the query planner/executor
 
-use sql/types.{SqlType, SqlValue};
+U sql/types.{SqlType, SqlValue};
 
 # ============================================================================
 # Top-level Statement
@@ -44,7 +44,7 @@ S SelectQuery {
     set_op: Option<SetOperation>,
 }
 
-I SelectQuery {
+X SelectQuery {
     # Create a minimal empty SelectQuery for builder-style construction
     F empty() -> SelectQuery {
         SelectQuery {
@@ -179,7 +179,7 @@ S ColumnDef {
     check_expr: Option<Expr>,
 }
 
-I ColumnDef {
+X ColumnDef {
     # Create a column definition with defaults (nullable, no constraints)
     F new(name: Str, data_type: SqlType) -> ColumnDef {
         ColumnDef {

@@ -2,7 +2,7 @@
 # Hardware-accelerated CRC32C via C FFI (Intel CRC32 / ARM CRC extension)
 # Software fallback for portability
 
-use std/hash.{crc32c};
+U std/hash.{crc32c};
 
 # Calculate CRC32C checksum for a page
 # The checksum field (offset 20, 4 bytes) is zeroed before computation

@@ -13,7 +13,7 @@ S VaisError {
     severity: ErrorSeverity,
 }
 
-I VaisError {
+X VaisError {
     F new(code: Str, message: Str) -> VaisError {
         VaisError {
             code,

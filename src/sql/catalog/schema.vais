@@ -7,10 +7,10 @@
 #   "I:" + name        for indexes
 #   "IT:" + table_id   for table-to-index reverse lookup
 
-use std/bytes.{ByteBuffer};
-use storage/error.{VaisError, err_internal};
-use storage/bytes.{write_string, read_string};
-use sql/types.{SqlType};
+U std/bytes.{ByteBuffer};
+U storage/error.{VaisError, err_internal};
+U storage/bytes.{write_string, read_string};
+U sql/types.{SqlType};
 
 # ============================================================================
 # System Table ID Constants
@@ -46,7 +46,7 @@ S TableInfo {
     row_count_estimate: u64,   # Approximate row count for optimizer
 }
 
-I TableInfo {
+X TableInfo {
     # Create a new user table info
     F new(table_id: u32, name: Str, column_count: u16, first_page_id: u32) -> TableInfo {
         TableInfo {
@@ -148,7 +148,7 @@ S ColumnInfo {
     is_primary_key: bool,
 }
 
-I ColumnInfo {
+X ColumnInfo {
     # Create a new column info
     F new(table_id: u32, column_index: u16, name: Str, data_type: SqlType) -> ColumnInfo {
         ColumnInfo {
@@ -280,7 +280,7 @@ S IndexInfo {
     root_page_id: u32,         # B+Tree root page for this index
 }
 
-I IndexInfo {
+X IndexInfo {
     # Create a new index info
     F new(index_id: u32, name: Str, table_id: u32, columns: Vec<Str>, root_page_id: u32) -> IndexInfo {
         IndexInfo {

@@ -2,14 +2,14 @@
 # vectors.vdb, graph.vdb, fulltext.vdb, undo.vdb each have this at page 0
 # Total used: 256 bytes (48 header + rest as data)
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{
+U std/bytes.{ByteBuffer};
+U storage/constants.{
     VAISDB_MAGIC, DB_FORMAT_VERSION, PAGE_HEADER_SIZE,
     FILE_HEADER_RESERVED_SIZE,
 };
-use storage/error.{VaisError, err_invalid_magic, err_internal};
-use storage/page/header.{PageHeader};
-use storage/page/types.{PAGE_TYPE_META, ENGINE_TAG_COMMON};
+U storage/error.{VaisError, err_invalid_magic, err_internal};
+U storage/page/header.{PageHeader};
+U storage/page/types.{PAGE_TYPE_META, ENGINE_TAG_COMMON};
 
 # File header data (after 48B page header)
 S FileHeader {
@@ -22,7 +22,7 @@ S FileHeader {
     reserved: [u8; 183],       # Reserved (must be 0)
 }
 
-I FileHeader {
+X FileHeader {
     # Create a new file header
     F new(file_id: u8, page_size: u32, total_pages: u32) -> FileHeader {
         FileHeader {

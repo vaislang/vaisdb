@@ -2,14 +2,14 @@
 # meta.vdb page 0: Database header (256 bytes total = 48 header + 208 metadata)
 # Contains critical bootstrap info: magic, UUID, checkpoint LSN, CLOG range, config store
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{
+U std/bytes.{ByteBuffer};
+U storage/constants.{
     VAISDB_MAGIC, DB_FORMAT_VERSION, FILE_LAYOUT_VERSION,
     PAGE_HEADER_SIZE, META_PAGE_RESERVED_SIZE,
 };
-use storage/error.{VaisError, err_invalid_magic, err_internal};
-use storage/page/header.{PageHeader};
-use storage/page/types.{PAGE_TYPE_META, ENGINE_TAG_COMMON};
+U storage/error.{VaisError, err_invalid_magic, err_internal};
+U storage/page/header.{PageHeader};
+U storage/page/types.{PAGE_TYPE_META, ENGINE_TAG_COMMON};
 
 # Database metadata stored at meta.vdb page 0 (after 48B page header)
 S MetaPageHeader {
@@ -29,7 +29,7 @@ S MetaPageHeader {
     reserved: [u8; 128],          # Reserved for future fields (must be 0)
 }
 
-I MetaPageHeader {
+X MetaPageHeader {
     # Create a new database meta header with defaults
     F new(page_size: u32, db_uuid: [u8; 16], creation_timestamp: u64) -> MetaPageHeader {
         MetaPageHeader {

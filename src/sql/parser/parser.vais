@@ -8,10 +8,10 @@
 #          CREATE INDEX, DROP INDEX, EXPLAIN, BEGIN/COMMIT/ROLLBACK,
 #          SET, PREPARE, EXECUTE, CAST, CASE WHEN, BETWEEN, IN, LIKE, EXISTS
 
-use storage/error.{VaisError};
-use sql/types.{SqlType, SqlValue};
-use sql/parser/token.{Token, TokenKind, Tokenizer};
-use sql/parser/ast.{
+U storage/error.{VaisError};
+U sql/types.{SqlType, SqlValue};
+U sql/parser/token.{Token, TokenKind, Tokenizer};
+U sql/parser/ast.{
     Statement, SelectQuery, SelectItem, Cte, SetOperation, SetOpKind,
     TableRef, JoinClause, JoinType, JoinCondition,
     Expr, BinOp, UnaryOp, WhenClause, OrderByItem,
@@ -26,7 +26,7 @@ S Parser {
     pos: usize,
 }
 
-I Parser {
+X Parser {
     # Create a new parser from a token stream
     F new(tokens: Vec<Token>) -> Parser {
         Parser { tokens, pos: 0 }

@@ -2,11 +2,11 @@
 # Hierarchical Navigable Small Worlds index types for VaisDB vector engine
 # Based on HNSW paper by Malkov & Yashunin 2018
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{PAGE_HEADER_SIZE, INVALID_TXN_ID, NULL_UNDO_PTR};
-use storage/error.{VaisError};
-use storage/page/header.{PageHeader};
-use storage/page/types.{PAGE_TYPE_HNSW_META, PAGE_TYPE_HNSW_NODE, ENGINE_TAG_VECTOR};
+U std/bytes.{ByteBuffer};
+U storage/constants.{PAGE_HEADER_SIZE, INVALID_TXN_ID, NULL_UNDO_PTR};
+U storage/error.{VaisError};
+U storage/page/header.{PageHeader};
+U storage/page/types.{PAGE_TYPE_HNSW_META, PAGE_TYPE_HNSW_NODE, ENGINE_TAG_VECTOR};
 
 # Distance metric types
 L DISTANCE_COSINE: u8 = 0;
@@ -72,7 +72,7 @@ S HnswConfig {
     distance_metric: u8,       # 0=Cosine, 1=L2, 2=DotProduct
 }
 
-I HnswConfig {
+X HnswConfig {
     # Create default configuration
     F default(max_elements: u64) -> HnswConfig {
         HnswConfig {
@@ -172,7 +172,7 @@ S HnswMeta {
     index_id: u32,             # Catalog index ID
 }
 
-I HnswMeta {
+X HnswMeta {
     # Create new metadata for empty index
     F new(config: HnswConfig, index_id: u32) -> HnswMeta {
         HnswMeta {
@@ -285,7 +285,7 @@ S HnswNode {
     neighbors: Vec<Vec<HnswNeighbor>>,
 }
 
-I HnswNode {
+X HnswNode {
     # Create new node for insertion
     F new(
         node_id: u64,
@@ -462,7 +462,7 @@ S HnswNeighbor {
     distance: f32,             # Distance to this neighbor
 }
 
-I HnswNeighbor {
+X HnswNeighbor {
     # Create new neighbor
     F new(node_id: u64, distance: f32) -> HnswNeighbor {
         HnswNeighbor { node_id, distance }
@@ -490,7 +490,7 @@ S SearchCandidate {
     distance: f32,             # Distance to query point
 }
 
-I SearchCandidate {
+X SearchCandidate {
     # Create new search candidate
     F new(node_id: u64, distance: f32) -> SearchCandidate {
         SearchCandidate { node_id, distance }
@@ -531,7 +531,7 @@ S LayerRng {
     seed: u64,                 # Current seed state
 }
 
-I LayerRng {
+X LayerRng {
     # Create new RNG with seed
     F new(seed: u64) -> LayerRng {
         LayerRng { seed }

@@ -2,7 +2,7 @@
 # All on-disk formats use little-endian, ByteBuffer-based serialization
 # Based on Stage 7: Implementation Mapping, Pattern 1-13
 
-use std/bytes.{ByteBuffer};
+U std/bytes.{ByteBuffer};
 
 # Re-export ByteBuffer from std for convenience and add storage-specific helpers
 

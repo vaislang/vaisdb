@@ -2,14 +2,14 @@
 # Tests: clock replacement, pin/unpin, dirty tracking, cache hit rate,
 #         partitioned pool, read-ahead
 
-use std/test.{assert_eq, assert_ne, assert_true, assert_false, describe, it};
+U std/test.{assert_eq, assert_ne, assert_true, assert_false, describe, it};
 
-use storage/constants.{PAGE_SIZE_DEFAULT, NULL_PAGE};
-use storage/buffer/pool.{BufferPool};
-use storage/buffer/frame.{BufferFrame, FrameState};
-use storage/buffer/clock.{ClockReplacer};
-use storage/buffer/dirty_tracker.{DirtyTracker};
-use storage/buffer/stats.{BufferPoolStats};
+U storage/constants.{PAGE_SIZE_DEFAULT, NULL_PAGE};
+U storage/buffer/pool.{BufferPool};
+U storage/buffer/frame.{BufferFrame, FrameState};
+U storage/buffer/clock.{ClockReplacer};
+U storage/buffer/dirty_tracker.{DirtyTracker};
+U storage/buffer/stats.{BufferPoolStats};
 
 describe("Clock Replacer") {
     it("should evict unpinned frames in clock order") {

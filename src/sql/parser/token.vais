@@ -3,7 +3,7 @@
 # Supports: keywords, identifiers, literals (string, integer, float, NULL),
 # operators, parentheses, comma, semicolon, parameter markers ($1, $2)
 
-use storage/error.{VaisError};
+U storage/error.{VaisError};
 
 # Token types
 L TokenKind =
@@ -48,7 +48,7 @@ S Token {
     col: u32,
 }
 
-I Token {
+X Token {
     F new(kind: TokenKind, line: u32, col: u32) -> Token {
         Token { kind, line, col }
     }
@@ -62,7 +62,7 @@ S Tokenizer {
     col: u32,            # Current column number (1-based)
 }
 
-I Tokenizer {
+X Tokenizer {
     # Create a new tokenizer from SQL string
     F new(input: Str) -> Tokenizer {
         Tokenizer {

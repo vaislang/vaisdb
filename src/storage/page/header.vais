@@ -2,12 +2,12 @@
 # All 4 engines share this header. Every page on disk begins with these 48 bytes.
 # Fields ordered for natural alignment: u64 at 8-byte, u32 at 4-byte, u16 at 2-byte boundaries.
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{PAGE_HEADER_SIZE, NULL_PAGE, COMPRESSION_NONE};
-use storage/error.{VaisError, err_internal};
-use storage/checksum.{calculate_page_checksum};
-use storage/page/types.{PAGE_TYPE_UNUSED, ENGINE_TAG_COMMON};
-use storage/page/flags.{PageFlags};
+U std/bytes.{ByteBuffer};
+U storage/constants.{PAGE_HEADER_SIZE, NULL_PAGE, COMPRESSION_NONE};
+U storage/error.{VaisError, err_internal};
+U storage/checksum.{calculate_page_checksum};
+U storage/page/types.{PAGE_TYPE_UNUSED, ENGINE_TAG_COMMON};
+U storage/page/flags.{PageFlags};
 
 S PageHeader {
     page_lsn: u64,           # LSN of last WAL record that modified this page
@@ -27,7 +27,7 @@ S PageHeader {
     format_version: u8,      # Page format version (starts at 1)
 }
 
-I PageHeader {
+X PageHeader {
     # Create a new page header with defaults
     F new(page_id: u32, page_type: u8, engine_tag: u8) -> PageHeader {
         PageHeader {

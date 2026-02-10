@@ -10,22 +10,22 @@
 # CLR ensures idempotent recovery:
 # If crash during undo, CLR's undo_next_lsn skips already-undone records
 
-use std/bytes.{ByteBuffer};
-use std/hashmap.{HashMap};
+U std/bytes.{ByteBuffer};
+U std/hashmap.{HashMap};
 
-use storage/error.{VaisError, err_internal};
-use storage/constants.{WAL_RECORD_HEADER_SIZE};
-use storage/wal/header.{WalRecordHeader, ENGINE_META};
-use storage/wal/record_types.{
+U storage/error.{VaisError, err_internal};
+U storage/constants.{WAL_RECORD_HEADER_SIZE};
+U storage/wal/header.{WalRecordHeader, ENGINE_META};
+U storage/wal/record_types.{
     CLR, TXN_ABORT, ClrPayload, TxnAbortPayload,
     TUPLE_INSERT, TUPLE_DELETE, TUPLE_UPDATE,
     BTREE_INSERT, BTREE_DELETE, BTREE_SPLIT, BTREE_MERGE,
     PAGE_ALLOC, PAGE_DEALLOC,
 };
-use storage/wal/writer.{WalWriter};
-use storage/wal/lsn.{NULL_LSN, lsn_compare};
-use storage/buffer/pool.{BufferPool};
-use storage/recovery/redo.{
+U storage/wal/writer.{WalWriter};
+U storage/wal/lsn.{NULL_LSN, lsn_compare};
+U storage/buffer/pool.{BufferPool};
+U storage/recovery/redo.{
     AnalysisResult, RecoveryTxnState, RecoveryTxnEntry,
     WalRecordIterator,
 };

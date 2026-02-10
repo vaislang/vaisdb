@@ -3,11 +3,11 @@
 # Page 1 of each file is the freelist bitmap
 # Bit 0=allocated, 1=free
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{PAGE_HEADER_SIZE, PAGE_BODY_SIZE_8K, NULL_PAGE};
-use storage/error.{VaisError, err_freelist_empty, err_internal};
-use storage/page/header.{PageHeader};
-use storage/page/types.{PAGE_TYPE_FREELIST, ENGINE_TAG_COMMON};
+U std/bytes.{ByteBuffer};
+U storage/constants.{PAGE_HEADER_SIZE, PAGE_BODY_SIZE_8K, NULL_PAGE};
+U storage/error.{VaisError, err_freelist_empty, err_internal};
+U storage/page/header.{PageHeader};
+U storage/page/types.{PAGE_TYPE_FREELIST, ENGINE_TAG_COMMON};
 
 # Calculate how many pages can be tracked by one freelist bitmap page
 F pages_per_bitmap_page(page_size: u32) -> u32 {
@@ -20,7 +20,7 @@ S FreelistBitmap {
     data: [u8; PAGE_BODY_SIZE_8K],  # Bitmap data (8144 bytes for 8KB pages)
 }
 
-I FreelistBitmap {
+X FreelistBitmap {
     # Create a new empty freelist bitmap (all pages allocated)
     F new() -> FreelistBitmap {
         FreelistBitmap {

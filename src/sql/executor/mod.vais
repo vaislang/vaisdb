@@ -3,9 +3,9 @@
 # Each executor node produces rows one at a time via next()
 # Predicate pushdown is supported via optional filter expressions
 
-use storage/error.{VaisError};
-use sql/types.{SqlValue};
-use sql/row.{Row};
+U storage/error.{VaisError};
+U sql/types.{SqlValue};
+U sql/row.{Row};
 
 # ============================================================================
 # Executor Result — a single row produced by an executor node
@@ -19,7 +19,7 @@ S ExecutorRow {
     slot_id: u16,                 # Slot within heap page (for UPDATE/DELETE)
 }
 
-I ExecutorRow {
+X ExecutorRow {
     # Create from a Row with physical location
     F new(row: Row, page_id: u32, slot_id: u16) -> ExecutorRow {
         ExecutorRow {
@@ -70,11 +70,11 @@ I ExecutorRow {
 # ExecContext — shared execution state passed to all executor nodes
 # ============================================================================
 
-use storage/buffer/pool.{BufferPool};
-use storage/txn/snapshot.{Snapshot};
-use storage/txn/clog.{Clog};
-use storage/wal/group_commit.{GroupCommitManager};
-use sql/catalog/manager.{CatalogManager};
+U storage/buffer/pool.{BufferPool};
+U storage/txn/snapshot.{Snapshot};
+U storage/txn/clog.{Clog};
+U storage/wal/group_commit.{GroupCommitManager};
+U sql/catalog/manager.{CatalogManager};
 
 S ExecContext {
     pool: &~BufferPool,
@@ -86,7 +86,7 @@ S ExecContext {
     cmd_id: u32,
 }
 
-I ExecContext {
+X ExecContext {
     F new(
         pool: &~BufferPool,
         snapshot: &Snapshot,
@@ -119,9 +119,9 @@ S ExecColumn {
     nullable: bool,
 }
 
-use sql/types.{SqlType};
+U sql/types.{SqlType};
 
-I ExecColumn {
+X ExecColumn {
     F new(name: Str, data_type: SqlType, nullable: bool) -> ExecColumn {
         ExecColumn {
             name,
@@ -152,7 +152,7 @@ S ExecStats {
     filter_rejected: u64,
 }
 
-I ExecStats {
+X ExecStats {
     F new() -> ExecStats {
         ExecStats {
             rows_produced: 0,

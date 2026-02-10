@@ -2,11 +2,11 @@
 # Splits total capacity across N partitions to reduce lock contention
 # Each partition is an independent BufferPool
 
-use std/sync.{Mutex};
-use std/hashmap.{HashMap};
-use storage/error.{VaisError, err_internal};
-use storage/page/manager.{PageManager};
-use storage/buffer/pool.{BufferPool};
+U std/sync.{Mutex};
+U std/hashmap.{HashMap};
+U storage/error.{VaisError, err_internal};
+U storage/page/manager.{PageManager};
+U storage/buffer/pool.{BufferPool};
 
 # Partitioned buffer pool: N independent pools to reduce contention
 S PartitionedBufferPool {
@@ -15,7 +15,7 @@ S PartitionedBufferPool {
     page_manager: PageManager,
 }
 
-I PartitionedBufferPool {
+X PartitionedBufferPool {
     # Create a new partitioned buffer pool
     # total_capacity is divided evenly across partitions
     F new(page_manager: PageManager, total_capacity: u32, partition_count: u32) -> PartitionedBufferPool {

@@ -2,9 +2,9 @@
 # Based on Stage 2: WAL Design
 # Defines all record type constants and their meta/relational payloads
 
-use storage/error.{VaisError};
-use storage/bytes.{write_bytes, read_bytes, write_vec_u64, read_vec_u64, write_string, read_string};
-use std/bytes.{ByteBuffer};
+U storage/error.{VaisError};
+U storage/bytes.{write_bytes, read_bytes, write_vec_u64, read_vec_u64, write_string, read_string};
+U std/bytes.{ByteBuffer};
 
 # ============================================================================
 # Meta Records (0x00-0x0F)
@@ -75,7 +75,7 @@ S TxnBeginPayload {
     isolation_level: u8,  # 0=READ_UNCOMMITTED, 1=READ_COMMITTED, 2=REPEATABLE_READ, 3=SERIALIZABLE
 }
 
-I TxnBeginPayload {
+X TxnBeginPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u8(self.isolation_level);
     }
@@ -89,7 +89,7 @@ I TxnBeginPayload {
 # TXN_COMMIT payload (empty)
 S TxnCommitPayload {}
 
-I TxnCommitPayload {
+X TxnCommitPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         # No fields
     }
@@ -102,7 +102,7 @@ I TxnCommitPayload {
 # TXN_ABORT payload (empty)
 S TxnAbortPayload {}
 
-I TxnAbortPayload {
+X TxnAbortPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         # No fields
     }
@@ -117,7 +117,7 @@ S CheckpointBeginPayload {
     active_txns: Vec<u64>,  # List of active transaction IDs at checkpoint start
 }
 
-I CheckpointBeginPayload {
+X CheckpointBeginPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         write_vec_u64(buf, &self.active_txns);
     }
@@ -131,7 +131,7 @@ I CheckpointBeginPayload {
 # CHECKPOINT_END payload (empty)
 S CheckpointEndPayload {}
 
-I CheckpointEndPayload {
+X CheckpointEndPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         # No fields
     }
@@ -147,7 +147,7 @@ S SchemaChangePayload {
     schema_data: Vec<u8>, # DDL serialized data
 }
 
-I SchemaChangePayload {
+X SchemaChangePayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u8(self.change_type);
         write_bytes(buf, &self.schema_data);
@@ -168,7 +168,7 @@ S ClrPayload {
     page_id: u32,              # Physical page reference
 }
 
-I ClrPayload {
+X ClrPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u8(self.original_record_type);
         buf.put_u64_le(self.undo_next_lsn);
@@ -197,7 +197,7 @@ S PageAllocPayload {
     page_type: u8,  # Type of page being allocated
 }
 
-I PageAllocPayload {
+X PageAllocPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u32_le(self.page_id);
@@ -218,7 +218,7 @@ S PageDeallocPayload {
     page_id: u32,
 }
 
-I PageDeallocPayload {
+X PageDeallocPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u32_le(self.page_id);
@@ -238,7 +238,7 @@ S FpiPayload {
     page_data: Vec<u8>,  # Complete page contents (PAGE_SIZE bytes)
 }
 
-I FpiPayload {
+X FpiPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u32_le(self.page_id);

@@ -3,22 +3,22 @@
 # Coordinates ATT, CLOG, undo log, rollback, conflict detection, and deadlock detection
 # Based on Stage 3 MVCC Strategy
 
-use std/sync.{Mutex, AtomicU64};
-use storage/constants.{
+U std/sync.{Mutex, AtomicU64};
+U storage/constants.{
     INVALID_TXN_ID, NULL_UNDO_PTR, DEFAULT_TXN_TIMEOUT_SEC,
     DEFAULT_CLOG_CACHE_PAGES
 };
-use storage/error.{VaisError, err_internal, err_deadlock, err_txn_timeout};
-use storage/txn/snapshot.{Snapshot, IsolationLevel, DEFAULT_ISOLATION};
-use storage/txn/clog.{Clog, TxnStatus};
-use storage/txn/undo.{UndoLog};
-use storage/txn/undo_entry.{UndoEntry};
+U storage/error.{VaisError, err_internal, err_deadlock, err_txn_timeout};
+U storage/txn/snapshot.{Snapshot, IsolationLevel, DEFAULT_ISOLATION};
+U storage/txn/clog.{Clog, TxnStatus};
+U storage/txn/undo.{UndoLog};
+U storage/txn/undo_entry.{UndoEntry};
 # Note: RollbackExecutor not used directly in manager
 # TODO: Refactor RollbackExecutor to take &UndoLog instead of owning it
-use storage/txn/att.{ActiveTransactionTable, ActiveTransactionEntry, TxnState};
-use storage/txn/conflict.{ConflictDetector};
-use storage/txn/deadlock.{WaitForGraph};
-use storage/buffer/pool.{BufferPool};
+U storage/txn/att.{ActiveTransactionTable, ActiveTransactionEntry, TxnState};
+U storage/txn/conflict.{ConflictDetector};
+U storage/txn/deadlock.{WaitForGraph};
+U storage/buffer/pool.{BufferPool};
 
 # Transaction Manager: central coordinator for transaction lifecycle
 S TransactionManager {
@@ -32,7 +32,7 @@ S TransactionManager {
     lock: Mutex,
 }
 
-I TransactionManager {
+X TransactionManager {
     # Create a new transaction manager
     F new(page_size: u32) -> TransactionManager {
         TransactionManager {
@@ -356,7 +356,7 @@ S TxnManagerStats {
     low_water_mark: u64,
 }
 
-I TxnManagerStats {
+X TxnManagerStats {
     F to_string(self) -> Str {
         "TxnManagerStats {{ active_txns: {self.active_txns}, next_txn_id: {self.next_txn_id}, total_locks: {self.total_locks}, deadlock_edges: {self.deadlock_edges}, low_water_mark: {self.low_water_mark} }}"
     }

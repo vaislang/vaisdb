@@ -1,7 +1,7 @@
 # Page Flags (u16 bit field)
 # Bit operations for the flags field in PageHeader
 
-use storage/constants.{
+U storage/constants.{
     FLAG_IS_LEAF, FLAG_IS_ROOT, FLAG_IS_OVERFLOW,
     FLAG_IS_COMPRESSED, FLAG_NEEDS_COMPACTION,
     FLAG_IS_PINNED, FLAG_HAS_TOMBSTONES,
@@ -12,7 +12,7 @@ S PageFlags {
     bits: u16,
 }
 
-I PageFlags {
+X PageFlags {
     F new() -> PageFlags {
         PageFlags { bits: 0 }
     }

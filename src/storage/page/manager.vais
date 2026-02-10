@@ -3,22 +3,22 @@
 # format version migration, and both mmap/buffered I/O modes
 # Based on Stage 1 Sections 1-11
 
-use std/file.{File};
-use std/sync.{Mutex};
-use storage/constants.{
+U std/file.{File};
+U std/sync.{Mutex};
+U storage/constants.{
     PAGE_HEADER_SIZE, FILE_ID_DATA, FILE_ID_VECTORS,
     FILE_ID_GRAPH, FILE_ID_FULLTEXT, FILE_ID_UNDO,
 };
-use storage/error.{
+U storage/error.{
     VaisError, err_page_corruption, err_io, err_internal,
     err_checksum_mismatch,
 };
-use storage/page/header.{PageHeader};
-use storage/page/types.{page_type_name, is_valid_page_type};
-use storage/page/file_header.{file_name_for_id};
-use storage/checksum.{verify_page_checksum, calculate_page_checksum};
-use storage/io/buffered.{BufferedIO};
-use storage/io/mod.{IoMode};
+U storage/page/header.{PageHeader};
+U storage/page/types.{page_type_name, is_valid_page_type};
+U storage/page/file_header.{file_name_for_id};
+U storage/checksum.{verify_page_checksum, calculate_page_checksum};
+U storage/io/buffered.{BufferedIO};
+U storage/io/mod.{IoMode};
 
 # PageManager provides unified page-level I/O across all data files
 S PageManager {
@@ -32,7 +32,7 @@ S PageManager {
     migration_hook: Option<F(&~[u8], u8) -> Result<(), VaisError>>,
 }
 
-I PageManager {
+X PageManager {
     # Create a new PageManager with buffered I/O for all files
     F new(files: Vec<File>, page_size: u32) -> PageManager {
         ~file_ios = Vec.with_capacity(files.len());

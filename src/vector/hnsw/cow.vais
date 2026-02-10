@@ -10,10 +10,10 @@
 # - Writers create new lists and retire old ones to the grace epoch
 # - Epochs advance when no readers remain in the oldest epoch
 
-use std/sync.{Mutex, AtomicU64, AtomicPtr};
-use std/hashmap.HashMap;
-use crate/common/error.{VaisError, ErrorCode};
-use crate/vector/hnsw/types.HnswNeighbor;
+U std/sync.{Mutex, AtomicU64, AtomicPtr};
+U std/hashmap.HashMap;
+U crate/common/error.{VaisError, ErrorCode};
+U crate/vector/hnsw/types.HnswNeighbor;
 
 # Error codes: EE=02 (vector), CC=07 (concurrency), NNN=004-006
 const ERR_COW_NODE_NOT_FOUND: u32 = 0x02_07_004;
@@ -28,7 +28,7 @@ S CowNeighborList {
     version: u64,                   # Monotonic version number
 }
 
-I CowNeighborList {
+X CowNeighborList {
     # Create new neighbor list with given neighbors and version
     F new(neighbors: Vec<HnswNeighbor>, version: u64) -> CowNeighborList {
         CowNeighborList {
@@ -102,7 +102,7 @@ S CowNodeNeighbors {
     layers: Vec<CowNeighborList>,  # One CowNeighborList per layer
 }
 
-I CowNodeNeighbors {
+X CowNodeNeighbors {
     # Create new node neighbors with empty lists for all layers
     F new(node_id: u64, num_layers: usize) -> CowNodeNeighbors {
         ~layers = Vec::with_capacity(num_layers);
@@ -158,7 +158,7 @@ S EpochManager {
     garbage: [Mutex<Vec<Vec<HnswNeighbor>>>; 3],  # Old arrays pending reclamation per slot
 }
 
-I EpochManager {
+X EpochManager {
     # Create new epoch manager
     F new() -> EpochManager {
         EpochManager {
@@ -287,7 +287,7 @@ S CowNeighborStore {
     version_counter: AtomicU64,
 }
 
-I CowNeighborStore {
+X CowNeighborStore {
     # Create new CoW neighbor store
     F new() -> CowNeighborStore {
         CowNeighborStore {
@@ -489,7 +489,7 @@ S CowNeighborStats {
     current_version: u64,       # Current version number
 }
 
-I CowNeighborStats {
+X CowNeighborStats {
     # Get total active readers across all epochs
     F total_readers(&self) -> u64 {
         self.reader_counts[0] + self.reader_counts[1] + self.reader_counts[2]

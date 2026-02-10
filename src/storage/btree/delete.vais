@@ -2,16 +2,16 @@
 # Delete key-TID pairs with underflow detection and merge/redistribution
 # Based on Stage 1 Section 9 - 40% merge threshold
 
-use storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
-use storage/error.{VaisError, err_internal, err_key_not_found};
-use storage/buffer/pool.{BufferPool};
-use storage/btree/tree.{BTree};
-use storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
-use storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry, compare_keys, KeyCmp, key_equal};
-use storage/btree/insert.{PathEntry, collect_insert_path, find_child_index};
-use storage/wal/group_commit.{GroupCommitManager};
-use storage/recovery/checkpoint.{write_fpi};
-use storage/btree/latch.{LatchGuard};
+U storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
+U storage/error.{VaisError, err_internal, err_key_not_found};
+U storage/buffer/pool.{BufferPool};
+U storage/btree/tree.{BTree};
+U storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
+U storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry, compare_keys, KeyCmp, key_equal};
+U storage/btree/insert.{PathEntry, collect_insert_path, find_child_index};
+U storage/wal/group_commit.{GroupCommitManager};
+U storage/recovery/checkpoint.{write_fpi};
+U storage/btree/latch.{LatchGuard};
 
 # Merge threshold: if utilization drops below 40%, consider merge
 L MERGE_THRESHOLD: f64 = 0.40;

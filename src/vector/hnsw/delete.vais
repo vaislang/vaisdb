@@ -8,28 +8,28 @@
 # - VE-02-03-005: MVCC filter failed (snapshot or CLOG error)
 # - VE-02-03-006: Insufficient visible results after max retries
 
-use std/result.{Result, Ok, Err};
-use std/vec.Vec;
-use std/string.String;
-use src/common/error.{VaisError, ErrorCategory};
-use src/vector/hnsw/types.{
+U std/result.{Result, Ok, Err};
+U std/vec.Vec;
+U std/string.String;
+U src/common/error.{VaisError, ErrorCategory};
+U src/vector/hnsw/types.{
     HnswMeta,
     HnswNode,
     INVALID_NODE_ID,
 };
-use src/vector/hnsw/search.{
+U src/vector/hnsw/search.{
     SearchResult,
     SearchResultEntry,
     NodeStore,
     knn_search,
 };
-use src/vector/hnsw/distance.DistanceComputer;
-use src/storage/txn/snapshot.Snapshot;
-use src/storage/txn/clog.{Clog, TxnStatus};
-use src/storage/txn/visibility.{is_visible, is_committed_before, is_aborted_fast};
-use src/storage/constants.INVALID_TXN_ID;
-use src/storage/wal/record_types.HNSW_DELETE_NODE;
-use src/storage/wal/record_vector.HnswDeleteNodePayload;
+U src/vector/hnsw/distance.DistanceComputer;
+U src/storage/txn/snapshot.Snapshot;
+U src/storage/txn/clog.{Clog, TxnStatus};
+U src/storage/txn/visibility.{is_visible, is_committed_before, is_aborted_fast};
+U src/storage/constants.INVALID_TXN_ID;
+U src/storage/wal/record_types.HNSW_DELETE_NODE;
+U src/storage/wal/record_vector.HnswDeleteNodePayload;
 
 # ============================================================================
 # Error Constructors

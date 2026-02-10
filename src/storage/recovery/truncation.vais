@@ -6,14 +6,14 @@
 #
 # Archiving: optionally copy old segments to archive path before deletion
 
-use std/file.{File, remove_file, copy_file, create_dir_all, read_dir};
-use std/sync.{Mutex};
+U std/file.{File, remove_file, copy_file, create_dir_all, read_dir};
+U std/sync.{Mutex};
 
-use storage/error.{VaisError, err_internal};
-use storage/wal/segment.{WalSegmentHeader, segment_filename};
-use storage/wal/lsn.{NULL_LSN, lsn_segment, lsn_compare};
-use storage/constants.{WAL_SEGMENT_HEADER_SIZE};
-use std/bytes.{ByteBuffer};
+U storage/error.{VaisError, err_internal};
+U storage/wal/segment.{WalSegmentHeader, segment_filename};
+U storage/wal/lsn.{NULL_LSN, lsn_segment, lsn_compare};
+U storage/constants.{WAL_SEGMENT_HEADER_SIZE};
+U std/bytes.{ByteBuffer};
 
 # WAL archive mode
 L ArchiveMode = Off | On;
@@ -25,7 +25,7 @@ S TruncationConfig {
     min_segments_to_keep: u32,     # Always keep at least N segments (default 2)
 }
 
-I TruncationConfig {
+X TruncationConfig {
     F default() -> TruncationConfig {
         TruncationConfig {
             archive_mode: ArchiveMode.Off,
@@ -57,7 +57,7 @@ S TruncationManager {
     lock: Mutex,
 }
 
-I TruncationManager {
+X TruncationManager {
     F new(wal_dir: Str, config: TruncationConfig) -> TruncationManager {
         TruncationManager {
             wal_dir,

@@ -2,22 +2,22 @@
 # Tests: page header R/W, checksum verification, heap page ops,
 #         freelist allocation, meta page bootstrap, overflow pages
 
-use std/test.{assert_eq, assert_ne, assert_true, assert_false, describe, it};
-use std/bytes.{ByteBuffer};
+U std/test.{assert_eq, assert_ne, assert_true, assert_false, describe, it};
+U std/bytes.{ByteBuffer};
 
-use storage/constants.{
+U storage/constants.{
     PAGE_SIZE_DEFAULT, PAGE_HEADER_SIZE, NULL_PAGE, MVCC_TUPLE_META_SIZE,
     FLAG_IS_LEAF, FLAG_IS_ROOT,
 };
-use storage/page/header.{PageHeader};
-use storage/page/types.{PAGE_TYPE_HEAP, PAGE_TYPE_BTREE_LEAF, ENGINE_TAG_SQL};
-use storage/page/flags.{PageFlags};
-use storage/page/meta.{MetaPage};
-use storage/page/freelist.{FreelistPage};
-use storage/page/heap.{HeapPage};
-use storage/page/slot.{HeapPageSlot};
-use storage/page/mvcc.{MvccTupleMeta};
-use storage/checksum.{calculate_page_checksum, verify_page_checksum};
+U storage/page/header.{PageHeader};
+U storage/page/types.{PAGE_TYPE_HEAP, PAGE_TYPE_BTREE_LEAF, ENGINE_TAG_SQL};
+U storage/page/flags.{PageFlags};
+U storage/page/meta.{MetaPage};
+U storage/page/freelist.{FreelistPage};
+U storage/page/heap.{HeapPage};
+U storage/page/slot.{HeapPageSlot};
+U storage/page/mvcc.{MvccTupleMeta};
+U storage/checksum.{calculate_page_checksum, verify_page_checksum};
 
 describe("Page Header") {
     it("should serialize and deserialize correctly") {

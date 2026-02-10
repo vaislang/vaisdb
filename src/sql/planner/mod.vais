@@ -9,12 +9,12 @@
 # - Join ordering: left-deep tree, smaller table on build side of hash join
 # - Predicate pushdown: pushes WHERE conditions to scan level
 
-use storage/error.{VaisError, err_internal};
-use storage/btree/key.{KeyRange};
-use sql/parser/ast.{SelectQuery, SelectItem, TableRef, JoinClause, JoinType, JoinCondition, Expr, BinOp, OrderByItem, SetOperation};
-use sql/catalog/manager.{CatalogManager};
-use sql/catalog/schema.{TableInfo, IndexInfo, ColumnInfo};
-use sql/types.{SqlType, SqlValue};
+U storage/error.{VaisError, err_internal};
+U storage/btree/key.{KeyRange};
+U sql/parser/ast.{SelectQuery, SelectItem, TableRef, JoinClause, JoinType, JoinCondition, Expr, BinOp, OrderByItem, SetOperation};
+U sql/catalog/manager.{CatalogManager};
+U sql/catalog/schema.{TableInfo, IndexInfo, ColumnInfo};
+U sql/types.{SqlType, SqlValue};
 
 # ============================================================================
 # Error Code Constants (EE=01 SQL Engine, CC=08 Planner)
@@ -79,7 +79,7 @@ S CostEstimate {
     row_estimate: u64,
 }
 
-I CostEstimate {
+X CostEstimate {
     F new(io_cost: f64, cpu_cost: f64, row_estimate: u64) -> CostEstimate {
         CostEstimate { io_cost, cpu_cost, row_estimate }
     }
@@ -151,7 +151,7 @@ S ProjectColumn {
     alias: Option<Str>,
 }
 
-I ProjectColumn {
+X ProjectColumn {
     F new(expr: Expr) -> ProjectColumn {
         ProjectColumn { expr, alias: None }
     }
@@ -168,7 +168,7 @@ S AggregateSpec {
     is_distinct: bool,       # COUNT(DISTINCT col)
 }
 
-I AggregateSpec {
+X AggregateSpec {
     F new(func_name: Str, arg_expr: Expr) -> AggregateSpec {
         AggregateSpec { func_name, arg_expr, is_distinct: false }
     }
@@ -185,7 +185,7 @@ S WindowSpec {
     order_by: Vec<OrderByItem>, # ORDER BY within window
 }
 
-I WindowSpec {
+X WindowSpec {
     F new(func: Expr, partition_by: Vec<Expr>, order_by: Vec<OrderByItem>) -> WindowSpec {
         WindowSpec { func, partition_by, order_by }
     }
@@ -204,7 +204,7 @@ S TableStats {
     avg_row_size: u32,      # Bytes per row
 }
 
-I TableStats {
+X TableStats {
     # Extract statistics from TableInfo
     F from_table_info(info: &TableInfo) -> TableStats {
         # Use row_count_estimate from TableInfo

@@ -2,9 +2,9 @@
 # Handles composite keys, type-aware encoding, and prefix compression
 # Keys are stored as byte slices with type-aware comparison
 
-use storage/error.{VaisError, err_internal};
-use storage/btree/entry.{compare_keys, key_less_than, key_equal, KeyCmp};
-use std/bytes.{ByteBuffer};
+U storage/error.{VaisError, err_internal};
+U storage/btree/entry.{compare_keys, key_less_than, key_equal, KeyCmp};
+U std/bytes.{ByteBuffer};
 
 # Key types for type-aware comparison
 L KeyType = Integer | Float | String | Bytes | Composite;
@@ -162,7 +162,7 @@ S KeyRange {
     end_inclusive: bool,
 }
 
-I KeyRange {
+X KeyRange {
     # Full range (all keys)
     F all() -> KeyRange {
         KeyRange {

@@ -19,12 +19,12 @@
 #
 # Error codes: VAIS-0206NNN (EE=02 vector, CC=06 quantize)
 
-use std/bytes.{ByteBuffer};
-use std/math.{sqrt};
-use storage/error.{VaisError};
-use vector/quantize/scalar.{ScalarQuantizer};
-use vector/quantize/pq.{ProductQuantizer};
-use vector/distance.{l2_distance_scalar};
+U std/bytes.{ByteBuffer};
+U std/math.{sqrt};
+U storage/error.{VaisError};
+U vector/quantize/scalar.{ScalarQuantizer};
+U vector/quantize/pq.{ProductQuantizer};
+U vector/distance.{l2_distance_scalar};
 
 # ============================================================================
 # Error Handling
@@ -83,7 +83,7 @@ S QuantizationManager {
     trained: bool,                            # Whether manager has been trained
 }
 
-I QuantizationManager {
+X QuantizationManager {
     # Create a new quantization manager for the given vector dimension
     # Initially uses None strategy (full precision)
     F new(dim: u32) -> QuantizationManager {

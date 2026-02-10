@@ -2,9 +2,9 @@
 # Core types: INT, FLOAT, BOOL, VARCHAR(n), TEXT, BLOB, DATE, TIMESTAMP, VECTOR(dim), NULL
 # Based on the unified type system shared across all VaisDB engines
 
-use std/bytes.{ByteBuffer};
-use storage/error.{VaisError};
-use storage/bytes.{write_string, read_string, write_bytes, read_bytes};
+U std/bytes.{ByteBuffer};
+U storage/error.{VaisError};
+U storage/bytes.{write_string, read_string, write_bytes, read_bytes};
 
 # Type tag constants for serialization
 L TYPE_TAG_NULL: u8 = 0;
@@ -88,7 +88,7 @@ F err_incompatible_types(op: Str, left: Str, right: Str) -> VaisError {
 
 # --- SqlType implementation ---
 
-I SqlType {
+X SqlType {
     # Get unique type tag for serialization
     F type_id(self) -> u8 {
         M self {
@@ -245,7 +245,7 @@ I SqlType {
 
 # --- SqlValue implementation ---
 
-I SqlValue {
+X SqlValue {
     # Infer the SqlType from a runtime value
     F get_type(self) -> SqlType {
         M self {

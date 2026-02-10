@@ -2,7 +2,7 @@
 # Second-chance / clock replacement for buffer pool eviction
 # Based on Stage 4: Memory Architecture eviction priority
 
-use storage/buffer/frame.{BufferFrame, FrameState};
+U storage/buffer/frame.{BufferFrame, FrameState};
 
 # Clock hand for the replacement algorithm
 S ClockReplacer {
@@ -10,7 +10,7 @@ S ClockReplacer {
     capacity: u32,      # Total number of frames
 }
 
-I ClockReplacer {
+X ClockReplacer {
     F new(capacity: u32) -> ClockReplacer {
         ClockReplacer {
             hand: 0,

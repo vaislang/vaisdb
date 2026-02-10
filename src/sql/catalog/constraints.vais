@@ -3,14 +3,14 @@
 # Called during INSERT/UPDATE execution to ensure data integrity
 # Error codes: EE=01 (SQL), CC=02 (Constraint), NNN=001-005
 
-use std/bytes.{ByteBuffer};
-use storage/error.{VaisError};
-use storage/buffer/pool.{BufferPool};
-use storage/btree/tree.{BTree};
-use storage/btree/search.{search_cursor};
-use sql/catalog/schema.{TableInfo, ColumnInfo, IndexInfo};
-use sql/types.{SqlType, SqlValue};
-use sql/row.{Row};
+U std/bytes.{ByteBuffer};
+U storage/error.{VaisError};
+U storage/buffer/pool.{BufferPool};
+U storage/btree/tree.{BTree};
+U storage/btree/search.{search_cursor};
+U sql/catalog/schema.{TableInfo, ColumnInfo, IndexInfo};
+U sql/types.{SqlType, SqlValue};
+U sql/row.{Row};
 
 # ============================================================================
 # Error constructors (EE=01 SQL, CC=02 Constraint)
@@ -66,7 +66,7 @@ S ConstraintChecker {
     indexes: Vec<IndexInfo>,  # All indexes for this table (PK + UNIQUE + regular)
 }
 
-I ConstraintChecker {
+X ConstraintChecker {
     # Create a new constraint checker for a table
     F new(table_info: TableInfo, columns: Vec<ColumnInfo>, indexes: Vec<IndexInfo>) -> ConstraintChecker {
         ConstraintChecker {

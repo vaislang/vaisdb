@@ -2,16 +2,16 @@
 # Parse once, execute many with parameter binding ($1, $2, ...)
 # Supports plan caching (optional, for future optimizer integration)
 
-use storage/error.{VaisError};
-use sql/types.{SqlType, SqlValue};
-use sql/parser/ast.{
+U storage/error.{VaisError};
+U sql/types.{SqlType, SqlValue};
+U sql/parser/ast.{
     Statement, SelectQuery, SelectItem, Cte, SetOperation,
     TableRef, JoinClause, JoinCondition,
     Expr, BinOp, UnaryOp, WhenClause, OrderByItem,
     CreateTableStmt, ColumnDef, CreateIndexStmt, AlterTableStmt, AlterAction,
     InsertStmt, InsertSource, UpdateStmt, Assignment, DeleteStmt,
 };
-use sql/parser/parser.{parse_sql};
+U sql/parser/parser.{parse_sql};
 
 # ============================================================================
 # PreparedStatement - Cached parsed statement with parameter support
@@ -25,7 +25,7 @@ S PreparedStatement {
     param_types: Vec<Option<SqlType>>, # Optional type hints per parameter
 }
 
-I PreparedStatement {
+X PreparedStatement {
     # Parse SQL, count parameters, create prepared statement
     F prepare(name: Str, sql: Str) -> Result<PreparedStatement, VaisError> {
         # Parse the SQL
@@ -96,7 +96,7 @@ S PreparedStatementCache {
     max_size: usize,                            # Max cached statements
 }
 
-I PreparedStatementCache {
+X PreparedStatementCache {
     # Create new cache with max size
     F new(max_size: usize) -> PreparedStatementCache {
         PreparedStatementCache {

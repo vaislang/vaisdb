@@ -3,19 +3,19 @@
 # WAL-first: write WAL record BEFORE modifying pages
 # Based on Stage 2 - BTREE_SPLIT, BTREE_MERGE, BTREE_INSERT, BTREE_DELETE
 
-use storage/error.{VaisError};
-use storage/wal/header.{ENGINE_RELATIONAL};
-use storage/wal/record_types.{
+U storage/error.{VaisError};
+U storage/wal/header.{ENGINE_RELATIONAL};
+U storage/wal/record_types.{
     BTREE_SPLIT, BTREE_MERGE, BTREE_INSERT, BTREE_DELETE,
     PAGE_ALLOC, PAGE_DEALLOC,
 };
-use storage/wal/record_rel.{
+U storage/wal/record_rel.{
     BtreeSplitPayload, BtreeMergePayload,
     BtreeInsertPayload, BtreeDeletePayload,
     PageAllocPayload, PageDeallocPayload,
 };
-use storage/wal/group_commit.{GroupCommitManager};
-use std/bytes.{ByteBuffer};
+U storage/wal/group_commit.{GroupCommitManager};
+U std/bytes.{ByteBuffer};
 
 # WAL-integrated B+Tree operations
 # All methods write WAL records before returning

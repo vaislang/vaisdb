@@ -2,9 +2,9 @@
 # 28-byte fixed header + variable old_data
 # Based on Stage 1 Section 7 and Stage 3 Section 1
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{UNDO_ENTRY_HEADER_SIZE, UNDO_INSERT, UNDO_UPDATE, UNDO_DELETE};
-use storage/error.{VaisError, err_internal};
+U std/bytes.{ByteBuffer};
+U storage/constants.{UNDO_ENTRY_HEADER_SIZE, UNDO_INSERT, UNDO_UPDATE, UNDO_DELETE};
+U storage/error.{VaisError, err_internal};
 
 # Undo entry: records a previous version for rollback/snapshot reads
 S UndoEntry {
@@ -18,7 +18,7 @@ S UndoEntry {
     old_data: Vec<u8>,     # Old tuple data (for UPDATE/DELETE)
 }
 
-I UndoEntry {
+X UndoEntry {
     # Create an INSERT undo entry (no old data)
     F new_insert(
         txn_id: u64,

@@ -8,19 +8,19 @@
 # - VE-02-03-002: Invalid K parameter (K=0 or K > total nodes)
 # - VE-02-03-003: Search layer traversal failed
 
-use std/result.{Result, Ok, Err};
-use std/vec.Vec;
-use std/hashset.HashSet;
-use std/string.String;
-use src/common/error.{VaisError, ErrorCategory};
-use src/vector/hnsw/types.{
+U std/result.{Result, Ok, Err};
+U std/vec.Vec;
+U std/hashset.HashSet;
+U std/string.String;
+U src/common/error.{VaisError, ErrorCategory};
+U src/vector/hnsw/types.{
     HnswMeta,
     HnswNode,
     HnswNeighbor,
     SearchCandidate,
     INVALID_NODE_ID,
 };
-use src/vector/hnsw/distance.DistanceComputer;
+U src/vector/hnsw/distance.DistanceComputer;
 
 # ============================================================================
 # Public API Structs
@@ -31,7 +31,7 @@ S SearchResultEntry {
     distance: f32,
 }
 
-I SearchResultEntry {
+X SearchResultEntry {
     F new(node_id: u64, distance: f32) -> SearchResultEntry {
         SearchResultEntry {
             node_id: node_id,
@@ -46,7 +46,7 @@ S SearchResult {
     distance_computations: u64,
 }
 
-I SearchResult {
+X SearchResult {
     F new() -> SearchResult {
         SearchResult {
             results: Vec::new(),
@@ -113,7 +113,7 @@ S MinHeap {
     candidates: Vec<SearchCandidate>,
 }
 
-I MinHeap {
+X MinHeap {
     F new() -> MinHeap {
         MinHeap {
             candidates: Vec::new(),
@@ -166,7 +166,7 @@ S MaxHeap {
     candidates: Vec<SearchCandidate>,
 }
 
-I MaxHeap {
+X MaxHeap {
     F new() -> MaxHeap {
         MaxHeap {
             candidates: Vec::new(),

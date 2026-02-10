@@ -2,27 +2,27 @@
 # Tests: insert/search/delete, range scan, split/merge, bulk load,
 #         key encoding, prefix compression, concurrent access
 
-use std/test.{assert_eq, assert_ne, assert_true, assert_false, describe, it};
-use std/bytes.{ByteBuffer};
+U std/test.{assert_eq, assert_ne, assert_true, assert_false, describe, it};
+U std/bytes.{ByteBuffer};
 
-use storage/constants.{PAGE_SIZE_DEFAULT, NULL_PAGE, PAGE_HEADER_SIZE};
-use storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
-use storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry, compare_keys, KeyCmp, key_less_than};
-use storage/btree/key.{
+U storage/constants.{PAGE_SIZE_DEFAULT, NULL_PAGE, PAGE_HEADER_SIZE};
+U storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
+U storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry, compare_keys, KeyCmp, key_less_than};
+U storage/btree/key.{
     encode_i64_key, decode_i64_key, encode_u64_key, decode_u64_key,
     encode_string_key, encode_composite_key, decode_composite_key,
     common_prefix_length, strip_prefix, reconstruct_key,
     KeyRange,
 };
-use storage/btree/prefix.{
+U storage/btree/prefix.{
     compress_keys, decompress_keys, compressed_total_size, compression_ratio,
     compress_keys_with_restarts, decompress_key_with_restarts,
 };
-use storage/btree/merge.{
+U storage/btree/merge.{
     MERGE_UTILIZATION_THRESHOLD, leaf_needs_merge,
     can_merge_leaves, can_merge_internals,
 };
-use storage/btree/split.{SplitResult};
+U storage/btree/split.{SplitResult};
 
 describe("Key Encoding") {
     it("should encode i64 with correct sort order") {

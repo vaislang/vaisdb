@@ -3,9 +3,9 @@
 # LSN = (segment_number: u32) << 32 | offset_in_segment: u32
 # Thread-safe atomic LSN allocation
 
-use storage/bytes.{encode_lsn, decode_lsn};
-use storage/error.{VaisError, err_internal};
-use std/sync.{Mutex};
+U storage/bytes.{encode_lsn, decode_lsn};
+U storage/error.{VaisError, err_internal};
+U std/sync.{Mutex};
 
 # Null LSN constant
 L NULL_LSN: u64 = 0;
@@ -18,7 +18,7 @@ S LsnAllocator {
     lock: Mutex,
 }
 
-I LsnAllocator {
+X LsnAllocator {
     # Create a new LSN allocator
     F new(segment_size: u32) -> LsnAllocator {
         LsnAllocator {

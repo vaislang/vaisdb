@@ -2,12 +2,12 @@
 # Manages upper layers (1+) in memory, Layer 0 accessed via buffer pool
 # Based on HNSW memory architecture: upper layers pinned, lower layer evictable
 
-use std/hashmap.{HashMap};
-use std/bytes.{ByteBuffer};
-use storage/buffer/pool.{BufferPool};
-use storage/constants.{FILE_ID_VECTORS, PAGE_SIZE_8K, PAGE_HEADER_SIZE};
-use storage/error.{VaisError, err_internal, err_out_of_memory};
-use vector/hnsw/types.{
+U std/hashmap.{HashMap};
+U std/bytes.{ByteBuffer};
+U storage/buffer/pool.{BufferPool};
+U storage/constants.{FILE_ID_VECTORS, PAGE_SIZE_8K, PAGE_HEADER_SIZE};
+U storage/error.{VaisError, err_internal, err_out_of_memory};
+U vector/hnsw/types.{
     HnswConfig,
     HnswMeta,
     HnswNode,
@@ -46,7 +46,7 @@ S PinnedLayer {
     memory_bytes: usize,             # Total memory consumed by this layer
 }
 
-I PinnedLayer {
+X PinnedLayer {
     # Create new empty pinned layer
     F new(layer: u8) -> PinnedLayer {
         PinnedLayer {
@@ -157,7 +157,7 @@ S LayerStat {
     is_pinned: bool,
 }
 
-I LayerStat {
+X LayerStat {
     F new(layer: u8, node_count: u64, memory_bytes: usize, is_pinned: bool) -> LayerStat {
         LayerStat {
             layer,
@@ -178,7 +178,7 @@ S LayerManager {
     config: HnswConfig,                # HNSW configuration
 }
 
-I LayerManager {
+X LayerManager {
     # Create new layer manager
     F new(config: HnswConfig) -> LayerManager {
         LayerManager {

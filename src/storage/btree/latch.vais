@@ -10,9 +10,9 @@
 #
 # Optimistic: assume no splits/merges needed. Restart if wrong.
 
-use std/sync.{RwLock};
-use storage/constants.{NULL_PAGE};
-use storage/error.{VaisError, err_internal};
+U std/sync.{RwLock};
+U storage/constants.{NULL_PAGE};
+U storage/error.{VaisError, err_internal};
 
 # Latch mode
 L LatchMode = Read | Write | Optimistic;
@@ -23,7 +23,7 @@ S PageLatch {
     lock: RwLock<()>,
 }
 
-I PageLatch {
+X PageLatch {
     F new(page_id: u32) -> PageLatch {
         PageLatch {
             page_id,
@@ -66,7 +66,7 @@ S LatchTable {
     capacity: u32,
 }
 
-I LatchTable {
+X LatchTable {
     F new(capacity: u32) -> LatchTable {
         ~latches = Vec.with_capacity(capacity as usize);
         for i in 0..capacity {
@@ -89,7 +89,7 @@ S LatchGuard {
     held: bool,
 }
 
-I LatchGuard {
+X LatchGuard {
     F new_read(table: &LatchTable, page_id: u32) -> LatchGuard {
         table.get(page_id).read_lock();
         LatchGuard {
@@ -146,7 +146,7 @@ I LatchGuard {
 }
 
 # Drop implementation: release latch on scope exit
-I Drop for LatchGuard {
+X Drop for LatchGuard {
     F drop(~self) {
         self.release();
     }
@@ -165,7 +165,7 @@ S OptimisticDescent {
     needs_restart: bool,     # Set to true if optimistic assumption failed
 }
 
-I OptimisticDescent {
+X OptimisticDescent {
     F new() -> OptimisticDescent {
         OptimisticDescent {
             path: Vec.new(),
@@ -211,7 +211,7 @@ S PessimisticDescent {
     held_latches: Vec<u32>,    # Page IDs with write latches held
 }
 
-I PessimisticDescent {
+X PessimisticDescent {
     F new() -> PessimisticDescent {
         PessimisticDescent {
             held_latches: Vec.new(),

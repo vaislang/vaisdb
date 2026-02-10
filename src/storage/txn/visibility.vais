@@ -3,9 +3,9 @@
 # Based on Stage 1 Section 5 and Stage 3 Section 3
 # CRITICAL: All three visibility functions (tuple, edge, posting) use this same logic
 
-use storage/txn/snapshot.{Snapshot};
-use storage/txn/clog.{Clog, TxnStatus};
-use storage/constants.{INVALID_TXN_ID};
+U storage/txn/snapshot.{Snapshot};
+U storage/txn/clog.{Clog, TxnStatus};
+U storage/constants.{INVALID_TXN_ID};
 
 # Unified visibility check
 # Works for tuples (MvccTupleMeta), graph edges (AdjEntry), and posting entries

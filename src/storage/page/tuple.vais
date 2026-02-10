@@ -2,9 +2,9 @@
 # Each tuple: [MvccTupleMeta (32B)] + [User Data (variable)]
 # Handles overflow detection and inline prefix for large tuples
 
-use storage/constants.{MVCC_TUPLE_META_SIZE, PAGE_HEADER_SIZE, SLOT_ENTRY_SIZE};
-use storage/error.{VaisError, err_internal};
-use storage/page/mvcc.{MvccTupleMeta};
+U storage/constants.{MVCC_TUPLE_META_SIZE, PAGE_HEADER_SIZE, SLOT_ENTRY_SIZE};
+U storage/error.{VaisError, err_internal};
+U storage/page/mvcc.{MvccTupleMeta};
 
 # Overflow threshold: inline prefix size for overflowed tuples
 L OVERFLOW_INLINE_PREFIX: u32 = 64;
@@ -25,7 +25,7 @@ S Tuple {
     overflow_total_len: u32,    # Total user data length (for overflow)
 }
 
-I Tuple {
+X Tuple {
     # Create a new tuple with user data
     F new(mvcc: MvccTupleMeta, user_data: Vec<u8>) -> Tuple {
         Tuple {

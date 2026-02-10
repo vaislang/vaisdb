@@ -2,9 +2,9 @@
 # Based on Stage 2: WAL Design
 # HNSW uses logical logging: record the result, not the process
 
-use storage/error.{VaisError};
-use storage/bytes.{write_bytes, read_bytes, write_vec_u64, read_vec_u64};
-use std/bytes.{ByteBuffer};
+U storage/error.{VaisError};
+U storage/bytes.{write_bytes, read_bytes, write_vec_u64, read_vec_u64};
+U std/bytes.{ByteBuffer};
 
 # ============================================================================
 # HNSW_INSERT_NODE (0x20) - Insert node into HNSW index
@@ -19,7 +19,7 @@ S HnswInsertNodePayload {
     affected_pages: Vec<(u8, u32)>, # All (file_id, page_id) pairs affected
 }
 
-I HnswInsertNodePayload {
+X HnswInsertNodePayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.node_id);
         buf.put_u8(self.layer);
@@ -89,7 +89,7 @@ S HnswDeleteNodePayload {
     page_id: u32,
 }
 
-I HnswDeleteNodePayload {
+X HnswDeleteNodePayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.node_id);
 
@@ -138,7 +138,7 @@ S HnswUpdateEdgesPayload {
     page_id: u32,
 }
 
-I HnswUpdateEdgesPayload {
+X HnswUpdateEdgesPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.node_id);
         buf.put_u8(self.layer);
@@ -178,7 +178,7 @@ S HnswLayerPromotePayload {
     page_id: u32,
 }
 
-I HnswLayerPromotePayload {
+X HnswLayerPromotePayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.node_id);
         buf.put_u8(self.new_max_layer);
@@ -212,7 +212,7 @@ S VectorDataWritePayload {
     vector_data: Vec<u8>,
 }
 
-I VectorDataWritePayload {
+X VectorDataWritePayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u32_le(self.page_id);
@@ -244,7 +244,7 @@ S QuantizationUpdatePayload {
     codebook: Vec<u8>,
 }
 
-I QuantizationUpdatePayload {
+X QuantizationUpdatePayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u32_le(self.index_id);
         write_bytes(buf, &self.codebook);

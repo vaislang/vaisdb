@@ -18,10 +18,10 @@
 #
 # Error codes: VAIS-0206NNN (EE=02 vector, CC=06 quantize)
 
-use std/math.{sqrt};
-use std/bytes.{ByteBuffer};
-use storage/error.{VaisError};
-use vector/distance.{l2_distance_scalar};
+U std/math.{sqrt};
+U std/bytes.{ByteBuffer};
+U storage/error.{VaisError};
+U vector/distance.{l2_distance_scalar};
 
 # ============================================================================
 # Error Handling
@@ -87,7 +87,7 @@ S ProductQuantizer {
     trained: bool,                      # Whether codebooks have been trained
 }
 
-I ProductQuantizer {
+X ProductQuantizer {
     # Create a new product quantizer
     # dim: Original vector dimension
     # num_subspaces: Number of subspaces (M)

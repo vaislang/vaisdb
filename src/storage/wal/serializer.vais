@@ -2,16 +2,16 @@
 # Unified serialization/deserialization for all WAL record types
 # Based on Stage 2: WAL Design
 
-use storage/error.{VaisError, err_wal_corruption};
-use storage/wal/header.{WalRecordHeader};
-use storage/wal/record_types.*;
-use storage/wal/record_rel.*;
-use storage/wal/record_vector.*;
-use storage/wal/record_graph.*;
-use storage/wal/record_fulltext.*;
-use storage/checksum.{calculate_wal_checksum};
-use storage/constants.{WAL_RECORD_HEADER_SIZE};
-use std/bytes.{ByteBuffer};
+U storage/error.{VaisError, err_wal_corruption};
+U storage/wal/header.{WalRecordHeader};
+U storage/wal/record_types.*;
+U storage/wal/record_rel.*;
+U storage/wal/record_vector.*;
+U storage/wal/record_graph.*;
+U storage/wal/record_fulltext.*;
+U storage/checksum.{calculate_wal_checksum};
+U storage/constants.{WAL_RECORD_HEADER_SIZE};
+U std/bytes.{ByteBuffer};
 
 # WalRecord - Full WAL record (header + payload)
 S WalRecord {
@@ -19,7 +19,7 @@ S WalRecord {
     payload: Vec<u8>,       # Serialized payload (varies by record_type)
 }
 
-I WalRecord {
+X WalRecord {
     # Create a new WAL record with payload
     F new(header: WalRecordHeader, payload: Vec<u8>) -> WalRecord {
         WalRecord { header, payload }
@@ -64,7 +64,7 @@ I WalRecord {
 
 S WalRecordSerializer {}
 
-I WalRecordSerializer {
+X WalRecordSerializer {
     # Serialize a complete WAL record (header + payload + checksum)
     # Returns the full serialized record ready to write to WAL
     F serialize_record(header: &WalRecordHeader, payload: &[u8]) -> Vec<u8> {

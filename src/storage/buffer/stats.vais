@@ -2,8 +2,8 @@
 # Aggregates stats across partitioned buffer pools
 # Provides metrics for monitoring and diagnostics
 
-use storage/buffer/pool.{BufferPool, BufferPoolStats};
-use storage/buffer/partitioned.{PartitionedBufferPool};
+U storage/buffer/pool.{BufferPool, BufferPoolStats};
+U storage/buffer/partitioned.{PartitionedBufferPool};
 
 # Aggregated buffer pool statistics
 S AggregatedStats {
@@ -30,7 +30,7 @@ S AggregatedStats {
     per_partition_usage: Vec<u32>,
 }
 
-I AggregatedStats {
+X AggregatedStats {
     # Create empty stats
     F new() -> AggregatedStats {
         AggregatedStats {
@@ -105,7 +105,7 @@ I AggregatedStats {
 S BufferPoolStatsCollector {
 }
 
-I BufferPoolStatsCollector {
+X BufferPoolStatsCollector {
     # Create a new stats collector
     F new() -> BufferPoolStatsCollector {
         BufferPoolStatsCollector {}
@@ -222,7 +222,7 @@ S BufferPoolSnapshot {
     stats: AggregatedStats,
 }
 
-I BufferPoolSnapshot {
+X BufferPoolSnapshot {
     F new(stats: AggregatedStats) -> BufferPoolSnapshot {
         # In real implementation, would use std/time for timestamp
         BufferPoolSnapshot {
@@ -243,7 +243,7 @@ S BufferPoolMonitor {
     max_snapshots: usize,
 }
 
-I BufferPoolMonitor {
+X BufferPoolMonitor {
     F new() -> BufferPoolMonitor {
         BufferPoolMonitor {
             snapshots: Vec.new(),

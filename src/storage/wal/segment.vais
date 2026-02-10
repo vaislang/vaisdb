@@ -2,10 +2,10 @@
 # Based on Stage 2: WAL Design
 # Segment files are named {segment_number:06}.wal (e.g., 000001.wal, 000002.wal)
 
-use storage/error.{VaisError, err_wal_segment_corrupt, err_invalid_magic};
-use storage/constants.{WAL_SEGMENT_MAGIC, WAL_FORMAT_VERSION, WAL_SEGMENT_HEADER_SIZE};
-use storage/checksum.{calculate_segment_header_checksum, verify_segment_header_checksum};
-use std/bytes.{ByteBuffer};
+U storage/error.{VaisError, err_wal_segment_corrupt, err_invalid_magic};
+U storage/constants.{WAL_SEGMENT_MAGIC, WAL_FORMAT_VERSION, WAL_SEGMENT_HEADER_SIZE};
+U storage/checksum.{calculate_segment_header_checksum, verify_segment_header_checksum};
+U std/bytes.{ByteBuffer};
 
 # WAL Segment Header Structure (32 bytes)
 S WalSegmentHeader {
@@ -17,7 +17,7 @@ S WalSegmentHeader {
     checksum: u32,          # 28-31: CRC32C of segment header
 }
 
-I WalSegmentHeader {
+X WalSegmentHeader {
     # Create a new segment header
     F new(segment_number: u32, first_lsn: u64) -> WalSegmentHeader {
         WalSegmentHeader {

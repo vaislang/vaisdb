@@ -13,8 +13,8 @@
 #
 # Error codes: VAIS-0205NNN (EE=02 vector, CC=05 internal)
 
-use std/math.{sqrt};
-use storage/error.{VaisError};
+U std/math.{sqrt};
+U storage/error.{VaisError};
 
 # ============================================================================
 # Distance Metric Enum
@@ -186,7 +186,7 @@ S DistanceComputer {
     metric: DistanceMetric,
 }
 
-I DistanceComputer {
+X DistanceComputer {
     # Create a new distance computer for the given metric
     F new(metric: DistanceMetric) -> DistanceComputer {
         DistanceComputer { metric: metric }

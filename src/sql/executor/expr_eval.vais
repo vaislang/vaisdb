@@ -3,10 +3,10 @@
 # Used by WHERE clause filtering, SELECT list projection, and other contexts
 # Supports NULL propagation per SQL 3-valued logic
 
-use storage/error.{VaisError};
-use sql/types.{SqlType, SqlValue, err_type_mismatch, err_incompatible_types, coerce_types};
-use sql/row.{Row};
-use sql/parser/ast.{Expr, BinOp, UnaryOp, WhenClause};
+U storage/error.{VaisError};
+U sql/types.{SqlType, SqlValue, err_type_mismatch, err_incompatible_types, coerce_types};
+U sql/row.{Row};
+U sql/parser/ast.{Expr, BinOp, UnaryOp, WhenClause};
 
 # ============================================================================
 # Column Binding — maps column references to row positions
@@ -19,7 +19,7 @@ S ColumnBinding {
     data_type: SqlType,
 }
 
-I ColumnBinding {
+X ColumnBinding {
     F new(column: Str, index: usize, data_type: SqlType) -> ColumnBinding {
         ColumnBinding {
             table: None,
@@ -47,7 +47,7 @@ S EvalContext {
     bindings: Vec<ColumnBinding>,
 }
 
-I EvalContext {
+X EvalContext {
     F new() -> EvalContext {
         EvalContext {
             bindings: Vec.new(),
@@ -124,7 +124,7 @@ I EvalContext {
     }
 }
 
-use sql/catalog/schema.{ColumnInfo};
+U sql/catalog/schema.{ColumnInfo};
 
 # ============================================================================
 # Expression Evaluation — main entry point

@@ -10,17 +10,17 @@
 #
 # Error codes: VAIS-0202NNN (EE=02 vector, CC=02 insert)
 
-use std/bytes.{ByteBuffer};
-use std/hash.{HashSet};
-use storage/error.{VaisError};
-use storage/wal/group_commit.{GroupCommitManager};
-use storage/wal/record_types.{HNSW_INSERT_NODE, HNSW_UPDATE_EDGES};
-use storage/wal/record_vector.{HnswInsertNodePayload, HnswUpdateEdgesPayload};
-use vector/hnsw/types.{
+U std/bytes.{ByteBuffer};
+U std/hash.{HashSet};
+U storage/error.{VaisError};
+U storage/wal/group_commit.{GroupCommitManager};
+U storage/wal/record_types.{HNSW_INSERT_NODE, HNSW_UPDATE_EDGES};
+U storage/wal/record_vector.{HnswInsertNodePayload, HnswUpdateEdgesPayload};
+U vector/hnsw/types.{
     HnswConfig, HnswMeta, HnswNode, HnswNeighbor, SearchCandidate,
     LayerRng, INVALID_NODE_ID,
 };
-use vector/distance.{DistanceComputer, DistanceMetric};
+U vector/distance.{DistanceComputer, DistanceMetric};
 
 # ============================================================================
 # Error Codes
@@ -85,7 +85,7 @@ S MinHeap {
     items: Vec<SearchCandidate>,
 }
 
-I MinHeap {
+X MinHeap {
     F new() -> MinHeap {
         MinHeap { items: Vec.new() }
     }
@@ -135,7 +135,7 @@ S MaxHeap {
     items: Vec<SearchCandidate>,
 }
 
-I MaxHeap {
+X MaxHeap {
     F new() -> MaxHeap {
         MaxHeap { items: Vec.new() }
     }

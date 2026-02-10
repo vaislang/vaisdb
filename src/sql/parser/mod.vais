@@ -6,7 +6,7 @@ pub mod ast;
 pub mod parser;
 pub mod prepared;
 
-use token.{Token, TokenKind, Tokenizer};
-use ast.{Statement, SelectQuery, Expr};
-use parser.{Parser, parse_sql};
-use prepared.{PreparedStatement, PreparedStatementCache};
+U token.{Token, TokenKind, Tokenizer};
+U ast.{Statement, SelectQuery, Expr};
+U parser.{Parser, parse_sql};
+U prepared.{PreparedStatement, PreparedStatementCache};

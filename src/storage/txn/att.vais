@@ -2,16 +2,16 @@
 # Tracks all active transactions with their state and metadata
 # Based on Stage 3 MVCC Strategy
 
-use std/sync.{RwLock};
-use std/hashmap.{HashMap};
-use std/time.{now_micros};
-use storage/txn/snapshot.{Snapshot, IsolationLevel};
-use storage/constants.{INVALID_TXN_ID, NULL_UNDO_PTR};
+U std/sync.{RwLock};
+U std/hashmap.{HashMap};
+U std/time.{now_micros};
+U storage/txn/snapshot.{Snapshot, IsolationLevel};
+U storage/constants.{INVALID_TXN_ID, NULL_UNDO_PTR};
 
 # Transaction state enum
 L TxnState = Active | Committing | Aborting | Committed | Aborted;
 
-I TxnState {
+X TxnState {
     F is_active(self) -> bool {
         M self {
             TxnState.Active => true,
@@ -75,7 +75,7 @@ S ActiveTransactionEntry {
     isolation_level: IsolationLevel,
 }
 
-I ActiveTransactionEntry {
+X ActiveTransactionEntry {
     # Create a new transaction entry
     F new(
         txn_id: u64,
@@ -149,7 +149,7 @@ S ActiveTransactionTable {
     lock: RwLock,   # RwLock for read-heavy access
 }
 
-I ActiveTransactionTable {
+X ActiveTransactionTable {
     # Create an empty ATT
     F new() -> ActiveTransactionTable {
         ActiveTransactionTable {

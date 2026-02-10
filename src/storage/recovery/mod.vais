@@ -7,12 +7,12 @@ pub mod redo;          # Analysis + Redo phases, WAL record iterator
 pub mod undo;          # Undo phase with CLR support
 pub mod truncation;    # WAL segment truncation and archiving
 
-use storage/error.{VaisError};
-use storage/wal/writer.{WalWriter};
-use storage/wal/lsn.{NULL_LSN};
-use storage/buffer/pool.{BufferPool};
-use storage/recovery/redo.{recovery_analysis, recovery_redo, AnalysisResult};
-use storage/recovery/undo.{recovery_undo, UndoResult};
+U storage/error.{VaisError};
+U storage/wal/writer.{WalWriter};
+U storage/wal/lsn.{NULL_LSN};
+U storage/buffer/pool.{BufferPool};
+U storage/recovery/redo.{recovery_analysis, recovery_redo, AnalysisResult};
+U storage/recovery/undo.{recovery_undo, UndoResult};
 
 # Full crash recovery result
 S RecoveryResult {

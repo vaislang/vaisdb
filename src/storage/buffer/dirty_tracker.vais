@@ -2,8 +2,8 @@
 # Tracks which frames are dirty and need flushing during checkpoint
 # Maintains a dirty page table for crash recovery
 
-use std/sync.{Mutex};
-use storage/buffer/frame.{PageLocation};
+U std/sync.{Mutex};
+U storage/buffer/frame.{PageLocation};
 
 # Entry in the dirty page table
 S DirtyPageEntry {
@@ -18,7 +18,7 @@ S DirtyTracker {
     lock: Mutex,
 }
 
-I DirtyTracker {
+X DirtyTracker {
     F new() -> DirtyTracker {
         DirtyTracker {
             entries: Vec.new(),

@@ -2,14 +2,14 @@
 # Manages the tree with root page tracking and basic operations
 # Delegates to buffer pool for page access
 
-use storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
-use storage/error.{VaisError, err_internal};
-use storage/page/header.{PageHeader};
-use storage/page/types.{PAGE_TYPE_BTREE_INTERNAL, PAGE_TYPE_BTREE_LEAF};
-use storage/buffer/pool.{BufferPool};
-use storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
-use storage/btree/entry.{BTreeLeafEntry};
-use storage/btree/latch.{LatchTable, LatchGuard};
+U storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
+U storage/error.{VaisError, err_internal};
+U storage/page/header.{PageHeader};
+U storage/page/types.{PAGE_TYPE_BTREE_INTERNAL, PAGE_TYPE_BTREE_LEAF};
+U storage/buffer/pool.{BufferPool};
+U storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
+U storage/btree/entry.{BTreeLeafEntry};
+U storage/btree/latch.{LatchTable, LatchGuard};
 
 # Default latch table capacity (one latch per buffer pool slot)
 L DEFAULT_LATCH_CAPACITY: u32 = 4096;
@@ -24,7 +24,7 @@ S BTree {
     latch_table: LatchTable, # Per-page latches for concurrent access
 }
 
-I BTree {
+X BTree {
     # Create a new empty B+Tree with a single leaf root
     F new(root_page_id: u32, file_id: u8, page_size: u32) -> BTree {
         BTree {

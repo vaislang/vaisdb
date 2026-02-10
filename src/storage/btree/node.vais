@@ -3,19 +3,19 @@
 # Slotted structure with sorted key order
 # Based on Stage 1 Section 9
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{
+U std/bytes.{ByteBuffer};
+U storage/constants.{
     PAGE_HEADER_SIZE, BTREE_INTERNAL_ENTRY_SIZE, BTREE_LEAF_ENTRY_SIZE,
     BTREE_LEFTMOST_CHILD_SIZE, FLAG_IS_LEAF, FLAG_IS_ROOT,
     FLAG_IS_COMPRESSED, NULL_PAGE,
 };
-use storage/error.{VaisError, err_internal, err_page_full};
-use storage/page/header.{PageHeader};
-use storage/page/types.{PAGE_TYPE_BTREE_INTERNAL, PAGE_TYPE_BTREE_LEAF, ENGINE_TAG_SQL};
-use storage/page/flags.{PageFlags};
-use storage/btree/entry.{BTreeInternalEntry, BTreeLeafEntry, compare_keys, KeyCmp, key_less_than};
-use storage/btree/prefix.{CompressedKey, compress_keys_with_restarts, decompress_keys};
-use storage/checksum.{calculate_page_checksum};
+U storage/error.{VaisError, err_internal, err_page_full};
+U storage/page/header.{PageHeader};
+U storage/page/types.{PAGE_TYPE_BTREE_INTERNAL, PAGE_TYPE_BTREE_LEAF, ENGINE_TAG_SQL};
+U storage/page/flags.{PageFlags};
+U storage/btree/entry.{BTreeInternalEntry, BTreeLeafEntry, compare_keys, KeyCmp, key_less_than};
+U storage/btree/prefix.{CompressedKey, compress_keys_with_restarts, decompress_keys};
+U storage/checksum.{calculate_page_checksum};
 
 # B+Tree Internal Node
 S BTreeInternalNode {
@@ -27,7 +27,7 @@ S BTreeInternalNode {
     data: Vec<u8>,                      # Full page buffer
 }
 
-I BTreeInternalNode {
+X BTreeInternalNode {
     # Create a new empty internal node
     F new(page_id: u32, page_size: u32, is_root: bool) -> BTreeInternalNode {
         ~header = PageHeader.new(page_id, PAGE_TYPE_BTREE_INTERNAL, ENGINE_TAG_SQL);
@@ -343,7 +343,7 @@ S BTreeLeafNode {
     data: Vec<u8>,                      # Full page buffer
 }
 
-I BTreeLeafNode {
+X BTreeLeafNode {
     # Create a new empty leaf node
     F new(page_id: u32, page_size: u32, is_root: bool) -> BTreeLeafNode {
         ~header = PageHeader.new(page_id, PAGE_TYPE_BTREE_LEAF, ENGINE_TAG_SQL);

@@ -2,7 +2,7 @@
 # Represents a point-in-time view for MVCC visibility checks
 # Based on Stage 3 Section 7: Isolation Levels
 
-use storage/constants.{INVALID_TXN_ID};
+U storage/constants.{INVALID_TXN_ID};
 
 # Snapshot for transaction isolation
 S Snapshot {
@@ -12,7 +12,7 @@ S Snapshot {
     min_active_txn: u64,       # Smallest active txn_id (optimization)
 }
 
-I Snapshot {
+X Snapshot {
     # Create a new snapshot
     F new(txn_id: u64, active_txns: Vec<u64>) -> Snapshot {
         ~min_active = txn_id;

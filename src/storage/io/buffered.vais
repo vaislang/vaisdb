@@ -2,9 +2,9 @@
 # Uses pread/pwrite for positioned I/O (no seek needed)
 # Fallback when mmap is unavailable or undesirable
 
-use std/file.{File};
-use storage/constants.{DEFAULT_PAGE_SIZE};
-use storage/error.{VaisError, err_io, err_disk_io};
+U std/file.{File};
+U storage/constants.{DEFAULT_PAGE_SIZE};
+U storage/error.{VaisError, err_io, err_disk_io};
 
 # Buffered I/O page access
 S BufferedIO {
@@ -12,7 +12,7 @@ S BufferedIO {
     page_size: u32,
 }
 
-I BufferedIO {
+X BufferedIO {
     # Create buffered I/O wrapper for a file
     F new(file: File, page_size: u32) -> BufferedIO {
         BufferedIO { file, page_size }

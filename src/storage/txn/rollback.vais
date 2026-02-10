@@ -2,26 +2,26 @@
 # Applies undo log chain to rollback transaction changes
 # Based on Stage 3 Section 6 (Transaction Timeout) and Stage 1 Section 10
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{
+U std/bytes.{ByteBuffer};
+U storage/constants.{
     NULL_UNDO_PTR, PAGE_HEADER_SIZE, SLOT_ENTRY_SIZE,
     MVCC_TUPLE_META_SIZE, FLAG_HAS_TOMBSTONES,
     UNDO_INSERT, UNDO_DELETE, UNDO_UPDATE
 };
-use storage/error.{VaisError, err_internal};
-use storage/txn/undo.{UndoLog};
-use storage/txn/undo_entry.{UndoEntry};
-use storage/buffer/pool.{BufferPool};
-use storage/page/header.{PageHeader};
-use storage/page/slot.{HeapPageSlot};
-use storage/page/mvcc.{MvccTupleMeta};
+U storage/error.{VaisError, err_internal};
+U storage/txn/undo.{UndoLog};
+U storage/txn/undo_entry.{UndoEntry};
+U storage/buffer/pool.{BufferPool};
+U storage/page/header.{PageHeader};
+U storage/page/slot.{HeapPageSlot};
+U storage/page/mvcc.{MvccTupleMeta};
 
 # Rollback executor: traverses undo chain and reverses operations
 S RollbackExecutor {
     undo_log: UndoLog,
 }
 
-I RollbackExecutor {
+X RollbackExecutor {
     # Create a new rollback executor
     F new(undo_log: UndoLog) -> RollbackExecutor {
         RollbackExecutor { undo_log }

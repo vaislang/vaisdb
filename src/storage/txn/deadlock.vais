@@ -2,8 +2,8 @@
 # Wait-for graph based deadlock detection
 # Based on Stage 3 Section 8: Deadlock scenario
 
-use std/sync.{Mutex};
-use std/hashmap.{HashMap};
+U std/sync.{Mutex};
+U std/hashmap.{HashMap};
 
 # Wait-for graph for deadlock detection
 S WaitForGraph {
@@ -12,7 +12,7 @@ S WaitForGraph {
     lock: Mutex,
 }
 
-I WaitForGraph {
+X WaitForGraph {
     # Create an empty wait-for graph
     F new() -> WaitForGraph {
         WaitForGraph {

@@ -2,14 +2,14 @@
 # Contains minimal info to locate meta.vdb: magic, format version, page size, path
 # Total used: 256 bytes (48 header + 208 data)
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{
+U std/bytes.{ByteBuffer};
+U storage/constants.{
     VAISDB_MAGIC, DB_FORMAT_VERSION, PAGE_HEADER_SIZE,
     BOOTSTRAP_META_PATH_SIZE,
 };
-use storage/error.{VaisError, err_invalid_magic, err_internal};
-use storage/page/header.{PageHeader};
-use storage/page/types.{PAGE_TYPE_META, ENGINE_TAG_COMMON};
+U storage/error.{VaisError, err_invalid_magic, err_internal};
+U storage/page/header.{PageHeader};
+U storage/page/types.{PAGE_TYPE_META, ENGINE_TAG_COMMON};
 
 # Bootstrap page data (after 48B page header)
 S BootstrapPage {
@@ -20,7 +20,7 @@ S BootstrapPage {
     reserved: [u8; 160],               # Reserved (must be 0)
 }
 
-I BootstrapPage {
+X BootstrapPage {
     # Create a new bootstrap page
     F new(page_size: u32) -> BootstrapPage {
         ~meta_path = [0u8; 32];

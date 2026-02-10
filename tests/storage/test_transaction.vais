@@ -3,17 +3,17 @@
 #         conflict detection, deadlock detection, undo/rollback,
 #         CLOG status tracking, transaction timeout
 
-use std/test.{assert_eq, assert_ne, assert_true, assert_false, describe, it};
+U std/test.{assert_eq, assert_ne, assert_true, assert_false, describe, it};
 
-use storage/constants.{INVALID_TXN_ID, NULL_UNDO_PTR};
-use storage/txn/visibility.{is_visible, is_committed, is_aborted};
-use storage/txn/snapshot.{Snapshot};
-use storage/txn/clog.{Clog, TxnStatus};
-use storage/txn/att.{ActiveTransactionTable, TxnState};
-use storage/txn/conflict.{ConflictDetector};
-use storage/txn/deadlock.{WaitForGraph};
-use storage/txn/undo_entry.{UndoEntry, UndoType};
-use storage/page/mvcc.{MvccTupleMeta};
+U storage/constants.{INVALID_TXN_ID, NULL_UNDO_PTR};
+U storage/txn/visibility.{is_visible, is_committed, is_aborted};
+U storage/txn/snapshot.{Snapshot};
+U storage/txn/clog.{Clog, TxnStatus};
+U storage/txn/att.{ActiveTransactionTable, TxnState};
+U storage/txn/conflict.{ConflictDetector};
+U storage/txn/deadlock.{WaitForGraph};
+U storage/txn/undo_entry.{UndoEntry, UndoType};
+U storage/page/mvcc.{MvccTupleMeta};
 
 describe("MVCC Visibility - 10 Scenarios") {
     # Scenario 1: Transaction sees its own uncommitted insert

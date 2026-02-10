@@ -2,12 +2,12 @@
 # Provides iteration over leaf entries for range scans and sequential access
 # Follows the doubly-linked leaf chain
 
-use storage/constants.{NULL_PAGE};
-use storage/error.{VaisError};
-use storage/buffer/pool.{BufferPool};
-use storage/btree/node.{BTreeLeafNode};
-use storage/btree/entry.{BTreeLeafEntry, compare_keys, KeyCmp};
-use storage/btree/latch.{LatchTable, LatchGuard};
+U storage/constants.{NULL_PAGE};
+U storage/error.{VaisError};
+U storage/buffer/pool.{BufferPool};
+U storage/btree/node.{BTreeLeafNode};
+U storage/btree/entry.{BTreeLeafEntry, compare_keys, KeyCmp};
+U storage/btree/latch.{LatchTable, LatchGuard};
 
 # Cursor position within the B+Tree
 S BTreeCursor {
@@ -23,7 +23,7 @@ S BTreeCursor {
 
 L ScanDirection = Forward | Backward;
 
-I BTreeCursor {
+X BTreeCursor {
     # Create a cursor positioned at a specific leaf entry
     F new(file_id: u8, page_size: u32, page_id: u32, index: usize, frame_id: u32) -> BTreeCursor {
         BTreeCursor {
@@ -199,4 +199,4 @@ I BTreeCursor {
     }
 }
 
-use storage/error.{err_internal};
+U storage/error.{err_internal};

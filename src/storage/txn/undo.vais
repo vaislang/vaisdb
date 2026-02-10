@@ -2,17 +2,17 @@
 # Writes undo entries to undo.vdb pages, manages append-only log
 # Based on Stage 1 Section 10 and Stage 3 Section 1
 
-use std/sync.{Mutex};
-use std/bytes.{ByteBuffer};
-use storage/constants.{
+U std/sync.{Mutex};
+U std/bytes.{ByteBuffer};
+U storage/constants.{
     FILE_ID_UNDO, PAGE_HEADER_SIZE, NULL_UNDO_PTR, PAGE_BODY_SIZE_8K, PAGE_BODY_SIZE_16K
 };
-use storage/error.{VaisError, err_internal, err_page_full};
-use storage/bytes.{encode_undo_ptr, decode_undo_ptr};
-use storage/txn/undo_entry.{UndoEntry};
-use storage/buffer/pool.{BufferPool};
-use storage/page/header.{PageHeader};
-use storage/page/types.{PAGE_TYPE_UNDO_LOG};
+U storage/error.{VaisError, err_internal, err_page_full};
+U storage/bytes.{encode_undo_ptr, decode_undo_ptr};
+U storage/txn/undo_entry.{UndoEntry};
+U storage/buffer/pool.{BufferPool};
+U storage/page/header.{PageHeader};
+U storage/page/types.{PAGE_TYPE_UNDO_LOG};
 
 # Undo log: append-only log of previous tuple versions
 S UndoLog {
@@ -23,7 +23,7 @@ S UndoLog {
     lock: Mutex,
 }
 
-I UndoLog {
+X UndoLog {
     # Create a new undo log
     F new(page_size: u32) -> UndoLog {
         UndoLog {

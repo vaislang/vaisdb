@@ -6,19 +6,19 @@
 # SetOperationExecutor: UNION, INTERSECT, EXCEPT
 # Error codes: EE=01 (SQL), CC=07 (Subquery), NNN=001-005
 
-use std/hashmap.{HashMap, HashSet};
-use std/result.Result;
-use std/option.Option;
-use std/vec.Vec;
-use std/str.Str;
-use std/box.Box;
+U std/hashmap.{HashMap, HashSet};
+U std/result.Result;
+U std/option.Option;
+U std/vec.Vec;
+U std/str.Str;
+U std/box.Box;
 
-use crate/error.VaisError;
-use crate/sql/types.{SqlValue, group_key_hash};
-use crate/sql/row.Row;
-use crate/sql/parser/ast.{SelectQuery, Expr, SetOpKind};
-use crate/sql/executor/mod.{ExecutorRow, ExecStats, ExecContext};
-use crate/sql/executor/expr_eval.{eval_expr, EvalContext};
+U crate/error.VaisError;
+U crate/sql/types.{SqlValue, group_key_hash};
+U crate/sql/row.Row;
+U crate/sql/parser/ast.{SelectQuery, Expr, SetOpKind};
+U crate/sql/executor/mod.{ExecutorRow, ExecStats, ExecContext};
+U crate/sql/executor/expr_eval.{eval_expr, EvalContext};
 
 # ============================================================================
 # CTE Context - Shared storage for materialized CTEs
@@ -28,7 +28,7 @@ S CteContext {
     materialized: HashMap<Str, Vec<Row>>,
 }
 
-I CteContext {
+X CteContext {
     F new() -> CteContext {
         CteContext {
             materialized: HashMap.new(),
@@ -64,7 +64,7 @@ S SubqueryExecutor {
     stats: ExecStats,
 }
 
-I SubqueryExecutor {
+X SubqueryExecutor {
     F new(child: Box<dyn Executor>) -> SubqueryExecutor {
         SubqueryExecutor {
             child,
@@ -216,7 +216,7 @@ S CteRefExecutor {
     stats: ExecStats,
 }
 
-I CteRefExecutor {
+X CteRefExecutor {
     F new(cte_name: Str, cte_ctx: &CteContext) -> CteRefExecutor {
         CteRefExecutor {
             cte_name,
@@ -288,7 +288,7 @@ S SetOperationExecutor {
     stats: ExecStats,
 }
 
-I SetOperationExecutor {
+X SetOperationExecutor {
     F new(
         left: Box<dyn Executor>,
         right: Box<dyn Executor>,

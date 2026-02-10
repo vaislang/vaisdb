@@ -2,11 +2,11 @@
 # WAL-first allocation: PAGE_ALLOC first, then BTREE_SPLIT
 # Based on Stage 1 Section 9 - median split
 
-use storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
-use storage/error.{VaisError, err_internal, err_page_full};
-use storage/buffer/pool.{BufferPool};
-use storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
-use storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry, compare_keys, KeyCmp};
+U storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
+U storage/error.{VaisError, err_internal, err_page_full};
+U storage/buffer/pool.{BufferPool};
+U storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
+U storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry, compare_keys, KeyCmp};
 
 # Split result containing the separator key and new page ID
 S SplitResult {

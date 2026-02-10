@@ -3,12 +3,12 @@
 # Both executors follow Volcano-style: open → next → close
 # Error codes: EE=01 (SQL), CC=04 (Join), NNN=001-005
 
-use storage/error.{VaisError};
-use sql/types.{SqlValue, SqlType, group_key_hash};
-use sql/row.{Row};
-use sql/parser/ast.{Expr, JoinType, JoinCondition};
-use sql/executor/mod.{ExecutorRow, ExecContext, ExecStats};
-use sql/executor/expr_eval.{eval_predicate, eval_expr, EvalContext, ColumnBinding};
+U storage/error.{VaisError};
+U sql/types.{SqlValue, SqlType, group_key_hash};
+U sql/row.{Row};
+U sql/parser/ast.{Expr, JoinType, JoinCondition};
+U sql/executor/mod.{ExecutorRow, ExecContext, ExecStats};
+U sql/executor/expr_eval.{eval_predicate, eval_expr, EvalContext, ColumnBinding};
 
 # Error codes for join operations
 L JOIN_ERROR_BUILD_FAILED: &str = "VAIS-E0104001";   # Hash join build phase failed
@@ -49,7 +49,7 @@ S NestedLoopJoinExecutor {
     is_open: bool,
 }
 
-I NestedLoopJoinExecutor {
+X NestedLoopJoinExecutor {
     # Create new nested loop join executor
     F new(
         join_type: JoinType,
@@ -424,7 +424,7 @@ I NestedLoopJoinExecutor {
 # Hash Join Executor
 # ============================================================================
 
-use std/hashmap.{HashMap};
+U std/hashmap.{HashMap};
 
 S HashJoinExecutor {
     join_type: JoinType,
@@ -443,7 +443,7 @@ S HashJoinExecutor {
     is_open: bool,
 }
 
-I HashJoinExecutor {
+X HashJoinExecutor {
     # Create new hash join executor
     # join_keys_left/right are column indices to hash on
     F new(

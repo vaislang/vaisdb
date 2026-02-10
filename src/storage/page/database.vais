@@ -1,11 +1,11 @@
 # Database Open/Create
 # Implements the 7-step startup sequence from Stage 1 Section 11
 
-use std/file.{File};
-use std/dir.{Dir};
-use std/time.{Time};
-use std/random.{Random};
-use storage/constants.{
+U std/file.{File};
+U std/dir.{Dir};
+U std/time.{Time};
+U std/random.{Random};
+U storage/constants.{
     DEFAULT_PAGE_SIZE, FILE_ID_DATA, FILE_ID_VECTORS,
     FILE_ID_GRAPH, FILE_ID_FULLTEXT, FILE_ID_UNDO,
     FILE_NAME_DATA, FILE_NAME_VECTORS, FILE_NAME_GRAPH,
@@ -13,13 +13,13 @@ use storage/constants.{
     FILE_NAME_LOCK, DIR_NAME_WAL, DIR_NAME_TMP,
     FILE_EXTENSION_INCREMENT,
 };
-use storage/error.{VaisError, err_file_not_found, err_flock_failed, err_io, err_internal};
-use storage/page/header.{PageHeader};
-use storage/page/meta.{MetaPageHeader};
-use storage/page/bootstrap.{BootstrapPage};
-use storage/page/file_header.{FileHeader};
-use storage/page/types.{PAGE_TYPE_FREELIST, ENGINE_TAG_COMMON};
-use storage/checksum.{calculate_page_checksum};
+U storage/error.{VaisError, err_file_not_found, err_flock_failed, err_io, err_internal};
+U storage/page/header.{PageHeader};
+U storage/page/meta.{MetaPageHeader};
+U storage/page/bootstrap.{BootstrapPage};
+U storage/page/file_header.{FileHeader};
+U storage/page/types.{PAGE_TYPE_FREELIST, ENGINE_TAG_COMMON};
+U storage/checksum.{calculate_page_checksum};
 
 # Database handle - manages all files in the .vaisdb directory
 S Database {
@@ -35,7 +35,7 @@ S Database {
     lock_file: File,           # lock file handle
 }
 
-I Database {
+X Database {
     # Create a new database at the given path
     F create(db_path: Str, page_size: u32) -> Result<Database, VaisError> {
         # Validate page size

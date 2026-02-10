@@ -7,24 +7,24 @@
 # - PostFilter: Run HNSW search first, then apply SQL WHERE to results
 # - Hybrid: Auto-select based on estimated predicate selectivity
 
-use std/result.{Result, Ok, Err};
-use std/option.{Option, Some, None};
-use std/vec.Vec;
-use std/string.Str;
-use std/hashmap.{HashMap};
-use std/hashset.{HashSet};
+U std/result.{Result, Ok, Err};
+U std/option.{Option, Some, None};
+U std/vec.Vec;
+U std/string.Str;
+U std/hashmap.{HashMap};
+U std/hashset.{HashSet};
 
-use crate/error.{VaisError, error_code};
-use crate/sql/executor/mod.{ExecContext, ExecStats};
-use crate/sql/executor/expr_eval.{eval_predicate, EvalContext};
-use crate/sql/parser/ast.{Expr, BinOp};
-use crate/sql/types.{SqlType, SqlValue};
-use crate/sql/row.Row;
-use crate/sql/catalog/schema.{TableInfo, ColumnInfo};
-use crate/vector/search.{VectorSearchParams, VectorSearchRow, execute_vector_search};
-use crate/storage/page/heap.HeapPage;
-use crate/storage/txn/visibility.is_tuple_visible;
-use crate/storage/constants.{FILE_ID_DATA, NULL_PAGE};
+U crate/error.{VaisError, error_code};
+U crate/sql/executor/mod.{ExecContext, ExecStats};
+U crate/sql/executor/expr_eval.{eval_predicate, EvalContext};
+U crate/sql/parser/ast.{Expr, BinOp};
+U crate/sql/types.{SqlType, SqlValue};
+U crate/sql/row.Row;
+U crate/sql/catalog/schema.{TableInfo, ColumnInfo};
+U crate/vector/search.{VectorSearchParams, VectorSearchRow, execute_vector_search};
+U crate/storage/page/heap.HeapPage;
+U crate/storage/txn/visibility.is_tuple_visible;
+U crate/storage/constants.{FILE_ID_DATA, NULL_PAGE};
 
 # Error codes: EE=02 (vector), CC=03 (search), NNN=010-012
 # 02-03-010: Filter strategy error
@@ -50,7 +50,7 @@ S FilterConfig {
     post_filter_oversample: f32, # Extra oversample for post-filter (default 2.0)
 }
 
-I FilterConfig {
+X FilterConfig {
     # Create default filter configuration
     # - selectivity_threshold: 0.01 (1%) — very selective predicates use pre-filter
     # - post_filter_oversample: 2.0 — fetch 2x results for post-filtering
@@ -90,7 +90,7 @@ S TableStats {
     distinct_counts: HashMap<Str, u64>,  # column_name -> distinct count
 }
 
-I TableStats {
+X TableStats {
     F new(row_count: u64) -> TableStats {
         TableStats {
             row_count,
@@ -119,7 +119,7 @@ S FilteredVectorSearch {
     stats: ExecStats,
 }
 
-I FilteredVectorSearch {
+X FilteredVectorSearch {
     # Create new filtered vector search with default config
     F new(
         search_params: VectorSearchParams,

@@ -3,21 +3,21 @@
 # Based on Stage 2: WAL Design
 # Manages segment creation, record serialization, prev_lsn chain per txn
 
-use std/file.{File, OpenMode, fsync};
-use std/sync.{Mutex};
-use std/hashmap.{HashMap};
-use std/bytes.{ByteBuffer};
+U std/file.{File, OpenMode, fsync};
+U std/sync.{Mutex};
+U std/hashmap.{HashMap};
+U std/bytes.{ByteBuffer};
 
-use storage/error.{VaisError, err_internal, err_wal_corruption};
-use storage/constants.{
+U storage/error.{VaisError, err_internal, err_wal_corruption};
+U storage/constants.{
     WAL_RECORD_HEADER_SIZE, DEFAULT_WAL_SEGMENT_SIZE,
     WAL_SEGMENT_HEADER_SIZE,
 };
-use storage/wal/header.{WalRecordHeader};
-use storage/wal/segment.{WalSegmentHeader, segment_filename};
-use storage/wal/lsn.{LsnAllocator, NULL_LSN};
-use storage/wal/buffer.{WalBuffer};
-use storage/checksum.{calculate_wal_checksum};
+U storage/wal/header.{WalRecordHeader};
+U storage/wal/segment.{WalSegmentHeader, segment_filename};
+U storage/wal/lsn.{LsnAllocator, NULL_LSN};
+U storage/wal/buffer.{WalBuffer};
+U storage/checksum.{calculate_wal_checksum};
 
 # WAL Writer - manages appending records to WAL segment files
 S WalWriter {
@@ -33,7 +33,7 @@ S WalWriter {
     is_open: bool,
 }
 
-I WalWriter {
+X WalWriter {
     # Create a new WAL writer
     F new(wal_dir: Str, segment_size: u32) -> Result<WalWriter, VaisError> {
         ~lsn_allocator = LsnAllocator.new(segment_size);

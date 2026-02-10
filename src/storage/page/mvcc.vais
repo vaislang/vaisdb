@@ -2,9 +2,9 @@
 # Every row/tuple carries this metadata for multi-version concurrency control
 # Based on Stage 1 Section 5 and Stage 7 Pattern 5
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{MVCC_TUPLE_META_SIZE, INVALID_TXN_ID, NULL_UNDO_PTR};
-use storage/error.{VaisError};
+U std/bytes.{ByteBuffer};
+U storage/constants.{MVCC_TUPLE_META_SIZE, INVALID_TXN_ID, NULL_UNDO_PTR};
+U storage/error.{VaisError};
 
 S MvccTupleMeta {
     txn_id_create: u64,    # Transaction that created this version
@@ -14,7 +14,7 @@ S MvccTupleMeta {
     expire_cmd_id: u32,    # Command sequence within deleting/updating transaction
 }
 
-I MvccTupleMeta {
+X MvccTupleMeta {
     # Create metadata for a new tuple (INSERT)
     F new_insert(txn_id: u64, cmd_id: u32) -> MvccTupleMeta {
         MvccTupleMeta {

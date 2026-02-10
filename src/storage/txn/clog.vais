@@ -3,19 +3,19 @@
 # Stored in dedicated pages within meta.vdb
 # Based on Stage 3 Section 3
 
-use std/bytes.{ByteBuffer};
-use std/sync.{Mutex};
-use storage/constants.{
+U std/bytes.{ByteBuffer};
+U std/sync.{Mutex};
+U storage/constants.{
     PAGE_HEADER_SIZE, TXN_STATUS_IN_PROGRESS,
     TXN_STATUS_COMMITTED, TXN_STATUS_ABORTED,
     TXN_STATUS_RESERVED, DEFAULT_CLOG_CACHE_PAGES,
 };
-use storage/error.{VaisError, err_internal};
+U storage/error.{VaisError, err_internal};
 
 # Transaction status enum
 L TxnStatus = InProgress | Committed | Aborted | Reserved;
 
-I TxnStatus {
+X TxnStatus {
     F from_u8(val: u8) -> TxnStatus {
         M val {
             0 => TxnStatus.InProgress,
@@ -53,7 +53,7 @@ S ClogPage {
     data: Vec<u8>,  # PAGE_SIZE - 48 bytes of bitmap data
 }
 
-I ClogPage {
+X ClogPage {
     F new(page_body_size: u32) -> ClogPage {
         ~data = Vec.with_capacity(page_body_size as usize);
         data.resize(page_body_size as usize, 0u8);
@@ -98,7 +98,7 @@ S Clog {
     lock: Mutex,
 }
 
-I Clog {
+X Clog {
     # Create a new CLOG manager
     F new(page_size: u32, cache_pages: u32) -> Clog {
         ~txns_per_page = ClogPage.txns_per_page(page_size);

@@ -2,14 +2,14 @@
 # Point lookups, range scans, and cursor-based iteration
 # Extends tree.vais with advanced search patterns
 
-use storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
-use storage/error.{VaisError, err_internal};
-use storage/buffer/pool.{BufferPool};
-use storage/btree/tree.{BTree};
-use storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
-use storage/btree/entry.{BTreeLeafEntry, compare_keys, KeyCmp};
-use storage/btree/cursor.{BTreeCursor, ScanDirection};
-use storage/btree/key.{KeyRange};
+U storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
+U storage/error.{VaisError, err_internal};
+U storage/buffer/pool.{BufferPool};
+U storage/btree/tree.{BTree};
+U storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
+U storage/btree/entry.{BTreeLeafEntry, compare_keys, KeyCmp};
+U storage/btree/cursor.{BTreeCursor, ScanDirection};
+U storage/btree/key.{KeyRange};
 
 # Search result for point lookups
 L SearchResult = Found(u32) | NotFound;

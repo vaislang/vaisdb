@@ -2,9 +2,9 @@
 # Each slot points to a tuple within the page
 # Based on Stage 1 Section 7 and Stage 7 Pattern 11
 
-use std/bytes.{ByteBuffer};
-use storage/constants.{SLOT_ENTRY_SIZE, PAGE_HEADER_SIZE};
-use storage/error.{VaisError};
+U std/bytes.{ByteBuffer};
+U storage/constants.{SLOT_ENTRY_SIZE, PAGE_HEADER_SIZE};
+U storage/error.{VaisError};
 
 # Slot directory entry (4 bytes per slot)
 S HeapPageSlot {
@@ -12,7 +12,7 @@ S HeapPageSlot {
     tuple_len: u16,    # Length of tuple data in bytes (including MVCC metadata)
 }
 
-I HeapPageSlot {
+X HeapPageSlot {
     # Create a new slot entry
     F new(tuple_off: u16, tuple_len: u16) -> HeapPageSlot {
         HeapPageSlot { tuple_off, tuple_len }

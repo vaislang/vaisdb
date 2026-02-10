@@ -2,18 +2,18 @@
 # Insert key-TID pairs with automatic page split detection
 # Follows the descent-then-split approach from Stage 1 Section 9
 
-use storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
-use storage/error.{VaisError, err_internal, err_page_full, err_key_exists};
-use storage/buffer/pool.{BufferPool};
-use storage/btree/tree.{BTree};
-use storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
-use storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry, compare_keys, key_equal, KeyCmp};
-use storage/wal/group_commit.{GroupCommitManager};
-use storage/btree/wal_integration.{wal_btree_insert, wal_btree_split};
-use storage/recovery/checkpoint.{write_fpi};
-use storage/btree/latch.{LatchGuard};
-use storage/page/header.{PageHeader};
-use storage/page/flags.{PageFlags};
+U storage/constants.{NULL_PAGE, PAGE_HEADER_SIZE};
+U storage/error.{VaisError, err_internal, err_page_full, err_key_exists};
+U storage/buffer/pool.{BufferPool};
+U storage/btree/tree.{BTree};
+U storage/btree/node.{BTreeInternalNode, BTreeLeafNode};
+U storage/btree/entry.{BTreeLeafEntry, BTreeInternalEntry, compare_keys, key_equal, KeyCmp};
+U storage/wal/group_commit.{GroupCommitManager};
+U storage/btree/wal_integration.{wal_btree_insert, wal_btree_split};
+U storage/recovery/checkpoint.{write_fpi};
+U storage/btree/latch.{LatchGuard};
+U storage/page/header.{PageHeader};
+U storage/page/flags.{PageFlags};
 
 # Result of an insert that may need to propagate upward
 L InsertResult =

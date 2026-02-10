@@ -11,25 +11,25 @@
 # 6. Update meta page with checkpoint LSN
 # 7. WAL segments before checkpoint LSN are safe to truncate/archive
 
-use std/file.{fsync};
-use std/sync.{Mutex};
-use std/bytes.{ByteBuffer};
+U std/file.{fsync};
+U std/sync.{Mutex};
+U std/bytes.{ByteBuffer};
 
-use storage/error.{VaisError, err_internal};
-use storage/constants.{
+U storage/error.{VaisError, err_internal};
+U storage/constants.{
     WAL_RECORD_HEADER_SIZE,
     DEFAULT_CHECKPOINT_INTERVAL_SEC,
     DEFAULT_CHECKPOINT_WAL_SIZE,
 };
-use storage/wal/header.{ENGINE_META};
-use storage/wal/record_types.{
+U storage/wal/header.{ENGINE_META};
+U storage/wal/record_types.{
     CHECKPOINT_BEGIN, CHECKPOINT_END, FPI,
     CheckpointBeginPayload, CheckpointEndPayload, FpiPayload,
 };
-use storage/wal/writer.{WalWriter};
-use storage/wal/lsn.{NULL_LSN};
-use storage/buffer/pool.{BufferPool};
-use storage/page/meta.{MetaPage};
+U storage/wal/writer.{WalWriter};
+U storage/wal/lsn.{NULL_LSN};
+U storage/buffer/pool.{BufferPool};
+U storage/page/meta.{MetaPage};
 
 # Checkpoint configuration
 S CheckpointConfig {
@@ -38,7 +38,7 @@ S CheckpointConfig {
     force_flush: bool,         # Force flush all dirty pages (vs gradual)
 }
 
-I CheckpointConfig {
+X CheckpointConfig {
     F default() -> CheckpointConfig {
         CheckpointConfig {
             interval_sec: DEFAULT_CHECKPOINT_INTERVAL_SEC,
@@ -64,7 +64,7 @@ S CheckpointState {
     checkpoint_count: u64,          # Total checkpoints completed
 }
 
-I CheckpointState {
+X CheckpointState {
     F new() -> CheckpointState {
         CheckpointState {
             in_progress: false,
@@ -82,7 +82,7 @@ S CheckpointManager {
     lock: Mutex,
 }
 
-I CheckpointManager {
+X CheckpointManager {
     F new(config: CheckpointConfig) -> CheckpointManager {
         CheckpointManager {
             config,
@@ -231,7 +231,7 @@ S FpiTracker {
     lock: Mutex,
 }
 
-I FpiTracker {
+X FpiTracker {
     F new() -> FpiTracker {
         FpiTracker {
             pages_with_fpi: Vec.new(),

@@ -1,9 +1,9 @@
 # Buffer Frame - Individual slot in the buffer pool
 # Each frame holds one page of data plus metadata for eviction and concurrency
 
-use std/sync.{RwLock};
-use storage/constants.{PAGE_HEADER_SIZE};
-use storage/error.{VaisError};
+U std/sync.{RwLock};
+U storage/constants.{PAGE_HEADER_SIZE};
+U storage/error.{VaisError};
 
 # Describes the location of a page in the database files
 S PageLocation {
@@ -11,7 +11,7 @@ S PageLocation {
     page_id: u32,
 }
 
-I PageLocation {
+X PageLocation {
     F new(file_id: u8, page_id: u32) -> PageLocation {
         PageLocation { file_id, page_id }
     }
@@ -41,7 +41,7 @@ S BufferFrame {
     needs_fpi: bool,         # Full Page Image needed after checkpoint
 }
 
-I BufferFrame {
+X BufferFrame {
     # Create a new empty frame
     F new(frame_id: u32, page_size: u32) -> BufferFrame {
         ~data = Vec.with_capacity(page_size as usize);

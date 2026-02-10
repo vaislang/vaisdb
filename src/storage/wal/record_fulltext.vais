@@ -2,9 +2,9 @@
 # Based on Stage 2: WAL Design
 # Inverted index posting list operations
 
-use storage/error.{VaisError};
-use storage/bytes.{write_string, read_string, write_bytes, read_bytes};
-use std/bytes.{ByteBuffer};
+U storage/error.{VaisError};
+U storage/bytes.{write_string, read_string, write_bytes, read_bytes};
+U std/bytes.{ByteBuffer};
 
 # ============================================================================
 # POSTING_LIST_APPEND (0x40) - Append entry to posting list
@@ -17,7 +17,7 @@ S PostingListAppendPayload {
     entry: Vec<u8>,         # Serialized posting entry
 }
 
-I PostingListAppendPayload {
+X PostingListAppendPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.term_hash);
         buf.put_u32_le(self.page_id);
@@ -51,7 +51,7 @@ S PostingListDeletePayload {
     doc_id: u64,
 }
 
-I PostingListDeletePayload {
+X PostingListDeletePayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.term_hash);
         buf.put_u32_le(self.page_id);
@@ -83,7 +83,7 @@ S DictionaryInsertPayload {
     posting_head_page: u32,     # First page of posting list
 }
 
-I DictionaryInsertPayload {
+X DictionaryInsertPayload {
     F serialize(&self, buf: &~ByteBuffer) {
         write_string(buf, &self.term);
         buf.put_u32_le(self.posting_head_page);
@@ -109,7 +109,7 @@ S DictionaryDeletePayload {
     old_posting_head: u32,
 }
 
-I DictionaryDeletePayload {
+X DictionaryDeletePayload {
     F serialize(&self, buf: &~ByteBuffer) {
         write_string(buf, &self.term);
         buf.put_u32_le(self.old_posting_head);
@@ -137,7 +137,7 @@ S TermFreqUpdatePayload {
     new_freq: u32,
 }
 
-I TermFreqUpdatePayload {
+X TermFreqUpdatePayload {
     F serialize(&self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.term_hash);
         buf.put_u64_le(self.doc_id);

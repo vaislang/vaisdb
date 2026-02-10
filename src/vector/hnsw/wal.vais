@@ -2,20 +2,20 @@
 # HNSW WAL Integration - Write helpers, redo/undo handlers for crash recovery
 # Error codes: EE=02 (vector), CC=09 (WAL)
 
-use storage/wal/group_commit.{GroupCommitManager};
-use storage/wal/record_types.{
+U storage/wal/group_commit.{GroupCommitManager};
+U storage/wal/record_types.{
     HNSW_INSERT_NODE, HNSW_DELETE_NODE, HNSW_UPDATE_EDGES,
     HNSW_LAYER_PROMOTE, VECTOR_DATA_WRITE, QUANTIZATION_UPDATE
 };
-use storage/wal/record_vector.{
+U storage/wal/record_vector.{
     HnswInsertNodePayload, HnswDeleteNodePayload, HnswUpdateEdgesPayload,
     HnswLayerPromotePayload, VectorDataWritePayload, QuantizationUpdatePayload
 };
-use storage/buffer/pool.{BufferPool};
-use vector/hnsw/types.{HnswNode, HnswNeighbor, HnswMeta};
-use vector/hnsw/node_store.{NodeStore};
-use core/result.{Result, Ok, Err};
-use core/error.{VaisError};
+U storage/buffer/pool.{BufferPool};
+U vector/hnsw/types.{HnswNode, HnswNeighbor, HnswMeta};
+U vector/hnsw/node_store.{NodeStore};
+U core/result.{Result, Ok, Err};
+U core/error.{VaisError};
 
 # WAL manager for HNSW operations
 # Coordinates WAL writes with GroupCommitManager for crash recovery
@@ -23,7 +23,7 @@ S HnswWalManager {
     gcm: &GroupCommitManager,
 }
 
-I HnswWalManager {
+X HnswWalManager {
     # Create new WAL manager with reference to GroupCommitManager
     F new(gcm: &GroupCommitManager) -> HnswWalManager {
         HnswWalManager { gcm }

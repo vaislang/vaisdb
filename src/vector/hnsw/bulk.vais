@@ -16,18 +16,18 @@
 #
 # Error codes: VAIS-0202NNN (EE=02 vector, CC=02 insert, NNN=004-006)
 
-use std/bytes.{ByteBuffer};
-use storage/error.{VaisError};
-use storage/wal/group_commit.{GroupCommitManager};
-use storage/buffer/pool.{BufferPool};
-use storage/page/allocator.{PageAllocator};
-use storage/page/freelist.{FreelistBitmap};
-use vector/hnsw/types.{
+U std/bytes.{ByteBuffer};
+U storage/error.{VaisError};
+U storage/wal/group_commit.{GroupCommitManager};
+U storage/buffer/pool.{BufferPool};
+U storage/page/allocator.{PageAllocator};
+U storage/page/freelist.{FreelistBitmap};
+U vector/hnsw/types.{
     HnswConfig, HnswMeta, HnswNode, LayerRng, INVALID_NODE_ID,
 };
-use vector/hnsw/insert.{hnsw_insert, NodeStore};
-use vector/storage.{VectorStore};
-use vector/distance.{DistanceComputer};
+U vector/hnsw/insert.{hnsw_insert, NodeStore};
+U vector/storage.{VectorStore};
+U vector/distance.{DistanceComputer};
 
 # ============================================================================
 # Error Codes
@@ -73,7 +73,7 @@ S BulkLoadConfig {
     seed: u64,                  # RNG seed for layer assignment (0 = use system time)
 }
 
-I BulkLoadConfig {
+X BulkLoadConfig {
     # Create default configuration
     F default() -> BulkLoadConfig {
         BulkLoadConfig {
@@ -135,7 +135,7 @@ S BulkLoadProgress {
     elapsed_ms: u64,            # Elapsed time in milliseconds
 }
 
-I BulkLoadProgress {
+X BulkLoadProgress {
     # Create new progress tracker
     F new(total_vectors: usize) -> BulkLoadProgress {
         BulkLoadProgress {
@@ -189,7 +189,7 @@ S BulkLoadResult {
     wal_skipped: bool,          # Whether WAL was skipped
 }
 
-I BulkLoadResult {
+X BulkLoadResult {
     # Create new result
     F new(
         vectors_inserted: usize,
@@ -226,7 +226,7 @@ S VectorMeta {
     offset: u16,                # Offset within page
 }
 
-I VectorMeta {
+X VectorMeta {
     # Create new vector metadata
     F new(
         vector_index: usize,
@@ -256,7 +256,7 @@ S BulkLoader {
     rng: LayerRng,
 }
 
-I BulkLoader {
+X BulkLoader {
     # Create new bulk loader with configuration
     F new(config: BulkLoadConfig) -> Result<BulkLoader, VaisError> {
         config.validate()?;

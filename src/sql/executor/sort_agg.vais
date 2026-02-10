@@ -4,18 +4,18 @@
 # DistinctExecutor: hash-based duplicate elimination
 # Error codes: EE=01 (SQL), CC=05 (SortAgg), NNN=001-005
 
-use std/hashmap.{HashMap, HashSet};
-use std/result.Result;
-use std/option.Option;
-use std/vec.Vec;
-use std/str.Str;
+U std/hashmap.{HashMap, HashSet};
+U std/result.Result;
+U std/option.Option;
+U std/vec.Vec;
+U std/str.Str;
 
-use crate/error.VaisError;
-use crate/sql/types.{SqlValue, SqlType, agg_count_value, agg_sum, agg_avg_accumulate, agg_avg_finalize, agg_min, agg_max, group_key_hash, order_by_compare};
-use crate/sql/row.Row;
-use crate/sql/parser/ast.{OrderByItem, Expr};
-use crate/sql/executor/mod.{ExecutorRow, ExecStats};
-use crate/sql/executor/expr_eval.{eval_expr, EvalContext};
+U crate/error.VaisError;
+U crate/sql/types.{SqlValue, SqlType, agg_count_value, agg_sum, agg_avg_accumulate, agg_avg_finalize, agg_min, agg_max, group_key_hash, order_by_compare};
+U crate/sql/row.Row;
+U crate/sql/parser/ast.{OrderByItem, Expr};
+U crate/sql/executor/mod.{ExecutorRow, ExecStats};
+U crate/sql/executor/expr_eval.{eval_expr, EvalContext};
 
 # ============================================================================
 # SortExecutor - Multi-key in-memory sort with ORDER BY
@@ -30,7 +30,7 @@ S SortExecutor {
     stats: ExecStats,
 }
 
-I SortExecutor {
+X SortExecutor {
     F new(input: Box<dyn Executor>, order_items: Vec<OrderByItem>, eval_ctx: EvalContext) -> SortExecutor {
         SortExecutor {
             input,
@@ -142,7 +142,7 @@ S AggGroup {
     accumulators: Vec<AggAccumulator>,
 }
 
-I AggGroup {
+X AggGroup {
     F new(key_values: Vec<SqlValue>, agg_count: usize) -> AggGroup {
         ~accumulators = Vec.with_capacity(agg_count);
         for _ in 0..agg_count {
@@ -163,7 +163,7 @@ S AggregateSpec {
     is_distinct: bool,   # DISTINCT flag
 }
 
-I AggregateSpec {
+X AggregateSpec {
     F new(func_name: Str, arg_expr: Expr, is_distinct: bool) -> AggregateSpec {
         AggregateSpec { func_name, arg_expr, is_distinct }
     }
@@ -181,7 +181,7 @@ S AggregateExecutor {
     stats: ExecStats,
 }
 
-I AggregateExecutor {
+X AggregateExecutor {
     F new(
         input: Box<dyn Executor>,
         group_exprs: Vec<Expr>,
@@ -517,7 +517,7 @@ S DistinctExecutor {
     stats: ExecStats,
 }
 
-I DistinctExecutor {
+X DistinctExecutor {
     F new(input: Box<dyn Executor>) -> DistinctExecutor {
         DistinctExecutor {
             input,

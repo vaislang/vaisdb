@@ -2,17 +2,17 @@
 # Clock-based replacement, pin/unpin, dirty tracking, configurable size
 # Based on Stage 4: Memory Architecture
 
-use std/sync.{Mutex};
-use std/hashmap.{HashMap};
-use storage/constants.{PAGE_HEADER_SIZE};
-use storage/error.{VaisError, err_out_of_memory, err_internal};
-use storage/page/header.{PageHeader};
-use storage/page/manager.{PageManager};
-use storage/checksum.{calculate_page_checksum};
-use storage/buffer/frame.{BufferFrame, PageLocation, FrameState};
-use storage/buffer/clock.{ClockReplacer};
-use storage/buffer/dirty_tracker.{DirtyTracker};
-use storage/buffer/readahead.{ReadAhead};
+U std/sync.{Mutex};
+U std/hashmap.{HashMap};
+U storage/constants.{PAGE_HEADER_SIZE};
+U storage/error.{VaisError, err_out_of_memory, err_internal};
+U storage/page/header.{PageHeader};
+U storage/page/manager.{PageManager};
+U storage/checksum.{calculate_page_checksum};
+U storage/buffer/frame.{BufferFrame, PageLocation, FrameState};
+U storage/buffer/clock.{ClockReplacer};
+U storage/buffer/dirty_tracker.{DirtyTracker};
+U storage/buffer/readahead.{ReadAhead};
 
 # Buffer pool: caches pages in memory to reduce disk I/O
 S BufferPool {
@@ -37,7 +37,7 @@ S BufferPoolStats {
     flushes: u64,
 }
 
-I BufferPoolStats {
+X BufferPoolStats {
     F new() -> BufferPoolStats {
         BufferPoolStats { hits: 0, misses: 0, evictions: 0, flushes: 0 }
     }
@@ -49,7 +49,7 @@ I BufferPoolStats {
     }
 }
 
-I BufferPool {
+X BufferPool {
     # Create a new buffer pool with given capacity (in pages)
     F new(page_manager: PageManager, capacity: u32) -> BufferPool {
         ~page_size = page_manager.get_page_size();

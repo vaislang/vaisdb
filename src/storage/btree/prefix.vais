@@ -3,9 +3,9 @@
 # Based on Stage 1 Section 9 - prefix compression for leaf pages
 # Useful for sequential/monotonic keys (timestamps, auto-inc IDs)
 
-use storage/error.{VaisError, err_internal};
-use storage/btree/key.{common_prefix_length, strip_prefix, reconstruct_key};
-use std/bytes.{ByteBuffer};
+U storage/error.{VaisError, err_internal};
+U storage/btree/key.{common_prefix_length, strip_prefix, reconstruct_key};
+U std/bytes.{ByteBuffer};
 
 # Compressed key entry: prefix_len + suffix
 # On-disk format: [u16 prefix_len][u16 suffix_len][suffix bytes]
@@ -14,7 +14,7 @@ S CompressedKey {
     suffix: Vec<u8>,     # Remaining bytes after prefix
 }
 
-I CompressedKey {
+X CompressedKey {
     F new(prefix_len: u16, suffix: Vec<u8>) -> CompressedKey {
         CompressedKey { prefix_len, suffix }
     }

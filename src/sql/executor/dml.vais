@@ -3,28 +3,28 @@
 # and index maintenance. Follows the same ExecContext pattern as scan executors.
 # Error codes: EE=01 (SQL), CC=03 (DML), NNN=001-010
 
-use std/bytes.{ByteBuffer};
-use storage/error.{VaisError, err_internal};
-use storage/constants.{FILE_ID_DATA, NULL_PAGE, INVALID_TXN_ID};
-use storage/buffer/pool.{BufferPool};
-use storage/page/heap.{HeapPage};
-use storage/page/tuple.{Tuple};
-use storage/page/mvcc.{MvccTupleMeta};
-use storage/txn/visibility.{is_tuple_visible};
-use storage/btree/tree.{BTree};
-use storage/btree/insert.{btree_insert};
-use storage/btree/delete.{btree_delete};
-use storage/bytes.{encode_tid};
-use storage/wal/record_types.{TUPLE_INSERT, TUPLE_DELETE, TUPLE_UPDATE};
-use storage/wal/record_rel.{TupleInsertPayload, TupleDeletePayload, TupleUpdatePayload};
-use sql/types.{SqlType, SqlValue};
-use sql/row.{Row};
-use sql/parser/ast.{InsertStmt, InsertSource, UpdateStmt, DeleteStmt, Assignment, Expr};
-use sql/catalog/schema.{TableInfo, ColumnInfo, IndexInfo};
-use sql/catalog/constraints.{ConstraintChecker};
-use sql/executor/mod.{ExecutorRow, ExecContext, ExecStats};
-use sql/executor/expr_eval.{EvalContext, eval_expr, eval_predicate};
-use sql/executor/scan.{TableScanExecutor, build_index_key, build_index_key_from_row, resolve_index_columns};
+U std/bytes.{ByteBuffer};
+U storage/error.{VaisError, err_internal};
+U storage/constants.{FILE_ID_DATA, NULL_PAGE, INVALID_TXN_ID};
+U storage/buffer/pool.{BufferPool};
+U storage/page/heap.{HeapPage};
+U storage/page/tuple.{Tuple};
+U storage/page/mvcc.{MvccTupleMeta};
+U storage/txn/visibility.{is_tuple_visible};
+U storage/btree/tree.{BTree};
+U storage/btree/insert.{btree_insert};
+U storage/btree/delete.{btree_delete};
+U storage/bytes.{encode_tid};
+U storage/wal/record_types.{TUPLE_INSERT, TUPLE_DELETE, TUPLE_UPDATE};
+U storage/wal/record_rel.{TupleInsertPayload, TupleDeletePayload, TupleUpdatePayload};
+U sql/types.{SqlType, SqlValue};
+U sql/row.{Row};
+U sql/parser/ast.{InsertStmt, InsertSource, UpdateStmt, DeleteStmt, Assignment, Expr};
+U sql/catalog/schema.{TableInfo, ColumnInfo, IndexInfo};
+U sql/catalog/constraints.{ConstraintChecker};
+U sql/executor/mod.{ExecutorRow, ExecContext, ExecStats};
+U sql/executor/expr_eval.{EvalContext, eval_expr, eval_predicate};
+U sql/executor/scan.{TableScanExecutor, build_index_key, build_index_key_from_row, resolve_index_columns};
 
 # ============================================================================
 # Error constructors (EE=01 SQL, CC=03 DML)
@@ -86,7 +86,7 @@ S DmlResult {
     rows_affected: u64,
 }
 
-I DmlResult {
+X DmlResult {
     F new(rows_affected: u64) -> DmlResult {
         DmlResult { rows_affected }
     }
