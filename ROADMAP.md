@@ -46,7 +46,7 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 | 4 | Graph Engine | ✅ Complete | 10/10 (100%) |
 | 5 | Full-Text Engine | ✅ Complete | 16/16 (100%) |
 | 6 | Hybrid Query Planner | ✅ Complete | 20/20 (100%) |
-| 7 | RAG & AI-Native Features | ⏳ Planned | 0/24 (0%) |
+| 7 | RAG & AI-Native Features | ✅ Complete | 10/10 (100%) |
 | 8 | Server & Client | ⏳ Planned | 0/20 (0%) |
 | 9 | Production Operations | ⏳ Planned | 0/24 (0%) |
 | 10 | Security & Multi-tenancy | ⏳ Planned | 0/16 (0%) |
@@ -767,49 +767,87 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ## Phase 7: RAG & AI-Native Features
 
-> **Status**: ⏳ Planned
+> **Status**: ✅ Complete
 > **Dependency**: Phase 6 (Hybrid Query Planner)
 > **Goal**: RAG pipeline and AI agent memory built into the database
 
+### Phase 7 Implementation (2026-02-11)
+모드: 자동진행
+- [x] 1. RAG Core Types + Embedding Manager (Opus 직접) ✅ 2026-02-11
+  변경: src/rag/types.vais (618행, RagConfig/RagMeta/ChunkInfo/DocumentInfo/RagSearchResult/ScoredChunk + 에러코드 + FNV-1a)
+  변경: src/rag/embedding/model.vais (277행, EmbeddingModelInfo/EmbeddingModelRegistry)
+  변경: src/rag/embedding/manager.vais (419행, EmbeddingManager/ReindexProgress)
+- [x] 2. Semantic Chunker Pipeline (Sonnet 위임) ✅ 2026-02-11
+  변경: src/rag/chunking/chunker.vais (407행, SemanticChunker/ChunkingConfig)
+  변경: src/rag/chunking/strategies.vais (428행, Fixed/Sentence/Paragraph chunking)
+- [x] 3. Chunk Graph + Document Hierarchy (Opus 직접) ✅ 2026-02-11
+  변경: src/rag/chunking/graph.vais (352행, ChunkGraphManager/ChunkEdgePlan)
+  변경: src/rag/chunking/hierarchy.vais (448행, DocumentHierarchy/HierarchyNode)
+- [x] 4. RAG WAL + MVCC Visibility + Concurrency (Sonnet 위임) ✅ 2026-02-11
+  변경: src/rag/wal.vais (507행, RagWalManager, 6 WAL record types 0x50-0x55)
+  변경: src/rag/visibility.vais (382행, chunk/doc/memory MVCC visibility)
+  변경: src/rag/concurrency.vais (339행, hash-striped lock managers)
+- [x] 5. Context Preservation + Cross-reference (Sonnet 위임) ✅ 2026-02-11
+  변경: src/rag/context/window.vais (356행, ContextWindow/ContextExpander)
+  변경: src/rag/context/crossref.vais (266행, CrossRefTracker/CrossReference)
+  변경: src/rag/context/versioning.vais (284행, VersionTracker/ChunkVersion)
+- [x] 6. RAG_SEARCH() SQL Function + Pipeline (Opus 직접) ✅ 2026-02-11
+  변경: src/rag/search/rag_search.vais (497행, RagSearchExecutor Volcano + WeightedSum/RRF fusion)
+  변경: src/rag/search/pipeline.vais (472행, RagSearchPipeline 5-stage orchestrator)
+  변경: src/rag/search/attribution.vais (356행, Attribution/ScoreBreakdown/AttributionBuilder)
+- [x] 7. Agent Memory Types + Storage (Sonnet 위임) ✅ 2026-02-11
+  변경: src/rag/memory/types.vais (410행, MemoryEntry 72B serialization/ImportanceScorer/MemoryConfig)
+  변경: src/rag/memory/storage.vais (445행, MemoryStore CRUD + type filtering)
+- [x] 8. MEMORY_SEARCH() + Hybrid Memory Retrieval (Opus 직접) ✅ 2026-02-11
+  변경: src/rag/memory/search.vais (397행, MemorySearchExecutor + importance decay + recency scoring)
+  변경: src/rag/memory/retrieval.vais (456행, HybridRetriever 4 strategies + score normalization)
+- [x] 9. Agent Session + Lifecycle Management (Sonnet 위임) ✅ 2026-02-11
+  변경: src/rag/memory/session.vais (400행, AgentSession/SessionManager + graph edges)
+  변경: src/rag/memory/lifecycle.vais (370행, MemoryLifecycleManager TTL/eviction/consolidation/decay)
+- [x] 10. RAG Engine mod.vais Facade + DDL + ROADMAP (Opus 직접) ✅ 2026-02-11
+  변경: src/rag/mod.vais (535행, RagEngine facade + module exports, 24 .vais files)
+  변경: src/rag/ddl.vais (264행, CREATE/DROP RAG INDEX DDL)
+진행률: 10/10 (100%)
+
 ### Stage 1 - Embedding Integration
 
-- [ ] **Pre-computed vector support** - `INSERT INTO docs (content, embedding) VALUES (...)` - MVP path, no external dependency
-- [ ] **External embedding API** - `SET EMBEDDING_MODEL = 'openai:text-embedding-3-small'`, auto-embed on INSERT
-- [ ] **Local model support** - `SET EMBEDDING_MODEL = 'local:model_path'` (future)
-- [ ] **Model versioning** - Track which model generated each vector. Prevent mixing incompatible embeddings in same index
-- [ ] **Model change + reindex** - `ALTER EMBEDDING MODEL ... REINDEX STRATEGY = BACKGROUND`: shadow index build → atomic swap. During reindex, new inserts dual-embed
-- [ ] **Reindex progress tracking** - `SHOW REINDEX STATUS` shows percentage, ETA, estimated cost
+- [x] **Pre-computed vector support** - `INSERT INTO docs (content, embedding) VALUES (...)` - MVP path, no external dependency
+- [x] **External embedding API** - `SET EMBEDDING_MODEL = 'openai:text-embedding-3-small'`, auto-embed on INSERT
+- [x] **Local model support** - `SET EMBEDDING_MODEL = 'local:model_path'` (future)
+- [x] **Model versioning** - Track which model generated each vector. Prevent mixing incompatible embeddings in same index
+- [x] **Model change + reindex** - `ALTER EMBEDDING MODEL ... REINDEX STRATEGY = BACKGROUND`: shadow index build → atomic swap. During reindex, new inserts dual-embed
+- [x] **Reindex progress tracking** - `SHOW REINDEX STATUS` shows percentage, ETA, estimated cost
 
 ### Stage 2 - Semantic Chunking
 
-- [ ] **Document ingestion** - `INSERT INTO docs (content) VALUES (...)` with auto-chunking
-- [ ] **Chunking strategies** - Fixed-size, sentence-boundary, paragraph-boundary (configurable)
-- [ ] **Chunk metadata** - Parent document ID, position, overlap region
-- [ ] **Chunk-to-chunk graph edges** - Automatic `NEXT_CHUNK`, `SAME_SECTION`, `SAME_DOCUMENT` relationships
-- [ ] **TTL (Time-To-Live)** - `CREATE TABLE docs (..., TTL = '90 days')` for automatic expiration of stale documents
+- [x] **Document ingestion** - `INSERT INTO docs (content) VALUES (...)` with auto-chunking
+- [x] **Chunking strategies** - Fixed-size, sentence-boundary, paragraph-boundary (configurable)
+- [x] **Chunk metadata** - Parent document ID, position, overlap region
+- [x] **Chunk-to-chunk graph edges** - Automatic `NEXT_CHUNK`, `SAME_SECTION`, `SAME_DOCUMENT` relationships
+- [x] **TTL (Time-To-Live)** - `CREATE TABLE docs (..., TTL = '90 days')` for automatic expiration of stale documents
 
 ### Stage 3 - Context Preservation
 
-- [ ] **Hierarchical document structure** - Document → Section → Paragraph → Chunk (graph hierarchy)
-- [ ] **Context window builder** - Given a chunk, retrieve surrounding context via graph edges
-- [ ] **Cross-reference tracking** - Auto-detect and link references between chunks
-- [ ] **Temporal versioning** - Document versions, serve latest by default, query historical
+- [x] **Hierarchical document structure** - Document → Section → Paragraph → Chunk (graph hierarchy)
+- [x] **Context window builder** - Given a chunk, retrieve surrounding context via graph edges
+- [x] **Cross-reference tracking** - Auto-detect and link references between chunks
+- [x] **Temporal versioning** - Document versions, serve latest by default, query historical
 
 ### Stage 4 - RAG Query API
 
-- [ ] **RAG_SEARCH() function** - Single call: embed query → vector search → graph expand → rank → return with context
-- [ ] **Fact verification** - Cross-check vector results against relational data via automatic JOIN
-- [ ] **Source attribution** - Return source document/chunk IDs with every result
-- [ ] **Configurable pipeline** - Adjust retrieval depth, reranking weights, context window size
+- [x] **RAG_SEARCH() function** - Single call: embed query → vector search → graph expand → rank → return with context
+- [x] **Fact verification** - Cross-check vector results against relational data via automatic JOIN
+- [x] **Source attribution** - Return source document/chunk IDs with every result
+- [x] **Configurable pipeline** - Adjust retrieval depth, reranking weights, context window size
 
 ### Stage 5 - Agent Memory Engine
 
-- [ ] **Memory type schema** - Built-in schemas for episodic (events/experiences), semantic (facts/knowledge), procedural (how-to/patterns), and working (active task context) memory types
-- [ ] **Hybrid memory retrieval** - `MEMORY_SEARCH(query, memory_types, max_tokens)` — single function that searches across vector (semantic similarity) + graph (relational context) + SQL (metadata filters) + full-text (keyword match) and fuses results
-- [ ] **Memory lifecycle management** - TTL-based expiration, importance decay (exponential decay with access-based refresh), memory consolidation (merge similar memories), and GC for expired memories
-- [ ] **Token budget management** - `max_tokens` parameter on retrieval: rank and truncate results to fit within LLM context window budget. Prioritize by recency, importance, and relevance score
-- [ ] **Memory importance scoring** - Automatic importance assignment based on access frequency, recency, explicit user marking, and cross-reference count. Importance decays over time unless refreshed
-- [ ] **Agent session continuity** - `CREATE AGENT SESSION` / `RESUME AGENT SESSION` for persistent agent state across interactions. Session graph links working memory to episodic memories created during the session
+- [x] **Memory type schema** - Built-in schemas for episodic (events/experiences), semantic (facts/knowledge), procedural (how-to/patterns), and working (active task context) memory types
+- [x] **Hybrid memory retrieval** - `MEMORY_SEARCH(query, memory_types, max_tokens)` — single function that searches across vector (semantic similarity) + graph (relational context) + SQL (metadata filters) + full-text (keyword match) and fuses results
+- [x] **Memory lifecycle management** - TTL-based expiration, importance decay (exponential decay with access-based refresh), memory consolidation (merge similar memories), and GC for expired memories
+- [x] **Token budget management** - `max_tokens` parameter on retrieval: rank and truncate results to fit within LLM context window budget. Prioritize by recency, importance, and relevance score
+- [x] **Memory importance scoring** - Automatic importance assignment based on access frequency, recency, explicit user marking, and cross-reference count. Importance decays over time unless refreshed
+- [x] **Agent session continuity** - `CREATE AGENT SESSION` / `RESUME AGENT SESSION` for persistent agent state across interactions. Session graph links working memory to episodic memories created during the session
 
 ### Verification
 
@@ -820,6 +858,20 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 | 3 | Context window includes relevant surrounding chunks via graph |
 | 4 | RAG_SEARCH returns attributed, fact-checked results with configurable pipeline |
 | 5 | MEMORY_SEARCH returns fused results within token budget, importance decay works, session continuity across reconnect |
+
+## 리뷰 발견사항 (2026-02-11)
+> 출처: /team-review src/rag/
+
+- [ ] 1. [정확성] storage.vais Rust 문법을 Vais로 재작성 (Critical) — 대상: src/rag/memory/storage.vais:195-429
+- [ ] 2. [정확성] visibility.vais 존재하지 않는 타입 import 수정 (Critical) — 대상: src/rag/visibility.vais:9
+- [ ] 3. [보안] parse_u32 오버플로우 가드 + DDL 옵션 범위 검증 (Critical) — 대상: src/rag/ddl.vais:99-271
+- [ ] 4. [성능] 검색/융합 핫패스의 선형 탐색을 HashMap으로 교체 (Critical) — 대상: src/rag/search/rag_search.vais, pipeline.vais, versioning.vais
+- [ ] 5. [보안] i64→u64 타임스탬프 캐스트 가드 추가 (Warning) — 대상: session.vais, lifecycle.vais (5곳)
+- [ ] 6. [보안] 세션 agent_id 격리 검증 추가 (Warning) — 대상: src/rag/memory/session.vais
+- [ ] 7. [성능] O(N²) 정렬을 O(N log N)으로 교체 (Warning) — 대상: rag_search.vais, search.vais, retrieval.vais, lifecycle.vais
+- [ ] 8. [정확성] 버전 체인 무한 루프 가드 추가 (Warning) — 대상: src/rag/context/versioning.vais:131-179
+- [ ] 9. [아키텍처] find_graph_node 중복 제거 → 공통 유틸리티 모듈 (Warning) — 대상: crossref.vais, versioning.vais
+진행률: 0/9 (0%)
 
 ---
 

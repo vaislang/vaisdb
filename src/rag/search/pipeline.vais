@@ -1,0 +1,472 @@
+# RAG Search Pipeline
+# Orchestrates the end-to-end RAG_SEARCH() execution:
+#   1. Parse query → RagSearchParams
+#   2. Dispatch to vector engine (HNSW search)
+#   3. Dispatch to full-text engine (BM25 search)
+#   4. Compute graph proximity boost (optional)
+#   5. Fuse scores via RagSearchExecutor
+#   6. Expand context windows (optional)
+#   7. Attach attribution metadata
+#   8. Return RagSearchResult stream
+#
+# This is the "coordinator" that wires all RAG sub-components together.
+
+U std/vec.Vec;
+U std/string.Str;
+U std/option.{Option, Some, None};
+U std/hashmap.HashMap;
+U storage/error.{VaisError};
+U rag/types.{
+    RagSearchResult, RagFusionConfig, ScoredChunk, ChunkInfo, DocumentInfo,
+    ENGINE_TAG_RAG, DEFAULT_VECTOR_WEIGHT, DEFAULT_FULLTEXT_WEIGHT,
+    DEFAULT_GRAPH_WEIGHT, DEFAULT_MEMORY_WEIGHT,
+    EDGE_TYPE_NEXT_CHUNK, EDGE_TYPE_SAME_SECTION,
+    err_rag_engine_closed, err_rag_chunk_not_found
+};
+U rag/search/rag_search.{
+    RagSearchParams, RagSearchExecutor, EngineResultSet,
+    err_rag_search_failed
+};
+
+# ============================================================================
+# PipelineStageStats — Per-stage execution statistics
+# ============================================================================
+
+S PipelineStageStats {
+    stage_name: Str,
+    items_in: u32,                  # Items fed into this stage
+    items_out: u32,                 # Items produced by this stage
+    time_us: u64,                   # Execution time in microseconds
+}
+
+X PipelineStageStats {
+    F new(name: Str) -> PipelineStageStats {
+        PipelineStageStats {
+            stage_name: name,
+            items_in: 0,
+            items_out: 0,
+            time_us: 0,
+        }
+    }
+}
+
+# ============================================================================
+# PipelineConfig — Configuration for the RAG search pipeline
+# ============================================================================
+
+S PipelineConfig {
+    enable_vector: bool,            # Enable vector similarity search
+    enable_fulltext: bool,          # Enable BM25 full-text search
+    enable_graph_boost: bool,       # Enable graph proximity boost
+    enable_context_expansion: bool, # Expand context windows
+    enable_attribution: bool,       # Attach source attribution
+    vector_top_k_multiplier: u32,  # Fetch more from vector for better fusion (default 3x)
+    fulltext_top_k_multiplier: u32, # Fetch more from fulltext for better fusion (default 3x)
+}
+
+X PipelineConfig {
+    F default() -> PipelineConfig {
+        PipelineConfig {
+            enable_vector: true,
+            enable_fulltext: true,
+            enable_graph_boost: true,
+            enable_context_expansion: true,
+            enable_attribution: true,
+            vector_top_k_multiplier: 3,
+            fulltext_top_k_multiplier: 3,
+        }
+    }
+
+    ## Create a vector-only config (for when no fulltext index exists)
+    F vector_only() -> PipelineConfig {
+        PipelineConfig {
+            enable_vector: true,
+            enable_fulltext: false,
+            enable_graph_boost: false,
+            enable_context_expansion: true,
+            enable_attribution: true,
+            vector_top_k_multiplier: 3,
+            fulltext_top_k_multiplier: 1,
+        }
+    }
+
+    ## Create a fulltext-only config (for when no embedding model set)
+    F fulltext_only() -> PipelineConfig {
+        PipelineConfig {
+            enable_vector: false,
+            enable_fulltext: true,
+            enable_graph_boost: false,
+            enable_context_expansion: true,
+            enable_attribution: true,
+            vector_top_k_multiplier: 1,
+            fulltext_top_k_multiplier: 3,
+        }
+    }
+}
+
+# ============================================================================
+# RagSearchPipeline — End-to-end RAG search orchestrator
+# ============================================================================
+
+S RagSearchPipeline {
+    config: PipelineConfig,
+    stage_stats: Vec<PipelineStageStats>,
+    is_open: bool,
+}
+
+X RagSearchPipeline {
+    F new(config: PipelineConfig) -> RagSearchPipeline {
+        RagSearchPipeline {
+            config,
+            stage_stats: Vec.new(),
+            is_open: false,
+        }
+    }
+
+    F default() -> RagSearchPipeline {
+        RagSearchPipeline.new(PipelineConfig.default())
+    }
+
+    ## Open the pipeline
+    F open(~self) {
+        self.is_open = true;
+        self.stage_stats = Vec.new();
+    }
+
+    ## Close the pipeline
+    F close(~self) {
+        self.is_open = false;
+    }
+
+    ## Execute the full RAG search pipeline
+    ##
+    ## This method coordinates all sub-engines. The actual engine calls
+    ## are delegated to the caller via the pre-computed result sets
+    ## (since the pipeline doesn't hold direct engine references).
+    ##
+    ## Inputs:
+    ##   params: Search parameters from RAG_SEARCH() SQL function
+    ##   vector_results: Pre-computed HNSW vector search results
+    ##   fulltext_results: Pre-computed BM25 search results
+    ##   graph_edges: NEXT_CHUNK edges for context navigation
+    ##   chunk_infos: Chunk metadata for text lookup and token counts
+    ##   doc_infos: Document metadata for attribution
+    ##
+    ## Returns: Ordered vector of RagSearchResult
+    F execute(
+        ~self,
+        params: &RagSearchParams,
+        vector_results: &EngineResultSet,
+        fulltext_results: &EngineResultSet,
+        graph_edges: &Vec<(u64, u64)>,
+        chunk_infos: &Vec<ChunkInfo>,
+        doc_infos: &Vec<DocumentInfo>,
+    ) -> Result<Vec<RagSearchResult>, VaisError> {
+        if !self.is_open {
+            return Err(err_rag_engine_closed());
+        }
+
+        # Stage 1: Graph proximity boost
+        ~graph_boost = self.compute_graph_boost(
+            vector_results, fulltext_results, graph_edges
+        );
+        self.record_stage("graph_boost", 0,
+            graph_boost.scored_chunks.len() as u32);
+
+        # Stage 2: Build chunk text lookup
+        ~chunk_text_lookup = build_chunk_text_lookup(chunk_infos);
+        self.record_stage("text_lookup", chunk_infos.len() as u32,
+            chunk_text_lookup.len() as u32);
+
+        # Stage 3: Score fusion via executor
+        ~executor = RagSearchExecutor.new(RagSearchParams.default(
+            params.query_text.clone(), params.top_k
+        ));
+        # Override fusion config from params
+        ~exec_params = RagSearchParams.from_config(
+            params.query_text.clone(),
+            &RagFusionConfig {
+                vector_weight: params.vector_weight,
+                fulltext_weight: params.fulltext_weight,
+                graph_weight: params.graph_weight,
+                memory_weight: params.memory_weight,
+                fusion_method: params.fusion_method,
+                rrf_k: params.rrf_k,
+                top_k: params.top_k,
+                max_context_tokens: params.max_context_tokens,
+            },
+        );
+        executor = RagSearchExecutor.new(exec_params);
+
+        executor.open(
+            vector_results, fulltext_results, &graph_boost,
+            &chunk_text_lookup,
+        )?;
+
+        ~fused_count = executor.result_count();
+        self.record_stage("fusion", 0, fused_count);
+
+        # Stage 4: Context expansion (optional)
+        ~results = Vec.new();
+        ~ri: u32 = 0;
+        W ri < executor.result_count() {
+            ~raw_results = executor.get_results();
+            ~r = raw_results.get(ri as usize);
+
+            ~enriched = RagSearchResult.new(
+                r.source_id, r.chunk_id, r.score, r.source_text.clone()
+            );
+            enriched = enriched.with_parent(r.parent_doc_id);
+
+            # Add context from neighboring chunks
+            if self.config.enable_context_expansion && params.include_context {
+                ~ctx = build_context_strings(
+                    r.chunk_id, graph_edges, chunk_infos,
+                    params.max_context_tokens
+                );
+                enriched = enriched.with_context(ctx.0, ctx.1);
+            }
+
+            # Add attribution metadata
+            if self.config.enable_attribution {
+                enriched = attach_attribution(enriched, r.chunk_id, chunk_infos, doc_infos);
+            }
+
+            results.push(enriched);
+            ri = ri + 1;
+        }
+
+        self.record_stage("context_expand", fused_count, results.len() as u32);
+
+        executor.close();
+
+        Ok(results)
+    }
+
+    ## Compute graph proximity boost scores
+    ## Chunks that are graph-neighbors of high-scoring vector/fulltext hits
+    ## get a boost proportional to the original score and graph distance
+    F compute_graph_boost(
+        &self,
+        vector_results: &EngineResultSet,
+        fulltext_results: &EngineResultSet,
+        graph_edges: &Vec<(u64, u64)>,
+    ) -> EngineResultSet {
+        ~boost_set = EngineResultSet.new(ENGINE_TAG_RAG);
+
+        if !self.config.enable_graph_boost {
+            return boost_set;
+        }
+
+        # For each high-scoring chunk (from vector + fulltext),
+        # find 1-hop neighbors via NEXT_CHUNK edges and assign decayed score
+        ~decay_factor: f64 = 0.5;
+
+        # Process vector results
+        ~vi: u32 = 0;
+        W vi < vector_results.scored_chunks.len() as u32 {
+            ~vc = vector_results.scored_chunks.get(vi as usize);
+            add_neighbor_boosts(
+                vc.chunk_id, vc.doc_id, vc.score * decay_factor,
+                graph_edges, &~boost_set
+            );
+            vi = vi + 1;
+        }
+
+        # Process fulltext results
+        ~fi: u32 = 0;
+        W fi < fulltext_results.scored_chunks.len() as u32 {
+            ~fc = fulltext_results.scored_chunks.get(fi as usize);
+            add_neighbor_boosts(
+                fc.chunk_id, fc.doc_id, fc.score * decay_factor,
+                graph_edges, &~boost_set
+            );
+            fi = fi + 1;
+        }
+
+        boost_set
+    }
+
+    ## Record a pipeline stage execution
+    F record_stage(~self, name: &Str, items_in: u32, items_out: u32) {
+        ~stat = PipelineStageStats.new(name.clone());
+        stat.items_in = items_in;
+        stat.items_out = items_out;
+        self.stage_stats.push(stat);
+    }
+
+    ## Get stage statistics for EXPLAIN ANALYZE
+    F get_stage_stats(&self) -> &Vec<PipelineStageStats> {
+        &self.stage_stats
+    }
+
+    ## Format pipeline stats as human-readable string
+    F format_stats(&self) -> Str {
+        ~result = "RAG Search Pipeline Stats:\n";
+        ~i: u32 = 0;
+        W i < self.stage_stats.len() as u32 {
+            ~s = self.stage_stats.get(i as usize);
+            result = "{result}  Stage {s.stage_name}: {s.items_in} → {s.items_out}\n";
+            i = i + 1;
+        }
+        result
+    }
+}
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+## Build chunk text lookup table from chunk info records
+F build_chunk_text_lookup(chunks: &Vec<ChunkInfo>) -> Vec<(u64, Str)> {
+    ~lookup = Vec.new();
+    ~i: u32 = 0;
+    W i < chunks.len() as u32 {
+        ~c = chunks.get(i as usize);
+        lookup.push((c.chunk_id, c.chunk_text.clone()));
+        i = i + 1;
+    }
+    lookup
+}
+
+## Add neighbor boost scores for a chunk's graph neighbors
+F add_neighbor_boosts(
+    chunk_id: u64,
+    doc_id: u64,
+    boost_score: f64,
+    edges: &Vec<(u64, u64)>,
+    result: &~EngineResultSet,
+) {
+    ~i: u32 = 0;
+    W i < edges.len() as u32 {
+        ~edge = edges.get(i as usize);
+        if edge.0 == chunk_id {
+            # Forward neighbor — add boost, check for duplicate
+            ~already = false;
+            ~j: u32 = 0;
+            W j < result.scored_chunks.len() as u32 {
+                if result.scored_chunks.get(j as usize).chunk_id == edge.1 {
+                    already = true;
+                    j = result.scored_chunks.len() as u32;  # Break
+                }
+                j = j + 1;
+            }
+            if !already {
+                result.add(edge.1, doc_id, boost_score);
+            }
+        }
+        if edge.1 == chunk_id {
+            # Backward neighbor — add boost
+            ~already = false;
+            ~j: u32 = 0;
+            W j < result.scored_chunks.len() as u32 {
+                if result.scored_chunks.get(j as usize).chunk_id == edge.0 {
+                    already = true;
+                    j = result.scored_chunks.len() as u32;  # Break
+                }
+                j = j + 1;
+            }
+            if !already {
+                result.add(edge.0, doc_id, boost_score);
+            }
+        }
+        i = i + 1;
+    }
+}
+
+## Build context strings (before, after) from graph neighbors
+## Returns (context_before, context_after) as concatenated chunk texts
+F build_context_strings(
+    chunk_id: u64,
+    graph_edges: &Vec<(u64, u64)>,
+    chunks: &Vec<ChunkInfo>,
+    max_tokens: u32,
+) -> (Str, Str) {
+    ~before = Str.new();
+    ~after = Str.new();
+    ~tokens_used: u32 = 0;
+
+    # Find previous chunk (edge target → chunk_id means source is previous)
+    ~prev_id: u64 = 0;
+    ~next_id: u64 = 0;
+    ~ei: u32 = 0;
+    W ei < graph_edges.len() as u32 {
+        ~edge = graph_edges.get(ei as usize);
+        if edge.1 == chunk_id && prev_id == 0 {
+            prev_id = edge.0;
+        }
+        if edge.0 == chunk_id && next_id == 0 {
+            next_id = edge.1;
+        }
+        ei = ei + 1;
+    }
+
+    # Get previous chunk text
+    if prev_id != 0 {
+        ~pi: u32 = 0;
+        W pi < chunks.len() as u32 {
+            ~c = chunks.get(pi as usize);
+            if c.chunk_id == prev_id {
+                if tokens_used + c.token_count <= max_tokens {
+                    before = c.chunk_text.clone();
+                    tokens_used = tokens_used + c.token_count;
+                }
+                pi = chunks.len() as u32;  # Break
+            }
+            pi = pi + 1;
+        }
+    }
+
+    # Get next chunk text
+    if next_id != 0 {
+        ~ni: u32 = 0;
+        W ni < chunks.len() as u32 {
+            ~c = chunks.get(ni as usize);
+            if c.chunk_id == next_id {
+                if tokens_used + c.token_count <= max_tokens {
+                    after = c.chunk_text.clone();
+                }
+                ni = chunks.len() as u32;  # Break
+            }
+            ni = ni + 1;
+        }
+    }
+
+    (before, after)
+}
+
+## Attach attribution metadata to a search result
+F attach_attribution(
+    ~result: RagSearchResult,
+    chunk_id: u64,
+    chunks: &Vec<ChunkInfo>,
+    docs: &Vec<DocumentInfo>,
+) -> RagSearchResult {
+    # Find chunk info
+    ~ci: u32 = 0;
+    W ci < chunks.len() as u32 {
+        ~c = chunks.get(ci as usize);
+        if c.chunk_id == chunk_id {
+            result.metadata.insert("position".clone(), "{c.position_in_doc}");
+            result.metadata.insert("token_count".clone(), "{c.token_count}");
+            result.metadata.insert("chunk_type".clone(), "{c.chunk_type}");
+
+            # Find parent document info
+            ~di: u32 = 0;
+            W di < docs.len() as u32 {
+                ~d = docs.get(di as usize);
+                if d.doc_id == c.parent_doc_id {
+                    result.metadata.insert("doc_title".clone(), d.title.clone());
+                    result.metadata.insert("doc_source".clone(), d.source_uri.clone());
+                    di = docs.len() as u32;  # Break
+                }
+                di = di + 1;
+            }
+
+            ci = chunks.len() as u32;  # Break
+        }
+        ci = ci + 1;
+    }
+
+    result
+}

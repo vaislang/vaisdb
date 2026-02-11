@@ -1,0 +1,456 @@
+# Hybrid Memory Retrieval
+# Combines document RAG search with agent memory search
+# Fuses results from RAG_SEARCH (chunks) and MEMORY_SEARCH (memories)
+# into a unified ranked result set for the LLM context window
+#
+# Retrieval strategies:
+# - DocumentFirst: RAG chunks prioritized, memories as supplemental context
+# - MemoryFirst: Agent memories prioritized, documents fill remaining budget
+# - Balanced: Equal weighting between documents and memories
+# - MemoryOnly: Only agent memories (no document search)
+
+U std/vec.Vec;
+U std/string.Str;
+U std/option.{Option, Some, None};
+U std/hashmap.HashMap;
+U storage/error.{VaisError};
+U rag/types.{
+    RagSearchResult, RagFusionConfig, ScoredChunk, ENGINE_TAG_RAG,
+    DEFAULT_MEMORY_WEIGHT,
+    err_rag_engine_closed
+};
+U rag/memory/search.{MemorySearchResult};
+
+# ============================================================================
+# Retrieval Strategy Constants
+# ============================================================================
+
+L STRATEGY_DOCUMENT_FIRST: u8 = 0;
+L STRATEGY_MEMORY_FIRST: u8 = 1;
+L STRATEGY_BALANCED: u8 = 2;
+L STRATEGY_MEMORY_ONLY: u8 = 3;
+
+# ============================================================================
+# HybridRetrievalConfig — Configuration for hybrid retrieval
+# ============================================================================
+
+S HybridRetrievalConfig {
+    strategy: u8,                   # STRATEGY_* constant
+    total_budget: u32,              # Total items to return
+    doc_budget_ratio: f64,          # Fraction allocated to documents [0, 1]
+    memory_budget_ratio: f64,       # Fraction allocated to memories [0, 1]
+    memory_weight_in_fusion: f64,   # Weight for memory scores in final fusion
+    dedup_by_content: bool,         # Remove near-duplicate content
+    min_score_threshold: f64,       # Minimum score to include in results
+}
+
+X HybridRetrievalConfig {
+    F default() -> HybridRetrievalConfig {
+        HybridRetrievalConfig {
+            strategy: STRATEGY_BALANCED,
+            total_budget: 10,
+            doc_budget_ratio: 0.6,
+            memory_budget_ratio: 0.4,
+            memory_weight_in_fusion: DEFAULT_MEMORY_WEIGHT,
+            dedup_by_content: false,
+            min_score_threshold: 0.0,
+        }
+    }
+
+    F document_first(total: u32) -> HybridRetrievalConfig {
+        HybridRetrievalConfig {
+            strategy: STRATEGY_DOCUMENT_FIRST,
+            total_budget: total,
+            doc_budget_ratio: 0.75,
+            memory_budget_ratio: 0.25,
+            memory_weight_in_fusion: 0.15,
+            dedup_by_content: false,
+            min_score_threshold: 0.0,
+        }
+    }
+
+    F memory_first(total: u32) -> HybridRetrievalConfig {
+        HybridRetrievalConfig {
+            strategy: STRATEGY_MEMORY_FIRST,
+            total_budget: total,
+            doc_budget_ratio: 0.25,
+            memory_budget_ratio: 0.75,
+            memory_weight_in_fusion: 0.5,
+            dedup_by_content: false,
+            min_score_threshold: 0.0,
+        }
+    }
+
+    F memory_only(total: u32) -> HybridRetrievalConfig {
+        HybridRetrievalConfig {
+            strategy: STRATEGY_MEMORY_ONLY,
+            total_budget: total,
+            doc_budget_ratio: 0.0,
+            memory_budget_ratio: 1.0,
+            memory_weight_in_fusion: 1.0,
+            dedup_by_content: false,
+            min_score_threshold: 0.0,
+        }
+    }
+
+    ## Calculate how many document results to fetch
+    F doc_budget(&self) -> u32 {
+        (self.total_budget as f64 * self.doc_budget_ratio) as u32
+    }
+
+    ## Calculate how many memory results to fetch
+    F memory_budget(&self) -> u32 {
+        (self.total_budget as f64 * self.memory_budget_ratio) as u32
+    }
+}
+
+# ============================================================================
+# HybridResult — A unified result from either documents or memories
+# ============================================================================
+
+S HybridResult {
+    source_type: u8,                # 0=document_chunk, 1=memory_entry
+    source_id: u64,                 # chunk_id or memory_id
+    doc_id: u64,                    # Parent document (0 for memories)
+    session_id: u64,                # Session (0 for document chunks)
+    content: Str,
+    score: f64,                     # Final fused score
+    original_rank: u32,             # Rank in source result set
+    metadata: HashMap<Str, Str>,
+}
+
+X HybridResult {
+    ## Create from a document RAG search result
+    F from_rag_result(result: &RagSearchResult, rank: u32) -> HybridResult {
+        HybridResult {
+            source_type: 0,
+            source_id: result.chunk_id,
+            doc_id: result.parent_doc_id,
+            session_id: 0,
+            content: result.source_text.clone(),
+            score: result.score,
+            original_rank: rank,
+            metadata: HashMap.new(),
+        }
+    }
+
+    ## Create from a memory search result
+    F from_memory_result(result: &MemorySearchResult, rank: u32) -> HybridResult {
+        HybridResult {
+            source_type: 1,
+            source_id: result.memory_id,
+            doc_id: 0,
+            session_id: result.session_id,
+            content: result.content.clone(),
+            score: result.score,
+            original_rank: rank,
+            metadata: HashMap.new(),
+        }
+    }
+
+    ## Check if this is a document chunk
+    F is_document(&self) -> bool {
+        self.source_type == 0
+    }
+
+    ## Check if this is a memory entry
+    F is_memory(&self) -> bool {
+        self.source_type == 1
+    }
+
+    ## Format source description
+    F source_description(&self) -> Str {
+        if self.source_type == 0 {
+            "doc:{self.doc_id}/chunk:{self.source_id}"
+        } else {
+            "memory:{self.source_id}/session:{self.session_id}"
+        }
+    }
+}
+
+# ============================================================================
+# HybridRetriever — Combines document and memory retrieval
+# ============================================================================
+
+S HybridRetriever {
+    config: HybridRetrievalConfig,
+}
+
+X HybridRetriever {
+    F new(config: HybridRetrievalConfig) -> HybridRetriever {
+        HybridRetriever { config }
+    }
+
+    F default() -> HybridRetriever {
+        HybridRetriever.new(HybridRetrievalConfig.default())
+    }
+
+    ## Merge document RAG results and memory results into a unified ranked list
+    ##
+    ## Strategy determines how budgets are allocated:
+    ## - DocumentFirst: doc results get priority positions, memories fill remainder
+    ## - MemoryFirst: memory results get priority, documents fill remainder
+    ## - Balanced: Interleave by score (RRF-like)
+    ## - MemoryOnly: Only memory results
+    F merge(
+        &self,
+        rag_results: &Vec<RagSearchResult>,
+        memory_results: &Vec<MemorySearchResult>,
+    ) -> Vec<HybridResult> {
+        M self.config.strategy {
+            0 => self.merge_document_first(rag_results, memory_results),
+            1 => self.merge_memory_first(rag_results, memory_results),
+            2 => self.merge_balanced(rag_results, memory_results),
+            3 => self.merge_memory_only(memory_results),
+            _ => self.merge_balanced(rag_results, memory_results),
+        }
+    }
+
+    ## Document-first: take doc_budget docs, then fill with memories
+    F merge_document_first(
+        &self,
+        rag_results: &Vec<RagSearchResult>,
+        memory_results: &Vec<MemorySearchResult>,
+    ) -> Vec<HybridResult> {
+        ~results = Vec.new();
+        ~doc_limit = self.config.doc_budget();
+        ~mem_limit = self.config.memory_budget();
+
+        # Add document results first
+        ~di: u32 = 0;
+        W di < rag_results.len() as u32 && di < doc_limit {
+            ~r = rag_results.get(di as usize);
+            results.push(HybridResult.from_rag_result(r, di + 1));
+            di = di + 1;
+        }
+
+        # Fill remaining with memory results
+        ~mi: u32 = 0;
+        W mi < memory_results.len() as u32 && mi < mem_limit {
+            ~m = memory_results.get(mi as usize);
+            results.push(HybridResult.from_memory_result(m, mi + 1));
+            mi = mi + 1;
+        }
+
+        # Trim to total budget
+        trim_to_budget(&~results, self.config.total_budget);
+        results
+    }
+
+    ## Memory-first: take memory_budget memories, then fill with docs
+    F merge_memory_first(
+        &self,
+        rag_results: &Vec<RagSearchResult>,
+        memory_results: &Vec<MemorySearchResult>,
+    ) -> Vec<HybridResult> {
+        ~results = Vec.new();
+        ~mem_limit = self.config.memory_budget();
+        ~doc_limit = self.config.doc_budget();
+
+        # Add memory results first
+        ~mi: u32 = 0;
+        W mi < memory_results.len() as u32 && mi < mem_limit {
+            ~m = memory_results.get(mi as usize);
+            results.push(HybridResult.from_memory_result(m, mi + 1));
+            mi = mi + 1;
+        }
+
+        # Fill remaining with document results
+        ~di: u32 = 0;
+        W di < rag_results.len() as u32 && di < doc_limit {
+            ~r = rag_results.get(di as usize);
+            results.push(HybridResult.from_rag_result(r, di + 1));
+            di = di + 1;
+        }
+
+        trim_to_budget(&~results, self.config.total_budget);
+        results
+    }
+
+    ## Balanced: interleave by score using RRF-style ranking
+    F merge_balanced(
+        &self,
+        rag_results: &Vec<RagSearchResult>,
+        memory_results: &Vec<MemorySearchResult>,
+    ) -> Vec<HybridResult> {
+        ~all = Vec.new();
+
+        # Normalize document scores and add
+        ~doc_norm = normalize_rag_scores(rag_results);
+        ~di: u32 = 0;
+        W di < doc_norm.len() as u32 {
+            ~entry = doc_norm.get(di as usize);
+            ~r = rag_results.get(di as usize);
+            ~hr = HybridResult.from_rag_result(r, di + 1);
+            hr.score = entry.1 * (1.0 - self.config.memory_weight_in_fusion);
+            all.push(hr);
+            di = di + 1;
+        }
+
+        # Normalize memory scores and add
+        ~mem_norm = normalize_memory_scores(memory_results);
+        ~mi: u32 = 0;
+        W mi < mem_norm.len() as u32 {
+            ~entry = mem_norm.get(mi as usize);
+            ~m = memory_results.get(mi as usize);
+            ~hr = HybridResult.from_memory_result(m, mi + 1);
+            hr.score = entry.1 * self.config.memory_weight_in_fusion;
+            all.push(hr);
+            mi = mi + 1;
+        }
+
+        # Sort by fused score descending
+        sort_hybrid_results_desc(&~all);
+
+        # Trim to budget
+        trim_to_budget(&~all, self.config.total_budget);
+
+        # Apply min_score threshold
+        if self.config.min_score_threshold > 0.0 {
+            ~filtered = Vec.new();
+            ~fi: u32 = 0;
+            W fi < all.len() as u32 {
+                if all.get(fi as usize).score >= self.config.min_score_threshold {
+                    ~hr = HybridResult {
+                        source_type: all.get(fi as usize).source_type,
+                        source_id: all.get(fi as usize).source_id,
+                        doc_id: all.get(fi as usize).doc_id,
+                        session_id: all.get(fi as usize).session_id,
+                        content: all.get(fi as usize).content.clone(),
+                        score: all.get(fi as usize).score,
+                        original_rank: all.get(fi as usize).original_rank,
+                        metadata: HashMap.new(),
+                    };
+                    filtered.push(hr);
+                }
+                fi = fi + 1;
+            }
+            return filtered;
+        }
+
+        all
+    }
+
+    ## Memory-only: return only memory results
+    F merge_memory_only(
+        &self,
+        memory_results: &Vec<MemorySearchResult>,
+    ) -> Vec<HybridResult> {
+        ~results = Vec.new();
+        ~limit = if self.config.total_budget < memory_results.len() as u32 {
+            self.config.total_budget
+        } else {
+            memory_results.len() as u32
+        };
+
+        ~i: u32 = 0;
+        W i < limit {
+            ~m = memory_results.get(i as usize);
+            results.push(HybridResult.from_memory_result(m, i + 1));
+            i = i + 1;
+        }
+        results
+    }
+
+    ## Format merged results as a context string for LLM
+    F format_context(&self, results: &Vec<HybridResult>) -> Str {
+        ~ctx = Str.new();
+        ~i: u32 = 0;
+        W i < results.len() as u32 {
+            ~r = results.get(i as usize);
+            ~source_tag = if r.is_document() { "[DOC]" } else { "[MEM]" };
+            ctx = "{ctx}{source_tag} ({r.source_description()}, score={r.score:.3}):\n{r.content}\n\n";
+            i = i + 1;
+        }
+        ctx
+    }
+}
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+## Normalize RAG search result scores to [0, 1]
+F normalize_rag_scores(results: &Vec<RagSearchResult>) -> Vec<(u64, f64)> {
+    if results.len() == 0 {
+        return Vec.new();
+    }
+
+    ~min_s = results.get(0).score;
+    ~max_s = results.get(0).score;
+    ~i: u32 = 1;
+    W i < results.len() as u32 {
+        ~s = results.get(i as usize).score;
+        if s < min_s { min_s = s; }
+        if s > max_s { max_s = s; }
+        i = i + 1;
+    }
+
+    ~range = max_s - min_s;
+    ~normalized = Vec.new();
+
+    ~j: u32 = 0;
+    W j < results.len() as u32 {
+        ~r = results.get(j as usize);
+        ~norm = if range < 0.000001 { 1.0 } else { (r.score - min_s) / range };
+        normalized.push((r.chunk_id, norm));
+        j = j + 1;
+    }
+    normalized
+}
+
+## Normalize memory search result scores to [0, 1]
+F normalize_memory_scores(results: &Vec<MemorySearchResult>) -> Vec<(u64, f64)> {
+    if results.len() == 0 {
+        return Vec.new();
+    }
+
+    ~min_s = results.get(0).score;
+    ~max_s = results.get(0).score;
+    ~i: u32 = 1;
+    W i < results.len() as u32 {
+        ~s = results.get(i as usize).score;
+        if s < min_s { min_s = s; }
+        if s > max_s { max_s = s; }
+        i = i + 1;
+    }
+
+    ~range = max_s - min_s;
+    ~normalized = Vec.new();
+
+    ~j: u32 = 0;
+    W j < results.len() as u32 {
+        ~r = results.get(j as usize);
+        ~norm = if range < 0.000001 { 1.0 } else { (r.score - min_s) / range };
+        normalized.push((r.memory_id, norm));
+        j = j + 1;
+    }
+    normalized
+}
+
+## Sort hybrid results by score descending (selection sort)
+F sort_hybrid_results_desc(results: &~Vec<HybridResult>) {
+    ~n = results.len() as u32;
+    ~i: u32 = 0;
+    W i < n {
+        ~max_idx = i;
+        ~j = i + 1;
+        W j < n {
+            if results.get(j as usize).score > results.get(max_idx as usize).score {
+                max_idx = j;
+            }
+            j = j + 1;
+        }
+        if max_idx != i {
+            results.swap(i as usize, max_idx as usize);
+        }
+        i = i + 1;
+    }
+}
+
+## Trim results to budget (in-place truncation)
+F trim_to_budget(results: &~Vec<HybridResult>, budget: u32) {
+    W results.len() as u32 > budget {
+        results.pop();
+    }
+}

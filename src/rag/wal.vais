@@ -1,0 +1,507 @@
+# RAG WAL Integration
+# WAL record types for RAG engine operations (0x50-0x55)
+# Provides log helpers + redo/undo handlers
+
+U std/bytes.{ByteBuffer};
+U std/vec.Vec;
+U std/string.Str;
+U storage/error.{VaisError};
+U storage/wal/group_commit.{GroupCommitManager};
+U rag/types.{ChunkMeta, DocumentMeta, MemoryEntry};
+
+# WAL Record Type Constants
+L RAG_CHUNK_INSERT: u8 = 0x50;
+L RAG_CHUNK_DELETE: u8 = 0x51;
+L RAG_DOCUMENT_INSERT: u8 = 0x52;
+L RAG_DOCUMENT_DELETE: u8 = 0x53;
+L RAG_EMBEDDING_UPDATE: u8 = 0x54;
+L RAG_MEMORY_WRITE: u8 = 0x55;
+
+# Engine type constant
+L ENGINE_TYPE_RAG: u8 = 0x05;
+
+# FILE_ID for RAG
+L FILE_ID_RAG: u8 = 5;
+
+## RAG Chunk Insert Payload
+## Records insertion of a new chunk into the RAG engine
+S RagChunkInsertPayload {
+    chunk_id: u64,
+    doc_id: u64,
+    page_id: u32,
+    chunk_offset: u32,
+    chunk_length: u32,
+}
+
+X RagChunkInsertPayload {
+    ## Serialize payload to bytes
+    F serialize(&self) -> Vec<u8> {
+        ~buf = ByteBuffer.new(32);
+        buf.put_u64_le(self.chunk_id);
+        buf.put_u64_le(self.doc_id);
+        buf.put_u32_le(self.page_id);
+        buf.put_u32_le(self.chunk_offset);
+        buf.put_u32_le(self.chunk_length);
+        buf.into_vec()
+    }
+
+    ## Deserialize payload from bytes
+    F deserialize(data: &[u8]) -> Result<RagChunkInsertPayload, VaisError> {
+        if data.len() < 28 {
+            return Err(VaisError.WalCorruption(
+                Str.from("RagChunkInsertPayload: insufficient data")
+            ));
+        }
+        ~buf = ByteBuffer.from_bytes(data);
+        L chunk_id = buf.get_u64_le();
+        L doc_id = buf.get_u64_le();
+        L page_id = buf.get_u32_le();
+        L chunk_offset = buf.get_u32_le();
+        L chunk_length = buf.get_u32_le();
+        Ok(RagChunkInsertPayload { chunk_id, doc_id, page_id, chunk_offset, chunk_length })
+    }
+}
+
+## RAG Chunk Delete Payload
+## Records deletion (expiration) of a chunk
+S RagChunkDeletePayload {
+    chunk_id: u64,
+    doc_id: u64,
+}
+
+X RagChunkDeletePayload {
+    F serialize(&self) -> Vec<u8> {
+        ~buf = ByteBuffer.new(16);
+        buf.put_u64_le(self.chunk_id);
+        buf.put_u64_le(self.doc_id);
+        buf.into_vec()
+    }
+
+    F deserialize(data: &[u8]) -> Result<RagChunkDeletePayload, VaisError> {
+        if data.len() < 16 {
+            return Err(VaisError.WalCorruption(
+                Str.from("RagChunkDeletePayload: insufficient data")
+            ));
+        }
+        ~buf = ByteBuffer.from_bytes(data);
+        L chunk_id = buf.get_u64_le();
+        L doc_id = buf.get_u64_le();
+        Ok(RagChunkDeletePayload { chunk_id, doc_id })
+    }
+}
+
+## RAG Document Insert Payload
+## Records insertion of a new document
+S RagDocumentInsertPayload {
+    doc_id: u64,
+    page_id: u32,
+    chunk_count: u32,
+    total_length: u64,
+}
+
+X RagDocumentInsertPayload {
+    F serialize(&self) -> Vec<u8> {
+        ~buf = ByteBuffer.new(24);
+        buf.put_u64_le(self.doc_id);
+        buf.put_u32_le(self.page_id);
+        buf.put_u32_le(self.chunk_count);
+        buf.put_u64_le(self.total_length);
+        buf.into_vec()
+    }
+
+    F deserialize(data: &[u8]) -> Result<RagDocumentInsertPayload, VaisError> {
+        if data.len() < 24 {
+            return Err(VaisError.WalCorruption(
+                Str.from("RagDocumentInsertPayload: insufficient data")
+            ));
+        }
+        ~buf = ByteBuffer.from_bytes(data);
+        L doc_id = buf.get_u64_le();
+        L page_id = buf.get_u32_le();
+        L chunk_count = buf.get_u32_le();
+        L total_length = buf.get_u64_le();
+        Ok(RagDocumentInsertPayload { doc_id, page_id, chunk_count, total_length })
+    }
+}
+
+## RAG Document Delete Payload
+## Records deletion (expiration) of a document
+S RagDocumentDeletePayload {
+    doc_id: u64,
+}
+
+X RagDocumentDeletePayload {
+    F serialize(&self) -> Vec<u8> {
+        ~buf = ByteBuffer.new(8);
+        buf.put_u64_le(self.doc_id);
+        buf.into_vec()
+    }
+
+    F deserialize(data: &[u8]) -> Result<RagDocumentDeletePayload, VaisError> {
+        if data.len() < 8 {
+            return Err(VaisError.WalCorruption(
+                Str.from("RagDocumentDeletePayload: insufficient data")
+            ));
+        }
+        ~buf = ByteBuffer.from_bytes(data);
+        L doc_id = buf.get_u64_le();
+        Ok(RagDocumentDeletePayload { doc_id })
+    }
+}
+
+## RAG Embedding Update Payload
+## Records update of chunk embedding vector
+S RagEmbeddingUpdatePayload {
+    chunk_id: u64,
+    vector_page_id: u32,
+    vector_offset: u32,
+    dimension: u16,
+}
+
+X RagEmbeddingUpdatePayload {
+    F serialize(&self) -> Vec<u8> {
+        ~buf = ByteBuffer.new(18);
+        buf.put_u64_le(self.chunk_id);
+        buf.put_u32_le(self.vector_page_id);
+        buf.put_u32_le(self.vector_offset);
+        buf.put_u16_le(self.dimension);
+        buf.into_vec()
+    }
+
+    F deserialize(data: &[u8]) -> Result<RagEmbeddingUpdatePayload, VaisError> {
+        if data.len() < 18 {
+            return Err(VaisError.WalCorruption(
+                Str.from("RagEmbeddingUpdatePayload: insufficient data")
+            ));
+        }
+        ~buf = ByteBuffer.from_bytes(data);
+        L chunk_id = buf.get_u64_le();
+        L vector_page_id = buf.get_u32_le();
+        L vector_offset = buf.get_u32_le();
+        L dimension = buf.get_u16_le();
+        Ok(RagEmbeddingUpdatePayload { chunk_id, vector_page_id, vector_offset, dimension })
+    }
+}
+
+## RAG Memory Write Payload
+## Records write to conversation memory store
+S RagMemoryWritePayload {
+    memory_id: u64,
+    page_id: u32,
+    memory_offset: u32,
+    memory_length: u32,
+    turn_index: u32,
+}
+
+X RagMemoryWritePayload {
+    F serialize(&self) -> Vec<u8> {
+        ~buf = ByteBuffer.new(24);
+        buf.put_u64_le(self.memory_id);
+        buf.put_u32_le(self.page_id);
+        buf.put_u32_le(self.memory_offset);
+        buf.put_u32_le(self.memory_length);
+        buf.put_u32_le(self.turn_index);
+        buf.into_vec()
+    }
+
+    F deserialize(data: &[u8]) -> Result<RagMemoryWritePayload, VaisError> {
+        if data.len() < 24 {
+            return Err(VaisError.WalCorruption(
+                Str.from("RagMemoryWritePayload: insufficient data")
+            ));
+        }
+        ~buf = ByteBuffer.from_bytes(data);
+        L memory_id = buf.get_u64_le();
+        L page_id = buf.get_u32_le();
+        L memory_offset = buf.get_u32_le();
+        L memory_length = buf.get_u32_le();
+        L turn_index = buf.get_u32_le();
+        Ok(RagMemoryWritePayload { memory_id, page_id, memory_offset, memory_length, turn_index })
+    }
+}
+
+## RAG WAL Manager
+## Handles logging of RAG operations and dispatches redo/undo
+S RagWalManager {
+    gcm: &GroupCommitManager,
+}
+
+X RagWalManager {
+    ## Create new RAG WAL manager
+    F new(gcm: &GroupCommitManager) -> RagWalManager {
+        RagWalManager { gcm }
+    }
+
+    ## Log a chunk insertion
+    F log_chunk_insert(
+        &self,
+        txn_id: u64,
+        chunk_id: u64,
+        doc_id: u64,
+        page_id: u32,
+        chunk_offset: u32,
+        chunk_length: u32,
+    ) -> Result<u64, VaisError> {
+        L payload = RagChunkInsertPayload {
+            chunk_id,
+            doc_id,
+            page_id,
+            chunk_offset,
+            chunk_length,
+        };
+        L bytes = payload.serialize();
+        self.gcm.append_record(
+            txn_id,
+            RAG_CHUNK_INSERT,
+            ENGINE_TYPE_RAG,
+            bytes.as_slice()
+        )
+    }
+
+    ## Log a chunk deletion
+    F log_chunk_delete(
+        &self,
+        txn_id: u64,
+        chunk_id: u64,
+        doc_id: u64,
+    ) -> Result<u64, VaisError> {
+        L payload = RagChunkDeletePayload { chunk_id, doc_id };
+        L bytes = payload.serialize();
+        self.gcm.append_record(
+            txn_id,
+            RAG_CHUNK_DELETE,
+            ENGINE_TYPE_RAG,
+            bytes.as_slice()
+        )
+    }
+
+    ## Log a document insertion
+    F log_document_insert(
+        &self,
+        txn_id: u64,
+        doc_id: u64,
+        page_id: u32,
+        chunk_count: u32,
+        total_length: u64,
+    ) -> Result<u64, VaisError> {
+        L payload = RagDocumentInsertPayload {
+            doc_id,
+            page_id,
+            chunk_count,
+            total_length,
+        };
+        L bytes = payload.serialize();
+        self.gcm.append_record(
+            txn_id,
+            RAG_DOCUMENT_INSERT,
+            ENGINE_TYPE_RAG,
+            bytes.as_slice()
+        )
+    }
+
+    ## Log a document deletion
+    F log_document_delete(
+        &self,
+        txn_id: u64,
+        doc_id: u64,
+    ) -> Result<u64, VaisError> {
+        L payload = RagDocumentDeletePayload { doc_id };
+        L bytes = payload.serialize();
+        self.gcm.append_record(
+            txn_id,
+            RAG_DOCUMENT_DELETE,
+            ENGINE_TYPE_RAG,
+            bytes.as_slice()
+        )
+    }
+
+    ## Log an embedding update
+    F log_embedding_update(
+        &self,
+        txn_id: u64,
+        chunk_id: u64,
+        vector_page_id: u32,
+        vector_offset: u32,
+        dimension: u16,
+    ) -> Result<u64, VaisError> {
+        L payload = RagEmbeddingUpdatePayload {
+            chunk_id,
+            vector_page_id,
+            vector_offset,
+            dimension,
+        };
+        L bytes = payload.serialize();
+        self.gcm.append_record(
+            txn_id,
+            RAG_EMBEDDING_UPDATE,
+            ENGINE_TYPE_RAG,
+            bytes.as_slice()
+        )
+    }
+
+    ## Log a memory write
+    F log_memory_write(
+        &self,
+        txn_id: u64,
+        memory_id: u64,
+        page_id: u32,
+        memory_offset: u32,
+        memory_length: u32,
+        turn_index: u32,
+    ) -> Result<u64, VaisError> {
+        L payload = RagMemoryWritePayload {
+            memory_id,
+            page_id,
+            memory_offset,
+            memory_length,
+            turn_index,
+        };
+        L bytes = payload.serialize();
+        self.gcm.append_record(
+            txn_id,
+            RAG_MEMORY_WRITE,
+            ENGINE_TYPE_RAG,
+            bytes.as_slice()
+        )
+    }
+
+    ## Dispatch redo operation for RAG record
+    F dispatch_rag_redo(
+        &self,
+        record_type: u8,
+        payload: &[u8],
+    ) -> Result<(), VaisError> {
+        M record_type {
+            RAG_CHUNK_INSERT => {
+                L p = RagChunkInsertPayload.deserialize(payload)?;
+                self.redo_chunk_insert(&p)
+            }
+            RAG_CHUNK_DELETE => {
+                L p = RagChunkDeletePayload.deserialize(payload)?;
+                self.redo_chunk_delete(&p)
+            }
+            RAG_DOCUMENT_INSERT => {
+                L p = RagDocumentInsertPayload.deserialize(payload)?;
+                self.redo_document_insert(&p)
+            }
+            RAG_DOCUMENT_DELETE => {
+                L p = RagDocumentDeletePayload.deserialize(payload)?;
+                self.redo_document_delete(&p)
+            }
+            RAG_EMBEDDING_UPDATE => {
+                L p = RagEmbeddingUpdatePayload.deserialize(payload)?;
+                self.redo_embedding_update(&p)
+            }
+            RAG_MEMORY_WRITE => {
+                L p = RagMemoryWritePayload.deserialize(payload)?;
+                self.redo_memory_write(&p)
+            }
+            _ => {
+                Err(VaisError.WalCorruption(
+                    Str.from("Unknown RAG WAL record type")
+                ))
+            }
+        }
+    }
+
+    ## Dispatch undo operation for RAG record
+    F dispatch_rag_undo(
+        &self,
+        record_type: u8,
+        payload: &[u8],
+    ) -> Result<(), VaisError> {
+        M record_type {
+            RAG_CHUNK_INSERT => {
+                L p = RagChunkInsertPayload.deserialize(payload)?;
+                self.undo_chunk_insert(&p)
+            }
+            RAG_CHUNK_DELETE => {
+                L p = RagChunkDeletePayload.deserialize(payload)?;
+                self.undo_chunk_delete(&p)
+            }
+            RAG_DOCUMENT_INSERT => {
+                L p = RagDocumentInsertPayload.deserialize(payload)?;
+                self.undo_document_insert(&p)
+            }
+            RAG_DOCUMENT_DELETE => {
+                L p = RagDocumentDeletePayload.deserialize(payload)?;
+                self.undo_document_delete(&p)
+            }
+            RAG_EMBEDDING_UPDATE => {
+                L p = RagEmbeddingUpdatePayload.deserialize(payload)?;
+                self.undo_embedding_update(&p)
+            }
+            RAG_MEMORY_WRITE => {
+                L p = RagMemoryWritePayload.deserialize(payload)?;
+                self.undo_memory_write(&p)
+            }
+            _ => {
+                Err(VaisError.WalCorruption(
+                    Str.from("Unknown RAG WAL record type")
+                ))
+            }
+        }
+    }
+
+    # Redo handlers (to be implemented with storage integration)
+    F redo_chunk_insert(&self, payload: &RagChunkInsertPayload) -> Result<(), VaisError> {
+        # TODO: Restore chunk to page
+        Ok(())
+    }
+
+    F redo_chunk_delete(&self, payload: &RagChunkDeletePayload) -> Result<(), VaisError> {
+        # TODO: Mark chunk as deleted
+        Ok(())
+    }
+
+    F redo_document_insert(&self, payload: &RagDocumentInsertPayload) -> Result<(), VaisError> {
+        # TODO: Restore document metadata
+        Ok(())
+    }
+
+    F redo_document_delete(&self, payload: &RagDocumentDeletePayload) -> Result<(), VaisError> {
+        # TODO: Mark document as deleted
+        Ok(())
+    }
+
+    F redo_embedding_update(&self, payload: &RagEmbeddingUpdatePayload) -> Result<(), VaisError> {
+        # TODO: Restore embedding vector
+        Ok(())
+    }
+
+    F redo_memory_write(&self, payload: &RagMemoryWritePayload) -> Result<(), VaisError> {
+        # TODO: Restore memory entry
+        Ok(())
+    }
+
+    # Undo handlers (to be implemented with storage integration)
+    F undo_chunk_insert(&self, payload: &RagChunkInsertPayload) -> Result<(), VaisError> {
+        # TODO: Remove chunk from page
+        Ok(())
+    }
+
+    F undo_chunk_delete(&self, payload: &RagChunkDeletePayload) -> Result<(), VaisError> {
+        # TODO: Unmark chunk deletion
+        Ok(())
+    }
+
+    F undo_document_insert(&self, payload: &RagDocumentInsertPayload) -> Result<(), VaisError> {
+        # TODO: Remove document metadata
+        Ok(())
+    }
+
+    F undo_document_delete(&self, payload: &RagDocumentDeletePayload) -> Result<(), VaisError> {
+        # TODO: Unmark document deletion
+        Ok(())
+    }
+
+    F undo_embedding_update(&self, payload: &RagEmbeddingUpdatePayload) -> Result<(), VaisError> {
+        # TODO: Restore previous embedding
+        Ok(())
+    }
+
+    F undo_memory_write(&self, payload: &RagMemoryWritePayload) -> Result<(), VaisError> {
+        # TODO: Remove memory entry
+        Ok(())
+    }
+}

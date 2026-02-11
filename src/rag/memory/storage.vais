@@ -1,0 +1,445 @@
+## Agent Memory Storage
+##
+## Physical storage layer for AI agent memories.
+## Provides CRUD operations with:
+## - Importance scoring and decay
+## - TTL-based expiration
+## - Session-based retrieval
+## - Type-based filtering
+##
+## Integrates with SQL tables, vector indexes, and graph nodes
+## for hybrid memory retrieval.
+
+U std/vec.Vec
+U std/string.Str
+U std/option.{Option, Some, None}
+U std/hashmap.HashMap
+U std/result.{Result, Ok, Err}
+U storage/error.{VaisError}
+U rag/types.{
+    LABEL_MEMORY, EDGE_TYPE_RELATED_TO, EDGE_TYPE_TEMPORAL_NEXT,
+    EDGE_TYPE_SESSION_CONTEXT,
+    err_rag_memory_not_found, err_rag_engine_closed
+}
+U rag/memory/types.{MemoryEntry, MemoryConfig, ImportanceScorer}
+
+## In-memory storage for agent memories
+##
+## Production implementation would delegate to:
+## - SQL tables for structured metadata
+## - Vector indexes for semantic search
+## - Graph nodes for relationships
+S MemoryStore {
+    memories: Vec<MemoryEntry>,
+    config: MemoryConfig,
+    scorer: ImportanceScorer,
+    next_memory_id: u64,
+    is_open: bool,
+}
+
+X MemoryStore {
+    ## Create new memory store with configuration
+    F new(config: MemoryConfig) -> MemoryStore {
+        MemoryStore {
+            memories: Vec.new(),
+            config: config,
+            scorer: ImportanceScorer.default(),
+            next_memory_id: 1,
+            is_open: false,
+        }
+    }
+
+    ## Open the memory store
+    F open(~self) {
+        self.is_open = true
+    }
+
+    ## Close the memory store
+    F close(~self) {
+        self.is_open = false
+    }
+
+    ## Insert a new memory entry
+    ##
+    ## Returns the assigned memory_id.
+    ## Initial importance is calculated based on explicit metadata
+    ## or defaults to 0.5.
+    F insert_memory(
+        ~self,
+        memory_type: u8,
+        content: Str,
+        embedding: Vec<f32>,
+        metadata: HashMap<Str, Str>,
+        session_id: u64,
+        current_time: i64,
+    ) -> Result<u64, VaisError> {
+        if !self.is_open {
+            return Err(err_rag_engine_closed())
+        }
+
+        ~memory_id = self.next_memory_id
+        self.next_memory_id = self.next_memory_id + 1
+
+        # Get TTL for this memory type
+        ~ttl_seconds = self.config.get_default_ttl(memory_type)
+
+        # Check for explicit importance in metadata
+        ~explicit_importance = metadata.get(&Str.from("importance"))
+        ~initial_importance = M explicit_importance {
+            Some(val) => {
+                M val.parse_f64() {
+                    Ok(imp) => {
+                        if imp < 0.0 {
+                            0.5
+                        } else if imp > 1.0 {
+                            1.0
+                        } else {
+                            imp
+                        }
+                    }
+                    Err(_) => 0.5,
+                }
+            }
+            None => 0.5,
+        }
+
+        ~entry = MemoryEntry.new(
+            memory_id,
+            memory_type,
+            content,
+            embedding,
+            metadata,
+            initial_importance,
+            session_id,
+            current_time,
+            ttl_seconds,
+        )
+
+        self.memories.push(entry)
+
+        Ok(memory_id)
+    }
+
+    ## Get memory by ID (immutable reference)
+    F get_memory(&self, memory_id: u64) -> Option<&MemoryEntry> {
+        E entry in &self.memories {
+            if entry.memory_id == memory_id {
+                return Some(entry)
+            }
+        }
+        None
+    }
+
+    ## Get memory by ID (mutable reference)
+    F get_memory_mut(~self, memory_id: u64) -> Option<&mut MemoryEntry> {
+        E entry in &mut self.memories {
+            if entry.memory_id == memory_id {
+                return Some(entry)
+            }
+        }
+        None
+    }
+
+    ## Update importance score for a memory
+    F update_importance(
+        ~self,
+        memory_id: u64,
+        new_importance: f64,
+    ) -> Result<(), VaisError> {
+        if !self.is_open {
+            return Err(err_rag_engine_closed())
+        }
+
+        M self.get_memory_mut(memory_id) {
+            Some(entry) => {
+                ~clamped = new_importance
+                if clamped < 0.0 {
+                    clamped = 0.0
+                }
+                if clamped > 1.0 {
+                    clamped = 1.0
+                }
+                entry.importance = clamped
+                Ok(())
+            }
+            None => Err(err_rag_memory_not_found()),
+        }
+    }
+
+    ## Touch a memory (update last_accessed, increment access_count)
+    F touch_memory(
+        ~self,
+        memory_id: u64,
+        current_time: i64,
+    ) -> Result<(), VaisError> {
+        if !self.is_open {
+            return Err(err_rag_engine_closed())
+        }
+
+        M self.get_memory_mut(memory_id) {
+            Some(entry) => {
+                entry.touch(current_time)
+                Ok(())
+            }
+            None => Err(err_rag_memory_not_found()),
+        }
+    }
+
+    ## Delete a memory by ID
+    F delete_memory(~self, memory_id: u64) -> Result<(), VaisError> {
+        if !self.is_open {
+            return Err(err_rag_engine_closed())
+        }
+
+        ~index = None
+        E (i, entry) in self.memories.iter().enumerate() {
+            if entry.memory_id == memory_id {
+                index = Some(i)
+                break
+            }
+        }
+
+        M index {
+            Some(i) => {
+                self.memories.remove(i)
+                Ok(())
+            }
+            None => Err(err_rag_memory_not_found()),
+        }
+    }
+
+    ## Delete all expired memories
+    ##
+    ## Returns count of deleted memories.
+    F delete_expired(~self, current_time: i64) -> u32 {
+        if !self.is_open {
+            return 0
+        }
+
+        ~to_delete = Vec.new()
+
+        E (i, entry) in self.memories.iter().enumerate() {
+            if entry.is_expired(current_time) {
+                to_delete.push(i)
+            }
+        }
+
+        # Remove in reverse order to maintain indices
+        ~deleted_count = to_delete.len() as u32
+        E i in to_delete.iter().rev() {
+            self.memories.remove(*i)
+        }
+
+        deleted_count
+    }
+
+    ## Get all memories of a specific type
+    F get_memories_by_type(&self, memory_type: u8) -> Vec<&MemoryEntry> {
+        ~result = Vec.new()
+
+        E entry in &self.memories {
+            if entry.memory_type == memory_type {
+                result.push(entry)
+            }
+        }
+
+        result
+    }
+
+    ## Get all memories for a specific session
+    F get_memories_by_session(&self, session_id: u64) -> Vec<&MemoryEntry> {
+        ~result = Vec.new()
+
+        E entry in &self.memories {
+            if entry.session_id == session_id {
+                result.push(entry)
+            }
+        }
+
+        result
+    }
+
+    ## Apply importance decay to all memories
+    ##
+    ## Uses exponential decay based on time since last access.
+    ## Decay half-life is taken from config.
+    F apply_decay(~self, current_time: i64) {
+        if !self.is_open {
+            return
+        }
+
+        ~half_life = self.config.decay_half_life
+
+        E entry in &mut self.memories {
+            ~elapsed = (current_time - entry.last_accessed) as f64
+            if elapsed > 0.0 {
+                entry.importance = self.scorer.decay_importance(
+                    entry.importance,
+                    elapsed,
+                    half_life,
+                )
+            }
+        }
+    }
+
+    ## Get total memory count
+    F memory_count(&self) -> u64 {
+        self.memories.len() as u64
+    }
+
+    ## Get memory count by type
+    F memory_count_by_type(&self, memory_type: u8) -> u32 {
+        ~count = 0u32
+
+        E entry in &self.memories {
+            if entry.memory_type == memory_type {
+                count = count + 1
+            }
+        }
+
+        count
+    }
+
+    ## Get memories sorted by importance (descending)
+    F get_top_memories(&self, limit: u32, current_time: i64) -> Vec<&MemoryEntry> {
+        ~result = Vec.new()
+
+        # Collect all memories with decayed importance
+        ~scored = Vec.new()
+        E entry in &self.memories {
+            ~importance = entry.importance_with_decay(
+                current_time,
+                self.config.decay_half_life,
+            )
+            scored.push((entry, importance))
+        }
+
+        # Sort by importance (descending)
+        scored.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1).unwrap_or(std.cmp.Ordering.Equal)
+        })
+
+        # Take top limit
+        ~count = 0u32
+        E (entry, _importance) in scored {
+            if count >= limit {
+                break
+            }
+            result.push(entry)
+            count = count + 1
+        }
+
+        result
+    }
+
+    ## Get memories above importance threshold
+    F get_important_memories(
+        &self,
+        threshold: f64,
+        current_time: i64,
+    ) -> Vec<&MemoryEntry> {
+        ~result = Vec.new()
+
+        E entry in &self.memories {
+            ~importance = entry.importance_with_decay(
+                current_time,
+                self.config.decay_half_life,
+            )
+            if importance >= threshold {
+                result.push(entry)
+            }
+        }
+
+        result
+    }
+
+    ## Consolidate working memories above threshold into episodic memories
+    ##
+    ## This would typically:
+    ## 1. Find high-importance working memories
+    ## 2. Merge/summarize related working memories
+    ## 3. Create new episodic memory entries
+    ## 4. Delete original working memories
+    ##
+    ## Returns count of working memories consolidated.
+    F consolidate_working_memories(
+        ~self,
+        current_time: i64,
+    ) -> Result<u32, VaisError> {
+        if !self.is_open {
+            return Err(err_rag_engine_closed())
+        }
+
+        ~threshold = self.config.consolidation_threshold
+
+        # Find high-importance working memories
+        ~candidates = Vec.new()
+        E entry in &self.memories {
+            if entry.memory_type == MEMORY_TYPE_WORKING {
+                ~importance = entry.importance_with_decay(
+                    current_time,
+                    self.config.decay_half_life,
+                )
+                if importance >= threshold {
+                    candidates.push(entry.memory_id)
+                }
+            }
+        }
+
+        # TODO: In production, this would:
+        # - Group related working memories by session/topic
+        # - Use LLM to summarize/merge content
+        # - Create episodic memory with combined context
+        # - Transfer graph relationships
+        # For now, just return count of candidates
+        Ok(candidates.len() as u32)
+    }
+
+    ## Evict least important working memories if over limit
+    ##
+    ## Returns count of evicted memories.
+    F evict_working_memories(
+        ~self,
+        current_time: i64,
+    ) -> u32 {
+        if !self.is_open {
+            return 0
+        }
+
+        ~max_entries = self.config.max_working_memory_entries as usize
+
+        # Count working memories
+        ~working_memories = Vec.new()
+        E entry in &self.memories {
+            if entry.memory_type == MEMORY_TYPE_WORKING {
+                ~importance = entry.importance_with_decay(
+                    current_time,
+                    self.config.decay_half_life,
+                )
+                working_memories.push((entry.memory_id, importance))
+            }
+        }
+
+        if working_memories.len() <= max_entries {
+            return 0
+        }
+
+        # Sort by importance (ascending, so least important first)
+        working_memories.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1).unwrap_or(std.cmp.Ordering.Equal)
+        })
+
+        # Evict excess memories
+        ~to_evict = working_memories.len() - max_entries
+        ~evicted = 0u32
+
+        E (memory_id, _importance) in working_memories.iter().take(to_evict) {
+            M self.delete_memory(*memory_id) {
+                Ok(_) => evicted = evicted + 1,
+                Err(_) => {},
+            }
+        }
+
+        evicted
+    }
+}
