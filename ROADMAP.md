@@ -47,7 +47,7 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 | 5 | Full-Text Engine | ✅ Complete | 16/16 (100%) |
 | 6 | Hybrid Query Planner | ✅ Complete | 20/20 (100%) |
 | 7 | RAG & AI-Native Features | ✅ Complete | 10/10 (100%) |
-| 8 | Server & Client | ⏳ Planned | 0/20 (0%) |
+| 8 | Server & Client | 🔄 In Progress | 0/10 (0%) |
 | 9 | Production Operations | ⏳ Planned | 0/24 (0%) |
 | 10 | Security & Multi-tenancy | ⏳ Planned | 0/16 (0%) |
 
@@ -886,9 +886,24 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ## Phase 8: Server & Client
 
-> **Status**: ⏳ Planned
+> **Status**: 🔄 In Progress
 > **Dependency**: Phase 6 (Hybrid Query Planner)
 > **Goal**: Client/server mode + embedded mode + wire protocol
+
+### 구현 작업 (2026-02-12)
+모드: 개별선택
+- [x] 1. Types & Config 정의 (Sonnet 위임) ✅
+  생성: src/server/types.vais (711줄), src/server/config.vais (647줄)
+- [ ] 2. Wire Protocol 직렬화 (Opus 직접) [blockedBy: 1]
+- [ ] 3. Connection & Session 관리 (Opus 직접) [blockedBy: 1]
+- [ ] 4. Authentication & TLS (Sonnet 위임) [blockedBy: 1]
+- [ ] 5. Query Handler & Executor Bridge (Opus 직접) [blockedBy: 2, 3]
+- [ ] 6. TCP Server & Accept Loop (Opus 직접) [blockedBy: 3, 4, 5]
+- [ ] 7. Embedded Mode (Sonnet 위임) [blockedBy: 5]
+- [ ] 8. Data Import/Export - COPY (Sonnet 위임) [blockedBy: 5]
+- [ ] 9. Vais Native Client (Sonnet 위임) [blockedBy: 2]
+- [ ] 10. Server 통합 & main.vais 갱신 (Opus 직접) [blockedBy: 6, 7, 8, 9]
+진행률: 1/10 (10%)
 
 ### Stage 1 - Wire Protocol
 
