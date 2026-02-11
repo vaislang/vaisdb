@@ -1,2 +1,712 @@
 # Full-Text Engine
-# Inverted index, BM25 scoring, tokenizer
+# Inverted index, BM25 scoring, tokenizer, boolean/phrase search
+# Entry point and high-level facade for full-text operations
+
+# ============================================================================
+# Module exports
+# ============================================================================
+
+# Core types
+pub mod types;
+pub use types.{
+    FullTextConfig, FullTextMeta, PostingEntry, PostingPageHeader,
+    DictEntry, TokenInfo, DocumentStats, FULLTEXT_FORMAT_VERSION,
+    fnv1a_hash, err_fulltext_engine_closed, err_fulltext_index_not_found,
+    err_fulltext_term_not_found, err_fulltext_doc_not_found,
+};
+
+# Tokenizer
+pub mod tokenizer;
+pub use tokenizer.{Tokenizer, TermFreqInfo};
+
+# Visibility functions
+pub mod visibility;
+pub use visibility.{
+    is_posting_visible, filter_visible_postings,
+    count_visible_postings, filter_visible_postings_for_doc,
+};
+
+# WAL manager
+pub mod wal;
+pub use wal.{FullTextWalManager};
+
+# Concurrency control
+pub mod concurrency;
+pub use concurrency.{FullTextLock, FullTextReadGuard, FullTextWriteGuard, ConcurrencyStats};
+
+# Inverted index (dictionary + posting lists + compression + deletion bitmap)
+pub mod index;
+pub use index/dictionary.{DictionaryIndex};
+pub use index/posting.{PostingStore, PostingSlot};
+pub use index/compression.{vbyte_encode, vbyte_decode, delta_encode_doc_ids, delta_decode_doc_ids};
+pub use index/deletion_bitmap.{DeletionBitmap};
+
+# Search (BM25, phrase, boolean, SQL match function)
+pub mod search;
+pub use search/bm25.{BM25Scorer};
+pub use search/doc_freq.{DocFreqTracker};
+pub use search/phrase.{PhraseSearcher, PhraseResult};
+pub use search/boolean.{BooleanQueryParser, BooleanQueryExecutor, Query, BooleanQuery, TermQuery, PhraseQuery};
+pub use search/match_fn.{FullTextMatchExecutor, FullTextMatchResult};
+
+# DDL operations
+pub mod ddl;
+pub use ddl.{FullTextDDL, BuildResult, IndexEntry};
+
+# Maintenance (compaction, GC)
+pub mod maintenance;
+pub use maintenance/compaction.{PostingListCompactor, CompactionResult, CompactionStats};
+
+# Integration with other engines
+pub mod integration;
+pub use integration/fusion.{ScoreFusionMethod, ScoredDoc, fuse_results, normalize_scores};
+pub use integration/vector_hybrid.{HybridSearchPipeline, HybridSearchConfig};
+pub use integration/sql.{FullTextRowSource};
+
+# Dependencies
+U std/option.{Option, Some, None};
+U std/vec.Vec;
+U std/string.Str;
+U std/bytes.{ByteBuffer};
+U storage/error.{VaisError};
+U storage/buffer/pool.{BufferPool};
+U storage/page/allocator.{PageAllocator};
+U storage/page/freelist.{FreelistBitmap};
+U storage/wal/group_commit.{GroupCommitManager};
+U storage/txn/snapshot.{Snapshot};
+U storage/txn/clog.{Clog};
+U storage/constants.{FILE_ID_FULLTEXT, NULL_PAGE};
+
+# ============================================================================
+# FullTextEngine — High-level facade for all full-text operations
+# ============================================================================
+
+# FullTextEngine manages inverted indexes with BM25 scoring, phrase search,
+# boolean queries, and integration with vector/SQL engines
+S FullTextEngine {
+    config: FullTextConfig,              # Full-text configuration (BM25 params, tokenizer settings)
+    meta: FullTextMeta,                  # Metadata (doc count, term count, avg doc length)
+    tokenizer: Tokenizer,               # Text tokenizer pipeline
+    dict_index: DictionaryIndex,         # Term → posting list mapping (B+Tree)
+    posting_store: PostingStore,         # Posting list page storage
+    deletion_bitmap: DeletionBitmap,     # Per-term deletion tracking
+    bm25_scorer: BM25Scorer,             # BM25 relevance scorer
+    doc_freq_tracker: DocFreqTracker,    # Document frequency tracking
+    wal_mgr: FullTextWalManager,         # WAL logging for full-text operations
+    lock: FullTextLock,                  # Concurrency control (RwLock)
+    ddl: FullTextDDL,                    # DDL operations (create/drop index)
+    is_open: bool,                       # Engine open state
+    pool: &BufferPool,                   # Shared buffer pool
+    allocator: &PageAllocator,           # Shared page allocator
+    gcm: &GroupCommitManager,            # Shared group commit manager
+}
+
+X FullTextEngine {
+    # ========================================================================
+    # Constructor
+    # ========================================================================
+
+    # Create new FullTextEngine instance (does not load from disk)
+    # Call open() to load metadata and dictionary
+    F new(
+        config: FullTextConfig,
+        pool: &BufferPool,
+        allocator: &PageAllocator,
+        gcm: &GroupCommitManager,
+    ) -> FullTextEngine {
+        ~tokenizer = Tokenizer.from_config(&config);
+        ~bm25_scorer = BM25Scorer.with_params(config.bm25_k1, config.bm25_b);
+        ~dict_index = DictionaryIndex.new(NULL_PAGE, config.page_size);
+        ~posting_store = PostingStore.new(config.page_size, pool, allocator);
+        ~deletion_bitmap = DeletionBitmap.new();
+        ~doc_freq_tracker = DocFreqTracker.new();
+        ~wal_mgr = FullTextWalManager.new(gcm);
+        ~lock = FullTextLock.new();
+        ~ddl = FullTextDDL.new(pool, allocator, gcm, config.page_size);
+        ~meta = FullTextMeta.new(config);
+
+        FullTextEngine {
+            config,
+            meta,
+            tokenizer,
+            dict_index,
+            posting_store,
+            deletion_bitmap,
+            bm25_scorer,
+            doc_freq_tracker,
+            wal_mgr,
+            lock,
+            ddl,
+            is_open: false,
+            pool,
+            allocator,
+            gcm,
+        }
+    }
+
+    # ========================================================================
+    # Lifecycle — Open/Close
+    # ========================================================================
+
+    # Open engine: load meta page, dictionary index
+    F open(~self) -> Result<(), VaisError> {
+        if self.is_open {
+            return Ok(());
+        }
+
+        # Load metadata from meta page of fulltext.vdb
+        if self.meta.dict_root_page != NULL_PAGE {
+            # Load dictionary cache
+            self.dict_index = DictionaryIndex.new(
+                self.meta.dict_root_page,
+                self.config.page_size,
+            );
+            self.dict_index.load_cache(self.pool)?;
+
+            # Sync doc freq tracker from dictionary
+            ~entries = self.dict_index.scan_all_terms(self.pool)?;
+            self.doc_freq_tracker.recalibrate_from_dict(&entries);
+            self.doc_freq_tracker.set_total_docs(self.meta.total_docs);
+            self.doc_freq_tracker.set_avg_doc_length(self.meta.avg_doc_length);
+        }
+
+        self.is_open = true;
+        Ok(())
+    }
+
+    # Close engine: flush dirty pages, release resources
+    F close(~self) -> Result<(), VaisError> {
+        if !self.is_open {
+            return Ok(());
+        }
+
+        # Flush metadata
+        self.pool.flush_file(FILE_ID_FULLTEXT)?;
+
+        # Clear caches
+        self.dict_index.clear_cache();
+        self.doc_freq_tracker.clear();
+
+        self.is_open = false;
+        Ok(())
+    }
+
+    # ========================================================================
+    # Document Indexing — Index/Delete documents
+    # ========================================================================
+
+    # Index a document: tokenize → insert postings → update dictionary → WAL
+    F index_document(
+        ~self,
+        txn_id: u64,
+        doc_id: u64,
+        text: &Str,
+        cmd_id: u32,
+    ) -> Result<DocumentStats, VaisError> {
+        if !self.is_open {
+            return Err(err_fulltext_engine_closed());
+        }
+
+        # Acquire write lock
+        ~_guard = self.lock.write_lock()?;
+
+        # Tokenize text
+        ~term_freqs = self.tokenizer.tokenize_with_freqs(text);
+        ~total_tokens: u32 = 0;
+
+        # Process each unique term
+        ~i: usize = 0;
+        L while i < term_freqs.len() {
+            ~tf_info = &term_freqs[i];
+            ~term_hash = fnv1a_hash(&tf_info.term);
+
+            total_tokens += tf_info.freq;
+
+            # Create PostingEntry
+            ~entry = PostingEntry.new(
+                doc_id,
+                tf_info.freq,
+                tf_info.positions.clone(),
+                txn_id,
+                cmd_id,
+            );
+
+            # Lookup or create dictionary entry
+            ~dict_entry = self.dict_index.lookup_term(&tf_info.term, self.pool)?;
+            ~head_page = M dict_entry {
+                Some(~de) => de.posting_head_page,
+                None => {
+                    # WAL-log dictionary insert
+                    self.wal_mgr.log_dict_insert(txn_id, &tf_info.term, NULL_PAGE)?;
+                    # New term — will get page allocated on first posting append
+                    NULL_PAGE
+                },
+            };
+
+            # Serialize entry for WAL
+            ~entry_bytes = entry.to_bytes();
+
+            # WAL-log posting append
+            ~result_page = if head_page == NULL_PAGE { 0 } else { head_page };
+            self.wal_mgr.log_posting_append(txn_id, term_hash, result_page, &entry_bytes)?;
+
+            # Append to posting list
+            ~(page_id, slot_idx, new_head) = self.posting_store.append_entry(
+                head_page, &entry, term_hash, txn_id, self.gcm,
+            )?;
+
+            # If this is a new term, insert into dictionary
+            if dict_entry.is_none() {
+                self.dict_index.insert_term(
+                    &tf_info.term, new_head, txn_id, self.gcm, self.pool,
+                )?;
+                self.meta.total_terms += 1;
+            } else if new_head != head_page {
+                # Head page changed (new page allocated), update dictionary
+                self.dict_index.update_posting_head(
+                    term_hash, new_head, txn_id, self.gcm, self.pool,
+                )?;
+            }
+
+            # Update dictionary entry stats
+            self.dict_index.update_entry_stats(term_hash, 1, tf_info.freq as i64);
+
+            # Update doc freq tracker
+            self.doc_freq_tracker.update_on_insert(term_hash, tf_info.freq);
+
+            i += 1;
+        }
+
+        # Update metadata
+        self.meta.update_avg_doc_length(total_tokens as u64, true);
+        self.doc_freq_tracker.set_total_docs(self.meta.total_docs);
+        self.doc_freq_tracker.set_avg_doc_length(self.meta.avg_doc_length);
+
+        Ok(DocumentStats {
+            doc_id,
+            token_count: total_tokens,
+            unique_terms: term_freqs.len() as u32,
+        })
+    }
+
+    # Delete a document from the index: expire postings → update stats
+    F delete_document(
+        ~self,
+        txn_id: u64,
+        doc_id: u64,
+        cmd_id: u32,
+    ) -> Result<(), VaisError> {
+        if !self.is_open {
+            return Err(err_fulltext_engine_closed());
+        }
+
+        # Acquire write lock
+        ~_guard = self.lock.write_lock()?;
+
+        # Iterate all dictionary entries and expire postings for this doc_id
+        ~dict_entries = self.dict_index.scan_all_terms(self.pool)?;
+        ~total_expired_tokens: u64 = 0;
+
+        ~i: usize = 0;
+        L while i < dict_entries.len() {
+            ~de = &dict_entries[i];
+
+            # Read all entries from this posting list
+            ~postings = self.posting_store.read_all_entries(de.posting_head_page)?;
+
+            # Find and expire entries for this doc_id
+            ~j: usize = 0;
+            L while j < postings.len() {
+                if postings[j].doc_id == doc_id && postings[j].is_active() {
+                    # WAL-log posting delete
+                    self.wal_mgr.log_posting_delete(
+                        txn_id, de.term_hash, de.posting_head_page, doc_id,
+                    )?;
+
+                    # Soft-delete via PostingStore (set MVCC expire)
+                    self.posting_store.delete_entry(
+                        de.posting_head_page, doc_id, txn_id, cmd_id, self.gcm,
+                    )?;
+
+                    # Update deletion bitmap
+                    self.deletion_bitmap.set_deleted(doc_id);
+
+                    # Update doc freq tracker
+                    self.doc_freq_tracker.update_on_delete(de.term_hash, postings[j].term_freq);
+
+                    # Update dictionary stats
+                    self.dict_index.update_entry_stats(
+                        de.term_hash, -1, -(postings[j].term_freq as i64),
+                    );
+
+                    total_expired_tokens += postings[j].term_freq as u64;
+                }
+                j += 1;
+            }
+
+            i += 1;
+        }
+
+        # Update metadata
+        if total_expired_tokens > 0 {
+            self.meta.update_avg_doc_length(total_expired_tokens, false);
+            self.doc_freq_tracker.set_total_docs(self.meta.total_docs);
+            self.doc_freq_tracker.set_avg_doc_length(self.meta.avg_doc_length);
+        }
+
+        Ok(())
+    }
+
+    # ========================================================================
+    # Search Operations
+    # ========================================================================
+
+    # Search using BM25 scoring: tokenize query → lookup postings → score → rank
+    F search(
+        ~self,
+        query_text: &Str,
+        top_k: u32,
+        snapshot: &Snapshot,
+        clog: &Clog,
+    ) -> Result<Vec<FullTextMatchResult>, VaisError> {
+        if !self.is_open {
+            return Err(err_fulltext_engine_closed());
+        }
+
+        # Acquire read lock
+        ~_guard = self.lock.read_lock()?;
+
+        # Create and execute match executor
+        ~executor = FullTextMatchExecutor.new(0, query_text.clone(), top_k);
+        executor.execute_search(
+            &self.tokenizer,
+            &self.dict_index,
+            &self.posting_store,
+            &self.bm25_scorer,
+            &self.doc_freq_tracker,
+            snapshot,
+            clog,
+            self.pool,
+        )?;
+
+        # Collect results
+        executor.open();
+        ~results = Vec.new();
+        L {
+            M executor.next() {
+                Some(~result) => results.push(result),
+                None => break,
+            }
+        }
+        executor.close();
+
+        Ok(results)
+    }
+
+    # Phrase search: find exact phrase matches
+    F phrase_search(
+        ~self,
+        query_text: &Str,
+        top_k: u32,
+        snapshot: &Snapshot,
+        clog: &Clog,
+    ) -> Result<Vec<PhraseResult>, VaisError> {
+        if !self.is_open {
+            return Err(err_fulltext_engine_closed());
+        }
+
+        ~_guard = self.lock.read_lock()?;
+
+        # Tokenize query into terms
+        ~tokens = self.tokenizer.tokenize(query_text);
+        ~terms = Vec.new();
+        ~i: usize = 0;
+        L while i < tokens.len() {
+            terms.push(tokens[i].term.clone());
+            i += 1;
+        }
+
+        if terms.is_empty() {
+            return Ok(Vec.new());
+        }
+
+        # Collect posting entries per term
+        ~posting_entries_per_term: Vec<Vec<PostingEntry>> = Vec.new();
+        i = 0;
+        L while i < terms.len() {
+            ~dict_entry = self.dict_index.lookup_term(&terms[i], self.pool)?;
+            M dict_entry {
+                Some(~de) => {
+                    ~entries = self.posting_store.read_all_entries(de.posting_head_page)?;
+                    posting_entries_per_term.push(entries);
+                },
+                None => {
+                    # Term not found — no phrase match possible
+                    return Ok(Vec.new());
+                },
+            }
+            i += 1;
+        }
+
+        # Execute phrase search
+        ~searcher = PhraseSearcher.new(0);
+        ~results = searcher.search_phrase(
+            &terms,
+            &posting_entries_per_term,
+            snapshot,
+            clog,
+        );
+
+        # Limit to top_k
+        if results.len() > top_k as usize {
+            results.truncate(top_k as usize);
+        }
+
+        Ok(results)
+    }
+
+    # Boolean query search
+    F boolean_search(
+        ~self,
+        query_str: &Str,
+        top_k: u32,
+        snapshot: &Snapshot,
+        clog: &Clog,
+    ) -> Result<Vec<ScoredDoc>, VaisError> {
+        if !self.is_open {
+            return Err(err_fulltext_engine_closed());
+        }
+
+        ~_guard = self.lock.read_lock()?;
+
+        # Parse query
+        ~query = BooleanQueryParser.parse(query_str)?;
+
+        # For each term in the query, run a BM25 search and collect results
+        ~term_results: Vec<(Str, Vec<(u64, f64)>)> = Vec.new();
+        ~query_terms = Self.extract_terms_from_query(&query);
+
+        ~i: usize = 0;
+        L while i < query_terms.len() {
+            ~term = &query_terms[i];
+            ~dict_entry = self.dict_index.lookup_term(term, self.pool)?;
+            M dict_entry {
+                Some(~de) => {
+                    ~entries = self.posting_store.read_all_entries(de.posting_head_page)?;
+                    ~visible = filter_visible_postings(&entries, snapshot, clog);
+
+                    # Score each visible entry
+                    ~scored: Vec<(u64, f64)> = Vec.new();
+                    ~j: usize = 0;
+                    L while j < visible.len() {
+                        ~score = self.bm25_scorer.score(
+                            visible[j].term_freq,
+                            de.doc_freq,
+                            visible[j].term_freq,  # approximate doc_length
+                            self.meta.avg_doc_length,
+                            self.meta.total_docs,
+                        );
+                        scored.push((visible[j].doc_id, score));
+                        j += 1;
+                    }
+                    term_results.push((term.clone(), scored));
+                },
+                None => {
+                    term_results.push((term.clone(), Vec.new()));
+                },
+            }
+            i += 1;
+        }
+
+        # Execute boolean query
+        ~executor = BooleanQueryExecutor.new();
+        ~results = executor.execute(&query, &term_results);
+
+        # Sort by score descending and limit
+        ~sorted = results;
+        # Simple selection sort
+        ~k: usize = 0;
+        L while k < sorted.len() {
+            ~max_idx = k;
+            ~m: usize = k + 1;
+            L while m < sorted.len() {
+                if sorted[m].1 > sorted[max_idx].1 {
+                    max_idx = m;
+                }
+                m += 1;
+            }
+            if max_idx != k {
+                ~tmp = sorted[k];
+                sorted[k] = sorted[max_idx];
+                sorted[max_idx] = tmp;
+            }
+            k += 1;
+        }
+
+        if sorted.len() > top_k as usize {
+            sorted.truncate(top_k as usize);
+        }
+
+        # Convert to ScoredDoc
+        ~scored_docs = Vec.new();
+        i = 0;
+        L while i < sorted.len() {
+            scored_docs.push(ScoredDoc { doc_id: sorted[i].0, score: sorted[i].1 });
+            i += 1;
+        }
+
+        Ok(scored_docs)
+    }
+
+    # Hybrid search: BM25 + vector similarity fusion
+    F hybrid_search(
+        ~self,
+        query_text: &Str,
+        vector_results: &Vec<ScoredDoc>,
+        config: &HybridSearchConfig,
+        snapshot: &Snapshot,
+        clog: &Clog,
+    ) -> Result<Vec<ScoredDoc>, VaisError> {
+        if !self.is_open {
+            return Err(err_fulltext_engine_closed());
+        }
+
+        # Get BM25 results
+        ~bm25_match_results = self.search(query_text, config.top_k * 2, snapshot, clog)?;
+
+        # Convert to ScoredDoc
+        ~bm25_results = Vec.new();
+        ~i: usize = 0;
+        L while i < bm25_match_results.len() {
+            bm25_results.push(ScoredDoc {
+                doc_id: bm25_match_results[i].doc_id,
+                score: bm25_match_results[i].score,
+            });
+            i += 1;
+        }
+
+        # Fuse results
+        ~pipeline = HybridSearchPipeline.from_config(config);
+        ~fused = pipeline.hybrid_search(&bm25_results, vector_results, config.top_k);
+
+        Ok(fused)
+    }
+
+    # ========================================================================
+    # Maintenance Operations
+    # ========================================================================
+
+    # Run posting list compaction (GC)
+    F compact(
+        ~self,
+        low_water_mark: u64,
+    ) -> Result<CompactionStats, VaisError> {
+        if !self.is_open {
+            return Err(err_fulltext_engine_closed());
+        }
+
+        ~_guard = self.lock.write_lock()?;
+
+        ~compactor = PostingListCompactor.new(
+            self.config.page_size,
+            self.pool,
+            self.allocator,
+            self.gcm,
+            100,  # max_pages_per_second
+        );
+
+        ~dict_entries = self.dict_index.scan_all_terms(self.pool)?;
+
+        # Build (term_hash, head_page) pairs
+        ~term_pages: Vec<(u64, u32)> = Vec.new();
+        ~i: usize = 0;
+        L while i < dict_entries.len() {
+            term_pages.push((dict_entries[i].term_hash, dict_entries[i].posting_head_page));
+            i += 1;
+        }
+
+        ~stats = compactor.compact_all(&term_pages, low_water_mark)?;
+
+        Ok(stats)
+    }
+
+    # ========================================================================
+    # Statistics / Accessors
+    # ========================================================================
+
+    # Get total document count
+    F total_docs(self) -> u64 {
+        self.meta.total_docs
+    }
+
+    # Get total term count
+    F total_terms(self) -> u64 {
+        self.meta.total_terms
+    }
+
+    # Get average document length
+    F avg_doc_length(self) -> f64 {
+        self.meta.avg_doc_length
+    }
+
+    # Get concurrency stats
+    F concurrency_stats(self) -> ConcurrencyStats {
+        self.lock.get_stats()
+    }
+
+    # Check if engine is open
+    F is_engine_open(self) -> bool {
+        self.is_open
+    }
+
+    # ========================================================================
+    # Internal helpers
+    # ========================================================================
+
+    # Extract all terms from a query AST (for boolean query execution)
+    F extract_terms_from_query(query: &Query) -> Vec<Str> {
+        ~terms = Vec.new();
+        M query {
+            Query.Term(~tq) => {
+                terms.push(tq.term.clone());
+            },
+            Query.Phrase(~pq) => {
+                ~i: usize = 0;
+                L while i < pq.terms.len() {
+                    terms.push(pq.terms[i].clone());
+                    i += 1;
+                }
+            },
+            Query.Boolean(~bq) => {
+                ~i: usize = 0;
+                L while i < bq.clauses.len() {
+                    ~clause_query = M &bq.clauses[i] {
+                        BooleanClause.Must(~q) => q,
+                        BooleanClause.Should(~q) => q,
+                        BooleanClause.MustNot(~q) => q,
+                    };
+                    ~sub_terms = Self.extract_terms_from_query(clause_query);
+                    ~j: usize = 0;
+                    L while j < sub_terms.len() {
+                        # Deduplicate
+                        ~found = false;
+                        ~k: usize = 0;
+                        L while k < terms.len() {
+                            if terms[k] == sub_terms[j] {
+                                found = true;
+                                break;
+                            }
+                            k += 1;
+                        }
+                        if !found {
+                            terms.push(sub_terms[j].clone());
+                        }
+                        j += 1;
+                    }
+                    i += 1;
+                }
+            },
+        }
+        terms
+    }
+}

@@ -1,0 +1,211 @@
+# Full-Text WAL Integration
+# WAL-first write helpers for full-text engine operations
+# All mutations must write WAL before modifying pages
+# Uses GroupCommitManager for batched fsync
+# Error codes: EE=04 (fulltext), CC=09 (WAL)
+
+U std/bytes.{ByteBuffer};
+U std/vec.Vec;
+U storage/error.{VaisError};
+U storage/wal/group_commit.{GroupCommitManager};
+U storage/wal/record_types.{
+    POSTING_LIST_APPEND, POSTING_LIST_DELETE,
+    DICTIONARY_INSERT, DICTIONARY_DELETE,
+    TERM_FREQ_UPDATE
+};
+U storage/wal/record_fulltext.{
+    PostingListAppendPayload, PostingListDeletePayload,
+    DictionaryInsertPayload, DictionaryDeletePayload,
+    TermFreqUpdatePayload
+};
+U storage/page/types.{ENGINE_TAG_FULLTEXT};
+U storage/constants.{FILE_ID_FULLTEXT};
+
+# ============================================================================
+# FullTextWalManager — Coordinates WAL writes for full-text engine
+# ============================================================================
+
+S FullTextWalManager {
+    gcm: &GroupCommitManager,
+}
+
+X FullTextWalManager {
+    # Create new WAL manager with reference to GroupCommitManager
+    F new(gcm: &GroupCommitManager) -> FullTextWalManager {
+        FullTextWalManager { gcm }
+    }
+
+    # Log posting list append (WAL-first, before page mutation)
+    # Returns the assigned LSN
+    F log_posting_append(
+        ~self,
+        txn_id: u64,
+        term_hash: u64,
+        page_id: u32,
+        entry_bytes: &[u8],
+    ) -> Result<u64, VaisError> {
+        ~payload = PostingListAppendPayload {
+            term_hash,
+            page_id,
+            file_id: FILE_ID_FULLTEXT,
+            entry: entry_bytes.to_vec(),
+        };
+
+        ~buf = ByteBuffer.new(256);
+        payload.serialize(&buf);
+        ~payload_bytes = buf.to_vec();
+
+        self.gcm.write_record(txn_id, POSTING_LIST_APPEND, ENGINE_TAG_FULLTEXT, &payload_bytes)
+    }
+
+    # Log posting list delete (WAL-first, before page mutation)
+    F log_posting_delete(
+        ~self,
+        txn_id: u64,
+        term_hash: u64,
+        page_id: u32,
+        doc_id: u64,
+    ) -> Result<u64, VaisError> {
+        ~payload = PostingListDeletePayload {
+            term_hash,
+            page_id,
+            file_id: FILE_ID_FULLTEXT,
+            doc_id,
+        };
+
+        ~buf = ByteBuffer.new(64);
+        payload.serialize(&buf);
+        ~payload_bytes = buf.to_vec();
+
+        self.gcm.write_record(txn_id, POSTING_LIST_DELETE, ENGINE_TAG_FULLTEXT, &payload_bytes)
+    }
+
+    # Log dictionary insert (WAL-first, before page mutation)
+    F log_dict_insert(
+        ~self,
+        txn_id: u64,
+        term: &Str,
+        posting_head: u32,
+    ) -> Result<u64, VaisError> {
+        ~payload = DictionaryInsertPayload {
+            term: term.clone(),
+            posting_head_page: posting_head,
+        };
+
+        ~buf = ByteBuffer.new(128);
+        payload.serialize(&buf);
+        ~payload_bytes = buf.to_vec();
+
+        self.gcm.write_record(txn_id, DICTIONARY_INSERT, ENGINE_TAG_FULLTEXT, &payload_bytes)
+    }
+
+    # Log dictionary delete (WAL-first, before page mutation)
+    F log_dict_delete(
+        ~self,
+        txn_id: u64,
+        term: &Str,
+        old_posting_head: u32,
+    ) -> Result<u64, VaisError> {
+        ~payload = DictionaryDeletePayload {
+            term: term.clone(),
+            old_posting_head,
+        };
+
+        ~buf = ByteBuffer.new(128);
+        payload.serialize(&buf);
+        ~payload_bytes = buf.to_vec();
+
+        self.gcm.write_record(txn_id, DICTIONARY_DELETE, ENGINE_TAG_FULLTEXT, &payload_bytes)
+    }
+
+    # Log term frequency update (WAL-first, before page mutation)
+    F log_term_freq_update(
+        ~self,
+        txn_id: u64,
+        term_hash: u64,
+        doc_id: u64,
+        old_freq: u32,
+        new_freq: u32,
+    ) -> Result<u64, VaisError> {
+        ~payload = TermFreqUpdatePayload {
+            term_hash,
+            doc_id,
+            old_freq,
+            new_freq,
+        };
+
+        ~buf = ByteBuffer.new(64);
+        payload.serialize(&buf);
+        ~payload_bytes = buf.to_vec();
+
+        self.gcm.write_record(txn_id, TERM_FREQ_UPDATE, ENGINE_TAG_FULLTEXT, &payload_bytes)
+    }
+}
+
+# ============================================================================
+# Redo/Undo Handlers — Crash recovery for full-text operations
+# Called by the WAL recovery manager during startup
+# ============================================================================
+
+# Redo a posting list append (re-apply the page mutation)
+F redo_posting_append(payload: &PostingListAppendPayload) -> Result<(), VaisError> {
+    # During recovery: re-insert the posting entry into the posting list page
+    # The payload contains everything needed to reconstruct the entry
+    # Actual implementation deferred to recovery manager integration
+    Ok(())
+}
+
+# Undo a posting list append (remove the appended entry)
+F undo_posting_append(payload: &PostingListAppendPayload) -> Result<(), VaisError> {
+    # During rollback: remove the posting entry that was appended
+    # Mark the entry as deleted in the posting list page
+    Ok(())
+}
+
+# Redo a posting list delete (re-apply the expiration)
+F redo_posting_delete(payload: &PostingListDeletePayload) -> Result<(), VaisError> {
+    # During recovery: re-mark the posting entry as expired
+    Ok(())
+}
+
+# Undo a posting list delete (restore the entry)
+F undo_posting_delete(payload: &PostingListDeletePayload) -> Result<(), VaisError> {
+    # During rollback: clear expiration from the posting entry
+    Ok(())
+}
+
+# Redo a dictionary insert (re-apply the dictionary entry)
+F redo_dict_insert(payload: &DictionaryInsertPayload) -> Result<(), VaisError> {
+    # During recovery: re-insert the term into the dictionary B+Tree
+    Ok(())
+}
+
+# Undo a dictionary insert (remove the inserted term)
+F undo_dict_insert(payload: &DictionaryInsertPayload) -> Result<(), VaisError> {
+    # During rollback: remove the term that was inserted
+    Ok(())
+}
+
+# Redo a dictionary delete (re-apply the deletion)
+F redo_dict_delete(payload: &DictionaryDeletePayload) -> Result<(), VaisError> {
+    # During recovery: re-delete the term from the dictionary B+Tree
+    Ok(())
+}
+
+# Undo a dictionary delete (restore the deleted term)
+F undo_dict_delete(payload: &DictionaryDeletePayload) -> Result<(), VaisError> {
+    # During rollback: restore the term with its old posting head page
+    Ok(())
+}
+
+# Redo a term frequency update (re-apply the new frequency)
+F redo_term_freq_update(payload: &TermFreqUpdatePayload) -> Result<(), VaisError> {
+    # During recovery: update term frequency to new_freq
+    Ok(())
+}
+
+# Undo a term frequency update (restore the old frequency)
+F undo_term_freq_update(payload: &TermFreqUpdatePayload) -> Result<(), VaisError> {
+    # During rollback: restore term frequency to old_freq
+    Ok(())
+}

@@ -1,0 +1,327 @@
+# BM25 Scorer
+# Implements BM25 scoring algorithm for full-text search relevance ranking
+# BM25 formula: score = IDF * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl/avgdl))
+# IDF (Inverse Document Frequency) = ln((N - df + 0.5) / (df + 0.5) + 1)
+
+U std/vec.Vec;
+U fulltext/types.{DEFAULT_BM25_K1, DEFAULT_BM25_B};
+
+# ============================================================================
+# BM25Scorer — Configurable BM25 scoring implementation
+# ============================================================================
+
+S BM25Scorer {
+    k1: f64,    # Term frequency saturation parameter (default 1.2)
+    b: f64,     # Document length normalization parameter (default 0.75)
+}
+
+X BM25Scorer {
+    # Create new BM25 scorer with default parameters
+    # k1=1.2 controls how quickly TF impact saturates
+    # b=0.75 controls how much document length affects scoring
+    F new() -> BM25Scorer {
+        BM25Scorer {
+            k1: DEFAULT_BM25_K1,
+            b: DEFAULT_BM25_B,
+        }
+    }
+
+    # Create BM25 scorer with custom parameters
+    # k1: higher values give more weight to term frequency (typical range: 1.2-2.0)
+    # b: higher values penalize long documents more (typical range: 0.5-0.8)
+    F with_params(k1: f64, b: f64) -> BM25Scorer {
+        BM25Scorer { k1, b }
+    }
+
+    # Calculate IDF (Inverse Document Frequency) component
+    # Formula: ln((N - df + 0.5) / (df + 0.5) + 1)
+    # where N = total_docs, df = document frequency
+    #
+    # Edge cases:
+    # - df=0 → IDF=0 (term appears in no documents)
+    # - df>N → IDF=0 (data corruption, treat as invalid)
+    # - N=0 → IDF=0 (no documents in corpus)
+    F calculate_idf(df: u32, total_docs: u64) -> f64 {
+        if total_docs == 0 || df == 0 {
+            return 0.0;
+        }
+
+        ~n = total_docs as f64;
+        ~df_f = df as f64;
+
+        # Guard against df > total_docs (data corruption)
+        if df_f > n {
+            return 0.0;
+        }
+
+        # IDF = ln((N - df + 0.5) / (df + 0.5) + 1)
+        ~numerator = n - df_f + 0.5;
+        ~denominator = df_f + 0.5;
+        ~ratio = numerator / denominator;
+
+        # Natural logarithm
+        ln(ratio + 1.0)
+    }
+
+    # Score a single term occurrence in a document
+    #
+    # Parameters:
+    # - tf: term frequency in this document
+    # - df: document frequency (how many docs contain this term)
+    # - doc_length: length of this document in tokens
+    # - avg_doc_length: average document length in corpus
+    # - total_docs: total number of documents in corpus
+    #
+    # Returns: BM25 score for this term in this document
+    #
+    # Formula:
+    # score = IDF * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl/avgdl))
+    F score(
+        self,
+        tf: u32,
+        df: u32,
+        doc_length: u32,
+        avg_doc_length: f64,
+        total_docs: u64,
+    ) -> f64 {
+        # Edge case: no term occurrences
+        if tf == 0 {
+            return 0.0;
+        }
+
+        # Edge case: no corpus statistics
+        if total_docs == 0 || avg_doc_length == 0.0 {
+            return 0.0;
+        }
+
+        # Calculate IDF component
+        ~idf = BM25Scorer.calculate_idf(df, total_docs);
+
+        # Calculate TF component with length normalization
+        ~tf_f = tf as f64;
+        ~dl = doc_length as f64;
+        ~avgdl = avg_doc_length;
+
+        # Length normalization factor: (1 - b + b * dl/avgdl)
+        ~length_norm = 1.0 - self.b + self.b * (dl / avgdl);
+
+        # TF numerator: tf * (k1 + 1)
+        ~tf_numerator = tf_f * (self.k1 + 1.0);
+
+        # TF denominator: tf + k1 * length_norm
+        ~tf_denominator = tf_f + self.k1 * length_norm;
+
+        # Final score: IDF * (TF component)
+        idf * (tf_numerator / tf_denominator)
+    }
+
+    # Score multiple terms in a query and sum their BM25 scores
+    # This is the standard way to score multi-term queries in BM25
+    #
+    # Parameters:
+    # - term_scores: pre-computed BM25 scores for each query term
+    #
+    # Returns: total score (sum of individual term scores)
+    F batch_score(self, term_scores: &Vec<f64>) -> f64 {
+        ~total: f64 = 0.0;
+        ~i: usize = 0;
+        L while i < term_scores.len() {
+            total += term_scores[i];
+            i += 1;
+        }
+        total
+    }
+
+    # Score multiple terms at once given their (tf, df) pairs
+    # Convenience method that combines score() and batch_score()
+    #
+    # Parameters:
+    # - term_freqs: Vec of (tf, df) pairs for each query term
+    # - doc_length: length of this document in tokens
+    # - avg_doc_length: average document length in corpus
+    # - total_docs: total number of documents in corpus
+    #
+    # Returns: sum of BM25 scores for all terms
+    F score_multi_term(
+        self,
+        term_freqs: &Vec<(u32, u32)>,
+        doc_length: u32,
+        avg_doc_length: f64,
+        total_docs: u64,
+    ) -> f64 {
+        ~total: f64 = 0.0;
+        ~i: usize = 0;
+        L while i < term_freqs.len() {
+            ~(tf, df) = term_freqs[i];
+            ~term_score = self.score(tf, df, doc_length, avg_doc_length, total_docs);
+            total += term_score;
+            i += 1;
+        }
+        total
+    }
+}
+
+# ============================================================================
+# Standalone helper: natural logarithm approximation
+# ============================================================================
+
+# Natural logarithm using Taylor series approximation
+# ln(x) = 2 * sum((1/(2n+1)) * ((x-1)/(x+1))^(2n+1)) for n=0 to infinity
+# This implementation uses argument reduction and 15 terms for accuracy
+F ln(x: f64) -> f64 {
+    # Edge cases
+    if x <= 0.0 {
+        return 0.0;  # Undefined, return 0 for safety
+    }
+    if x == 1.0 {
+        return 0.0;
+    }
+
+    # Argument reduction: bring x into range [0.5, 2)
+    ~exp: i32 = 0;
+    ~y = x;
+    L while y >= 2.0 {
+        y = y / 2.0;
+        exp += 1;
+    }
+    L while y < 0.5 {
+        y = y * 2.0;
+        exp -= 1;
+    }
+
+    # Taylor series: ln(y) = 2 * sum((1/(2n+1)) * z^(2n+1))
+    # where z = (y-1)/(y+1)
+    ~z = (y - 1.0) / (y + 1.0);
+    ~z_sq = z * z;
+    ~term = z;
+    ~sum = term;
+
+    # Sum 15 terms for good accuracy
+    ~n: i32 = 1;
+    L while n < 15 {
+        term = term * z_sq;
+        ~divisor = (2 * n + 1) as f64;
+        sum += term / divisor;
+        n += 1;
+    }
+
+    ~ln_y = 2.0 * sum;
+
+    # Adjust for argument reduction: ln(x) = ln(y) + exp * ln(2)
+    ~ln_2: f64 = 0.6931471805599453;  # ln(2) constant
+    ln_y + (exp as f64) * ln_2
+}
+
+# ============================================================================
+# Unit tests
+# ============================================================================
+
+#[test]
+F test_bm25_scorer_default() {
+    ~scorer = BM25Scorer.new();
+    assert_eq!(scorer.k1, DEFAULT_BM25_K1);
+    assert_eq!(scorer.b, DEFAULT_BM25_B);
+}
+
+#[test]
+F test_bm25_scorer_custom_params() {
+    ~scorer = BM25Scorer.with_params(1.5, 0.8);
+    assert_eq!(scorer.k1, 1.5);
+    assert_eq!(scorer.b, 0.8);
+}
+
+#[test]
+F test_calculate_idf_normal() {
+    # IDF for term in 10 docs out of 100 total
+    # IDF = ln((100 - 10 + 0.5) / (10 + 0.5) + 1)
+    #     = ln((90.5 / 10.5) + 1)
+    #     = ln(9.619...)
+    #     ≈ 2.26
+    ~idf = BM25Scorer.calculate_idf(10, 100);
+    assert!(idf > 2.2 && idf < 2.3);
+}
+
+#[test]
+F test_calculate_idf_edge_cases() {
+    # df=0 → IDF=0
+    assert_eq!(BM25Scorer.calculate_idf(0, 100), 0.0);
+
+    # total_docs=0 → IDF=0
+    assert_eq!(BM25Scorer.calculate_idf(10, 0), 0.0);
+
+    # df > total_docs (data corruption) → IDF=0
+    assert_eq!(BM25Scorer.calculate_idf(150, 100), 0.0);
+}
+
+#[test]
+F test_score_single_term() {
+    ~scorer = BM25Scorer.new();
+
+    # Term appears 3 times in a 100-token doc
+    # Corpus: 1000 docs, average length 120 tokens
+    # Term appears in 50 docs
+    ~score = scorer.score(3, 50, 100, 120.0, 1000);
+
+    # Score should be positive
+    assert!(score > 0.0);
+}
+
+#[test]
+F test_score_edge_cases() {
+    ~scorer = BM25Scorer.new();
+
+    # tf=0 → score=0
+    assert_eq!(scorer.score(0, 50, 100, 120.0, 1000), 0.0);
+
+    # total_docs=0 → score=0
+    assert_eq!(scorer.score(3, 50, 100, 120.0, 0), 0.0);
+
+    # avg_doc_length=0 → score=0
+    assert_eq!(scorer.score(3, 50, 100, 0.0, 1000), 0.0);
+}
+
+#[test]
+F test_batch_score() {
+    ~scorer = BM25Scorer.new();
+
+    ~scores = Vec.new();
+    scores.push(1.5);
+    scores.push(2.3);
+    scores.push(0.8);
+
+    ~total = scorer.batch_score(&scores);
+    assert_eq!(total, 4.6);
+}
+
+#[test]
+F test_score_multi_term() {
+    ~scorer = BM25Scorer.new();
+
+    ~term_freqs = Vec.new();
+    term_freqs.push((3, 50));   # term1: tf=3, df=50
+    term_freqs.push((2, 30));   # term2: tf=2, df=30
+
+    ~total = scorer.score_multi_term(&term_freqs, 100, 120.0, 1000);
+
+    # Total should be sum of individual scores
+    assert!(total > 0.0);
+}
+
+#[test]
+F test_ln_approximation() {
+    # ln(1) = 0
+    assert!(ln(1.0) < 0.0001 && ln(1.0) > -0.0001);
+
+    # ln(e) ≈ 1
+    ~e: f64 = 2.718281828459045;
+    ~ln_e = ln(e);
+    assert!(ln_e > 0.99 && ln_e < 1.01);
+
+    # ln(10) ≈ 2.302585
+    ~ln_10 = ln(10.0);
+    assert!(ln_10 > 2.3 && ln_10 < 2.31);
+
+    # ln(0.5) ≈ -0.693147
+    ~ln_half = ln(0.5);
+    assert!(ln_half < -0.69 && ln_half > -0.70);
+}

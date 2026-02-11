@@ -1,0 +1,767 @@
+# Boolean Query Engine
+# Supports AND, OR, NOT boolean queries with phrase query support
+# Simple query syntax: "word1 word2" (AND), "word1 OR word2", "-word" (NOT), "exact phrase"
+
+U std/vec.Vec;
+U std/string.Str;
+U storage/error.{VaisError, Result};
+U fulltext/types.{err_fulltext_invalid_query};
+
+# ============================================================================
+# Query AST — Abstract syntax tree for boolean queries
+# ============================================================================
+
+# TermQuery — Single term match
+S TermQuery {
+    term: Str,
+}
+
+X TermQuery {
+    F new(term: Str) -> TermQuery {
+        TermQuery { term }
+    }
+}
+
+# PhraseQuery — Exact phrase match with optional slop
+S PhraseQuery {
+    terms: Vec<Str>,    # Ordered terms in the phrase
+    slop: u32,          # Maximum position gap (0 = exact phrase)
+}
+
+X PhraseQuery {
+    F new(terms: Vec<Str>) -> PhraseQuery {
+        PhraseQuery { terms, slop: 0 }
+    }
+
+    F with_slop(terms: Vec<Str>, slop: u32) -> PhraseQuery {
+        PhraseQuery { terms, slop }
+    }
+}
+
+# BooleanClause — Clause in a boolean query
+E BooleanClause {
+    Must(Query),        # Document MUST match this query (AND)
+    Should(Query),      # Document SHOULD match this query (OR)
+    MustNot(Query),     # Document MUST NOT match this query (NOT)
+}
+
+# BooleanQuery — Combination of clauses
+S BooleanQuery {
+    clauses: Vec<BooleanClause>,
+}
+
+X BooleanQuery {
+    F new() -> BooleanQuery {
+        BooleanQuery { clauses: Vec.new() }
+    }
+
+    F add_must(~self, query: Query) {
+        self.clauses.push(BooleanClause.Must(query));
+    }
+
+    F add_should(~self, query: Query) {
+        self.clauses.push(BooleanClause.Should(query));
+    }
+
+    F add_must_not(~self, query: Query) {
+        self.clauses.push(BooleanClause.MustNot(query));
+    }
+
+    F clause_count(self) -> usize {
+        self.clauses.len()
+    }
+}
+
+# Query — Top-level query enum
+E Query {
+    Term(TermQuery),
+    Phrase(PhraseQuery),
+    Boolean(BooleanQuery),
+}
+
+# ============================================================================
+# BooleanQueryParser — Parse query strings into Query AST
+# ============================================================================
+
+S BooleanQueryParser {}
+
+X BooleanQueryParser {
+    # Create new parser
+    F new() -> BooleanQueryParser {
+        BooleanQueryParser {}
+    }
+
+    # Parse query string into Query AST
+    #
+    # Syntax:
+    # - "word1 word2" → AND (both must match)
+    # - "word1 OR word2" → OR (either matches)
+    # - "-word" → NOT (must not match)
+    # - '"exact phrase"' → Phrase query
+    # - Combined: "word1 -word2 OR word3 \"phrase query\""
+    #
+    # Grammar:
+    # query ::= term+
+    # term ::= ["-"] (word | OR word | "phrase")
+    #
+    # Returns: Query enum
+    F parse(self, query_str: &Str) -> Result<Query, VaisError> {
+        # Tokenize query string
+        ~tokens = self.tokenize(query_str)?;
+
+        if tokens.len() == 0 {
+            return Err(err_fulltext_invalid_query(&Str.from("Empty query")));
+        }
+
+        # Parse tokens into query
+        self.parse_tokens(&tokens)
+    }
+
+    # Tokenize query string into tokens
+    # Returns Vec of tokens: words, "OR", "-", quoted phrases
+    F tokenize(self, query_str: &Str) -> Result<Vec<Str>, VaisError> {
+        ~tokens = Vec.new();
+        ~bytes = query_str.as_bytes();
+        ~i: usize = 0;
+
+        L while i < bytes.len() {
+            ~ch = bytes[i] as char;
+
+            # Skip whitespace
+            if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+                i += 1;
+                continue;
+            }
+
+            # Handle quoted phrase
+            if ch == '"' {
+                ~phrase = self.extract_quoted_phrase(bytes, i)?;
+                tokens.push(phrase);
+                # Skip past closing quote
+                i += phrase.len() + 2;  # +2 for opening and closing quotes
+                continue;
+            }
+
+            # Handle negation operator
+            if ch == '-' {
+                tokens.push(Str.from("-"));
+                i += 1;
+                continue;
+            }
+
+            # Extract word
+            ~word_start = i;
+            L while i < bytes.len() {
+                ~word_ch = bytes[i] as char;
+                if word_ch == ' ' || word_ch == '\t' || word_ch == '\n' || word_ch == '\r' || word_ch == '"' {
+                    break;
+                }
+                i += 1;
+            }
+
+            if i > word_start {
+                ~word = self.substring(query_str, word_start, i);
+                tokens.push(word);
+            }
+        }
+
+        Ok(tokens)
+    }
+
+    # Extract quoted phrase content (without quotes)
+    F extract_quoted_phrase(self, bytes: &[u8], start: usize) -> Result<Str, VaisError> {
+        ~i = start + 1;  # Skip opening quote
+        ~phrase_start = i;
+
+        # Find closing quote
+        L while i < bytes.len() {
+            if (bytes[i] as char) == '"' {
+                # Found closing quote
+                ~phrase_bytes = Vec.with_capacity(i - phrase_start);
+                ~j = phrase_start;
+                L while j < i {
+                    phrase_bytes.push(bytes[j]);
+                    j += 1;
+                }
+                return Ok(Str.from_utf8(&phrase_bytes)?);
+            }
+            i += 1;
+        }
+
+        # No closing quote found
+        Err(err_fulltext_invalid_query(&Str.from("Unclosed quoted phrase")))
+    }
+
+    # Parse tokens into Query AST
+    F parse_tokens(self, tokens: &Vec<Str>) -> Result<Query, VaisError> {
+        ~boolean_query = BooleanQuery.new();
+        ~i: usize = 0;
+        ~default_operator_is_or = false;
+
+        L while i < tokens.len() {
+            ~token = &tokens[i];
+
+            # Check for negation
+            if token.as_str() == "-" {
+                i += 1;
+                if i >= tokens.len() {
+                    return Err(err_fulltext_invalid_query(&Str.from("Negation without term")));
+                }
+
+                ~negated_term = &tokens[i];
+                ~term_query = TermQuery.new(negated_term.clone());
+                boolean_query.add_must_not(Query.Term(term_query));
+                i += 1;
+                continue;
+            }
+
+            # Check for OR operator
+            if token.as_str() == "OR" || token.as_str() == "or" {
+                default_operator_is_or = true;
+                i += 1;
+                continue;
+            }
+
+            # Regular term or phrase
+            if self.is_phrase(token) {
+                # Phrase query (contains spaces - was quoted)
+                ~phrase_terms = self.split_phrase_into_terms(token);
+                ~phrase_query = PhraseQuery.new(phrase_terms);
+
+                if default_operator_is_or {
+                    boolean_query.add_should(Query.Phrase(phrase_query));
+                    default_operator_is_or = false;
+                } else {
+                    boolean_query.add_must(Query.Phrase(phrase_query));
+                }
+            } else {
+                # Term query
+                ~term_query = TermQuery.new(token.clone());
+
+                if default_operator_is_or {
+                    boolean_query.add_should(Query.Term(term_query));
+                    default_operator_is_or = false;
+                } else {
+                    boolean_query.add_must(Query.Term(term_query));
+                }
+            }
+
+            i += 1;
+        }
+
+        # If only one clause and it's a MUST, return the inner query directly
+        if boolean_query.clause_count() == 1 {
+            M &boolean_query.clauses[0] {
+                BooleanClause.Must(q) -> return Ok(q.clone()),
+                _ -> {},
+            }
+        }
+
+        Ok(Query.Boolean(boolean_query))
+    }
+
+    # Check if token represents a phrase (contains internal spaces)
+    F is_phrase(self, token: &Str) -> bool {
+        ~bytes = token.as_bytes();
+        ~i: usize = 0;
+        L while i < bytes.len() {
+            if (bytes[i] as char) == ' ' {
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+
+    # Split phrase into individual terms
+    F split_phrase_into_terms(self, phrase: &Str) -> Vec<Str> {
+        ~terms = Vec.new();
+        ~bytes = phrase.as_bytes();
+        ~i: usize = 0;
+
+        L while i < bytes.len() {
+            # Skip whitespace
+            L while i < bytes.len() && (bytes[i] as char) == ' ' {
+                i += 1;
+            }
+
+            ~term_start = i;
+            L while i < bytes.len() && (bytes[i] as char) != ' ' {
+                i += 1;
+            }
+
+            if i > term_start {
+                ~term = self.substring(phrase, term_start, i);
+                terms.push(term);
+            }
+        }
+
+        terms
+    }
+
+    # Extract substring (helper)
+    F substring(self, s: &Str, start: usize, end: usize) -> Str {
+        ~bytes = s.as_bytes();
+        ~result_bytes = Vec.with_capacity(end - start);
+        ~i = start;
+        L while i < end && i < bytes.len() {
+            result_bytes.push(bytes[i]);
+            i += 1;
+        }
+        Str.from_utf8(&result_bytes).unwrap_or(Str.from(""))
+    }
+}
+
+# ============================================================================
+# BooleanQueryExecutor — Execute boolean queries against search results
+# ============================================================================
+
+S BooleanQueryExecutor {}
+
+X BooleanQueryExecutor {
+    # Create new executor
+    F new() -> BooleanQueryExecutor {
+        BooleanQueryExecutor {}
+    }
+
+    # Execute boolean query against per-term results
+    #
+    # Parameters:
+    # - query: parsed Query AST
+    # - results_per_term: Vec<(term: Str, results: Vec<(doc_id: u64, score: f64)>)>
+    #
+    # Returns: Vec<(doc_id, score)> sorted by score descending
+    #
+    # Algorithm:
+    # - MUST clauses: Intersect doc_id sets, sum scores
+    # - SHOULD clauses: Union doc_id sets, sum scores
+    # - MUST_NOT clauses: Remove doc_ids from result set
+    F execute(
+        self,
+        query: &Query,
+        results_per_term: &Vec<(Str, Vec<(u64, f64)>)>,
+    ) -> Vec<(u64, f64)> {
+        M query {
+            Query.Term(tq) -> {
+                # Simple term query
+                self.execute_term_query(&tq.term, results_per_term)
+            }
+            Query.Phrase(pq) -> {
+                # Phrase query (treat as intersection of terms for now)
+                # Note: Actual phrase verification done by PhraseSearcher
+                self.execute_phrase_query(&pq.terms, results_per_term)
+            }
+            Query.Boolean(bq) -> {
+                # Boolean query
+                self.execute_boolean_query(&bq.clauses, results_per_term)
+            }
+        }
+    }
+
+    # Execute term query
+    F execute_term_query(
+        self,
+        term: &Str,
+        results_per_term: &Vec<(Str, Vec<(u64, f64)>)>,
+    ) -> Vec<(u64, f64)> {
+        # Find results for this term
+        ~i: usize = 0;
+        L while i < results_per_term.len() {
+            if results_per_term[i].0.as_str() == term.as_str() {
+                return results_per_term[i].1.clone();
+            }
+            i += 1;
+        }
+        Vec.new()
+    }
+
+    # Execute phrase query (intersection of term results)
+    F execute_phrase_query(
+        self,
+        terms: &Vec<Str>,
+        results_per_term: &Vec<(Str, Vec<(u64, f64)>)>,
+    ) -> Vec<(u64, f64)> {
+        if terms.len() == 0 {
+            return Vec.new();
+        }
+
+        # Start with first term's results
+        ~result = self.execute_term_query(&terms[0], results_per_term);
+
+        # Intersect with remaining terms
+        ~i: usize = 1;
+        L while i < terms.len() {
+            ~term_results = self.execute_term_query(&terms[i], results_per_term);
+            result = self.intersect_results(&result, &term_results);
+            i += 1;
+        }
+
+        result
+    }
+
+    # Execute boolean query
+    F execute_boolean_query(
+        self,
+        clauses: &Vec<BooleanClause>,
+        results_per_term: &Vec<(Str, Vec<(u64, f64)>)>,
+    ) -> Vec<(u64, f64)> {
+        ~must_results = Vec.new();
+        ~should_results = Vec.new();
+        ~must_not_doc_ids = Vec.new();
+
+        # Process each clause
+        ~i: usize = 0;
+        L while i < clauses.len() {
+            M &clauses[i] {
+                BooleanClause.Must(q) -> {
+                    ~clause_results = self.execute(q, results_per_term);
+                    must_results.push(clause_results);
+                }
+                BooleanClause.Should(q) -> {
+                    ~clause_results = self.execute(q, results_per_term);
+                    should_results.push(clause_results);
+                }
+                BooleanClause.MustNot(q) -> {
+                    ~clause_results = self.execute(q, results_per_term);
+                    ~j: usize = 0;
+                    L while j < clause_results.len() {
+                        must_not_doc_ids.push(clause_results[j].0);
+                        j += 1;
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        # Combine results
+        ~result = self.combine_boolean_results(
+            &must_results,
+            &should_results,
+            &must_not_doc_ids,
+        );
+
+        # Sort by score descending
+        self.sort_by_score(&result);
+
+        result
+    }
+
+    # Combine boolean results
+    # - If MUST clauses exist: intersect all MUST results
+    # - If SHOULD clauses exist: union all SHOULD results (added to MUST if any)
+    # - Remove MUST_NOT doc_ids
+    F combine_boolean_results(
+        self,
+        must_results: &Vec<Vec<(u64, f64)>>,
+        should_results: &Vec<Vec<(u64, f64)>>,
+        must_not_doc_ids: &Vec<u64>,
+    ) -> Vec<(u64, f64)> {
+        ~result = Vec.new();
+
+        # Start with MUST results (intersection)
+        if must_results.len() > 0 {
+            result = must_results[0].clone();
+            ~i: usize = 1;
+            L while i < must_results.len() {
+                result = self.intersect_results(&result, &must_results[i]);
+                i += 1;
+            }
+        }
+
+        # Add SHOULD results (union)
+        if should_results.len() > 0 {
+            ~i: usize = 0;
+            L while i < should_results.len() {
+                result = self.union_results(&result, &should_results[i]);
+                i += 1;
+            }
+        }
+
+        # Remove MUST_NOT doc_ids
+        result = self.filter_out_doc_ids(&result, must_not_doc_ids);
+
+        result
+    }
+
+    # Intersect two result sets, summing scores for common doc_ids
+    F intersect_results(
+        self,
+        results1: &Vec<(u64, f64)>,
+        results2: &Vec<(u64, f64)>,
+    ) -> Vec<(u64, f64)> {
+        ~result = Vec.new();
+
+        ~i: usize = 0;
+        L while i < results1.len() {
+            ~doc_id = results1[i].0;
+            ~score1 = results1[i].1;
+
+            # Find matching doc_id in results2
+            ~found_score = self.find_score_for_doc(doc_id, results2);
+            M found_score {
+                Some(score2) -> {
+                    result.push((doc_id, score1 + score2));
+                }
+                None -> {}
+            }
+
+            i += 1;
+        }
+
+        result
+    }
+
+    # Union two result sets, summing scores for common doc_ids
+    F union_results(
+        self,
+        results1: &Vec<(u64, f64)>,
+        results2: &Vec<(u64, f64)>,
+    ) -> Vec<(u64, f64)> {
+        ~result = results1.clone();
+
+        # Add results2, merging scores for existing doc_ids
+        ~i: usize = 0;
+        L while i < results2.len() {
+            ~doc_id = results2[i].0;
+            ~score2 = results2[i].1;
+
+            ~found_idx = self.find_index_for_doc(doc_id, &result);
+            M found_idx {
+                Some(idx) -> {
+                    # Update score
+                    result[idx].1 += score2;
+                }
+                None -> {
+                    # Add new entry
+                    result.push((doc_id, score2));
+                }
+            }
+
+            i += 1;
+        }
+
+        result
+    }
+
+    # Filter out doc_ids from results
+    F filter_out_doc_ids(
+        self,
+        results: &Vec<(u64, f64)>,
+        exclude_doc_ids: &Vec<u64>,
+    ) -> Vec<(u64, f64)> {
+        ~result = Vec.new();
+
+        ~i: usize = 0;
+        L while i < results.len() {
+            ~doc_id = results[i].0;
+
+            ~excluded = false;
+            ~j: usize = 0;
+            L while j < exclude_doc_ids.len() {
+                if exclude_doc_ids[j] == doc_id {
+                    excluded = true;
+                }
+                j += 1;
+            }
+
+            if !excluded {
+                result.push(results[i]);
+            }
+
+            i += 1;
+        }
+
+        result
+    }
+
+    # Find score for doc_id in results
+    F find_score_for_doc(self, doc_id: u64, results: &Vec<(u64, f64)>) -> Option<f64> {
+        ~i: usize = 0;
+        L while i < results.len() {
+            if results[i].0 == doc_id {
+                return Some(results[i].1);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    # Find index for doc_id in results
+    F find_index_for_doc(self, doc_id: u64, results: &Vec<(u64, f64)>) -> Option<usize> {
+        ~i: usize = 0;
+        L while i < results.len() {
+            if results[i].0 == doc_id {
+                return Some(i);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    # Sort results by score descending (bubble sort)
+    F sort_by_score(self, results: &Vec<(u64, f64)>) {
+        if results.len() <= 1 {
+            return;
+        }
+
+        ~n = results.len();
+        ~i: usize = 0;
+        L while i < n {
+            ~j: usize = 0;
+            L while j < n - i - 1 {
+                if results[j].1 < results[j + 1].1 {
+                    # Swap
+                    ~temp = results[j];
+                    results[j] = results[j + 1];
+                    results[j + 1] = temp;
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+    }
+}
+
+# ============================================================================
+# Unit tests
+# ============================================================================
+
+#[test]
+F test_parser_single_term() {
+    ~parser = BooleanQueryParser.new();
+    ~query = parser.parse(&Str.from("hello")).unwrap();
+
+    M query {
+        Query.Term(tq) -> {
+            assert_eq!(tq.term.as_str(), "hello");
+        }
+        _ -> panic!("Expected Term query"),
+    }
+}
+
+#[test]
+F test_parser_multiple_terms_and() {
+    ~parser = BooleanQueryParser.new();
+    ~query = parser.parse(&Str.from("hello world")).unwrap();
+
+    M query {
+        Query.Boolean(bq) -> {
+            assert_eq!(bq.clause_count(), 2);
+        }
+        _ -> panic!("Expected Boolean query"),
+    }
+}
+
+#[test]
+F test_parser_or_operator() {
+    ~parser = BooleanQueryParser.new();
+    ~query = parser.parse(&Str.from("hello OR world")).unwrap();
+
+    M query {
+        Query.Boolean(bq) -> {
+            assert_eq!(bq.clause_count(), 2);
+        }
+        _ -> panic!("Expected Boolean query"),
+    }
+}
+
+#[test]
+F test_parser_negation() {
+    ~parser = BooleanQueryParser.new();
+    ~query = parser.parse(&Str.from("hello -world")).unwrap();
+
+    M query {
+        Query.Boolean(bq) -> {
+            assert_eq!(bq.clause_count(), 2);
+        }
+        _ -> panic!("Expected Boolean query"),
+    }
+}
+
+#[test]
+F test_parser_quoted_phrase() {
+    ~parser = BooleanQueryParser.new();
+    ~query = parser.parse(&Str.from(r#""hello world""#)).unwrap();
+
+    M query {
+        Query.Phrase(pq) -> {
+            assert_eq!(pq.terms.len(), 2);
+            assert_eq!(pq.terms[0].as_str(), "hello");
+            assert_eq!(pq.terms[1].as_str(), "world");
+            assert_eq!(pq.slop, 0);
+        }
+        _ -> panic!("Expected Phrase query"),
+    }
+}
+
+#[test]
+F test_executor_term_query() {
+    ~executor = BooleanQueryExecutor.new();
+
+    ~results_per_term = Vec.new();
+    ~hello_results = Vec.new();
+    hello_results.push((1, 1.5));
+    hello_results.push((2, 2.0));
+    results_per_term.push((Str.from("hello"), hello_results));
+
+    ~query = Query.Term(TermQuery.new(Str.from("hello")));
+    ~result = executor.execute(&query, &results_per_term);
+
+    assert_eq!(result.len(), 2);
+}
+
+#[test]
+F test_executor_intersect_results() {
+    ~executor = BooleanQueryExecutor.new();
+
+    ~results1 = Vec.new();
+    results1.push((1, 1.0));
+    results1.push((2, 2.0));
+    results1.push((3, 3.0));
+
+    ~results2 = Vec.new();
+    results2.push((2, 0.5));
+    results2.push((3, 1.0));
+    results2.push((4, 2.0));
+
+    ~result = executor.intersect_results(&results1, &results2);
+
+    # Should contain doc_id 2 and 3 with summed scores
+    assert_eq!(result.len(), 2);
+}
+
+#[test]
+F test_executor_union_results() {
+    ~executor = BooleanQueryExecutor.new();
+
+    ~results1 = Vec.new();
+    results1.push((1, 1.0));
+    results1.push((2, 2.0));
+
+    ~results2 = Vec.new();
+    results2.push((2, 0.5));
+    results2.push((3, 1.0));
+
+    ~result = executor.union_results(&results1, &results2);
+
+    # Should contain doc_id 1, 2 (with summed score), and 3
+    assert_eq!(result.len(), 3);
+}
+
+#[test]
+F test_executor_filter_out_doc_ids() {
+    ~executor = BooleanQueryExecutor.new();
+
+    ~results = Vec.new();
+    results.push((1, 1.0));
+    results.push((2, 2.0));
+    results.push((3, 3.0));
+
+    ~exclude = Vec.new();
+    exclude.push(2);
+
+    ~result = executor.filter_out_doc_ids(&results, &exclude);
+
+    # Should contain doc_id 1 and 3
+    assert_eq!(result.len(), 2);
+}

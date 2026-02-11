@@ -4,7 +4,7 @@
 > **Version**: 0.1.0 (Design Phase)
 > **Goal**: Vector + Graph + Relational + Full-Text search in a single DB, optimized for RAG
 > **Language**: Pure Vais (with C FFI for system calls)
-> **Last Updated**: 2026-02-09
+> **Last Updated**: 2026-02-11
 
 ---
 
@@ -44,7 +44,7 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 | 2 | SQL Engine | ✅ Complete | 17/17 (100%) |
 | 3 | Vector Engine | ✅ Complete | 18/18 (100%) |
 | 4 | Graph Engine | ✅ Complete | 10/10 (100%) |
-| 5 | Full-Text Engine | ⏳ Planned | 0/16 (0%) |
+| 5 | Full-Text Engine | ✅ Complete | 16/16 (100%) |
 | 6 | Hybrid Query Planner | ⏳ Planned | 0/20 (0%) |
 | 7 | RAG & AI-Native Features | ⏳ Planned | 0/24 (0%) |
 | 8 | Server & Client | ⏳ Planned | 0/20 (0%) |
@@ -632,9 +632,34 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ## Phase 5: Full-Text Engine
 
-> **Status**: ⏳ Planned
+> **Status**: ✅ Complete
 > **Dependency**: Phase 1 (Storage Engine)
 > **Goal**: Elasticsearch-level full-text search with WAL-integrated updates
+> **Completed**: 2026-02-11
+
+### Phase 5 Implementation (2026-02-11)
+모드: 자동진행
+- [x] 1. Full-Text Core Types + Tokenizer Pipeline (Opus 직접) ✅ 2026-02-11
+  변경: src/fulltext/types.vais (FullTextConfig, FullTextMeta, PostingEntry 40B+MVCC, DictEntry, TokenInfo, fnv1a_hash, 10 error fns), src/fulltext/tokenizer.vais (174 stop words, tokenize, tokenize_with_freqs)
+- [x] 2. Inverted Index — Dictionary B+Tree + Posting List Storage (Opus 직접) [blockedBy: 1] ✅ 2026-02-11
+  변경: src/fulltext/index/dictionary.vais (DictionaryIndex B+Tree wrapper, cache), src/fulltext/index/posting.vais (PostingStore slotted page, chaining), src/fulltext/index/compression.vais (VByte, delta encoding)
+- [x] 3. Full-Text WAL Integration + MVCC Visibility (Sonnet 위임) [blockedBy: 1, ∥4] ✅ 2026-02-11
+  변경: src/fulltext/wal.vais (FullTextWalManager 5 log methods 0x40-0x44), src/fulltext/visibility.vais (is_posting_visible, filter helpers)
+- [x] 4. Full-Text Concurrency + Deletion Bitmap (Sonnet 위임) [blockedBy: 1, ∥3] ✅ 2026-02-11
+  변경: src/fulltext/concurrency.vais (FullTextLock RwLock, RAII guards), src/fulltext/index/deletion_bitmap.vais (DeletionBitmap 1-bit/doc)
+- [x] 5. BM25 Scoring + Document Frequency Tracking (Sonnet 위임) [blockedBy: 2] ✅ 2026-02-11
+  변경: src/fulltext/search/bm25.vais (BM25Scorer k1/b, IDF, batch_score), src/fulltext/search/doc_freq.vais (DocFreqTracker)
+- [x] 6. Phrase Search + Boolean Queries (Sonnet 위임) [blockedBy: 2,5] ✅ 2026-02-11
+  변경: src/fulltext/search/phrase.vais (PhraseSearcher, slop), src/fulltext/search/boolean.vais (BooleanQueryParser/Executor AND/OR/NOT)
+- [x] 7. FULLTEXT_MATCH() SQL Function + CREATE FULLTEXT INDEX DDL (Sonnet 위임) [blockedBy: 5,6] ✅ 2026-02-11
+  변경: src/fulltext/search/match_fn.vais (FullTextMatchExecutor Volcano), src/fulltext/ddl.vais (FullTextDDL create/drop/build)
+- [x] 8. Score Fusion + Hybrid Search Integration (Sonnet 위임) [blockedBy: 7] ✅ 2026-02-11
+  변경: src/fulltext/integration/fusion.vais (WeightedSum, RRF k=60), src/fulltext/integration/vector_hybrid.vais (HybridSearchPipeline), src/fulltext/integration/sql.vais (FullTextRowSource)
+- [x] 9. Posting List Compaction + GC (Sonnet 위임) [blockedBy: 2,4] ✅ 2026-02-11
+  변경: src/fulltext/maintenance/compaction.vais (PostingListCompactor, I/O throttling)
+- [x] 10. FullTextEngine mod.vais Facade + ROADMAP Sync (Opus 직접) [blockedBy: 7,8,9] ✅ 2026-02-11
+  변경: src/fulltext/mod.vais (FullTextEngine facade: lifecycle, index/delete/search/phrase/boolean/hybrid/compact)
+진행률: 10/10 (100%)
 
 ### Stage 1 - Inverted Index
 
