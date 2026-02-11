@@ -862,16 +862,25 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 ## 리뷰 발견사항 (2026-02-11)
 > 출처: /team-review src/rag/
 
-- [ ] 1. [정확성] storage.vais Rust 문법을 Vais로 재작성 (Critical) — 대상: src/rag/memory/storage.vais:195-429
-- [ ] 2. [정확성] visibility.vais 존재하지 않는 타입 import 수정 (Critical) — 대상: src/rag/visibility.vais:9
-- [ ] 3. [보안] parse_u32 오버플로우 가드 + DDL 옵션 범위 검증 (Critical) — 대상: src/rag/ddl.vais:99-271
-- [ ] 4. [성능] 검색/융합 핫패스의 선형 탐색을 HashMap으로 교체 (Critical) — 대상: src/rag/search/rag_search.vais, pipeline.vais, versioning.vais
-- [ ] 5. [보안] i64→u64 타임스탬프 캐스트 가드 추가 (Warning) — 대상: session.vais, lifecycle.vais (5곳)
-- [ ] 6. [보안] 세션 agent_id 격리 검증 추가 (Warning) — 대상: src/rag/memory/session.vais
-- [ ] 7. [성능] O(N²) 정렬을 O(N log N)으로 교체 (Warning) — 대상: rag_search.vais, search.vais, retrieval.vais, lifecycle.vais
-- [ ] 8. [정확성] 버전 체인 무한 루프 가드 추가 (Warning) — 대상: src/rag/context/versioning.vais:131-179
-- [ ] 9. [아키텍처] find_graph_node 중복 제거 → 공통 유틸리티 모듈 (Warning) — 대상: crossref.vais, versioning.vais
-진행률: 0/9 (0%)
+- [x] 1. [정확성] storage.vais Rust 문법을 Vais로 재작성 (Critical) ✅ 2026-02-11
+  변경: src/rag/memory/storage.vais (break→sentinel W loop, closure sort→parallel Vec insertion sort, iter chains→W loops)
+- [x] 2. [정확성] visibility.vais 존재하지 않는 타입 import 수정 (Critical) ✅ 2026-02-11
+  변경: src/rag/types.vais (ChunkMeta/DocumentMeta MVCC wrapper 추가), src/rag/memory/types.vais (MemoryEntry MVCC 필드 추가), src/rag/visibility.vais (import 경로 수정)
+- [x] 3. [보안] parse_u32 오버플로우 가드 + DDL 옵션 범위 검증 (Critical) ✅ 2026-02-11
+  변경: src/rag/ddl.vais (u64 누산기 + 오버플로우 검사, apply_option 범위 검증 4곳)
+- [x] 4. [성능] 검색/융합 핫패스의 선형 탐색을 HashMap으로 교체 (Critical) ✅ 2026-02-11
+  변경: src/rag/search/rag_search.vais (HashMap 기반 score/rank/dedup), src/rag/search/pipeline.vais (seen HashMap + info map helpers)
+- [x] 5. [보안] i64→u64 타임스탬프 캐스트 가드 추가 (Warning) ✅ 2026-02-11
+  변경: src/rag/memory/session.vais, src/rag/memory/lifecycle.vais (음수 diff 가드 5곳)
+- [x] 6. [보안] 세션 agent_id 격리 검증 추가 (Warning) ✅ 2026-02-11
+  변경: src/rag/memory/session.vais (get_session_for_agent 소유권 검증, close_session agent_id 파라미터 추가)
+- [x] 7. [성능] O(N²) 정렬을 O(N log N)으로 교체 (Warning) ✅ 2026-02-11
+  변경: src/rag/search/rag_search.vais, src/rag/memory/search.vais, src/rag/memory/retrieval.vais, src/rag/memory/lifecycle.vais (bottom-up merge sort + swap cycle 적용)
+- [x] 8. [정확성] 버전 체인 무한 루프 가드 추가 (Warning) ✅ 2026-02-11
+  변경: src/rag/context/versioning.vais (visited set + iteration cap으로 cycle detection)
+- [x] 9. [아키텍처] find_graph_node 중복 제거 → 공통 유틸리티 모듈 (Warning) ✅ 2026-02-11
+  변경: src/rag/context/helpers.vais (신규), crossref.vais + versioning.vais (import 전환, 중복 함수 삭제)
+진행률: 9/9 (100%)
 
 ---
 

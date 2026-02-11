@@ -11,6 +11,7 @@ U rag/types.{
     EDGE_TYPE_SUPERSEDES,
     err_rag_chunk_not_found
 };
+U rag/context/helpers.{find_graph_node};
 
 # ============================================================================
 # ChunkVersion — Version record for a chunk
@@ -94,28 +95,44 @@ X VersionTracker {
     }
 
     ## Get the latest version of a chunk lineage by following SUPERSEDES
+    ## Guarded against infinite loops via visited set + iteration cap
     F get_latest_version(&self, chunk_id: u64) -> Option<&ChunkVersion> {
         # Find the chunk in versions
         M self.find_version(chunk_id) {
             Some(version) => {
-                # Check if this chunk has been superseded
                 ~latest_id = chunk_id;
+                ~visited = Vec.new();
+                visited.push(chunk_id);
+                ~max_steps = self.versions.len() as u32;
+                ~steps: u32 = 0;
                 ~found_newer = true;
 
-                W found_newer {
+                W found_newer && steps < max_steps {
                     found_newer = false;
                     ~i: u32 = 0;
                     W i < self.versions.len() as u32 {
                         ~v = self.versions.get(i as usize);
                         if v.previous_chunk_id == latest_id {
-                            latest_id = v.chunk_id;
-                            found_newer = true;
+                            # Check if already visited (cycle detection)
+                            ~is_visited = false;
+                            ~vi: u32 = 0;
+                            W vi < visited.len() as u32 {
+                                if *visited.get(vi as usize) == v.chunk_id {
+                                    is_visited = true;
+                                }
+                                vi = vi + 1;
+                            }
+                            if !is_visited {
+                                latest_id = v.chunk_id;
+                                visited.push(v.chunk_id);
+                                found_newer = true;
+                            }
                         }
                         i = i + 1;
                     }
+                    steps = steps + 1;
                 }
 
-                # Return the latest version
                 self.find_version(latest_id)
             },
             None => None,
@@ -123,22 +140,42 @@ X VersionTracker {
     }
 
     ## Get the full version chain for a chunk (oldest to newest)
+    ## Guarded against infinite loops via visited set + iteration cap
     F get_version_chain(&self, chunk_id: u64) -> Vec<&ChunkVersion> {
         ~chain = Vec.new();
+        ~max_steps = self.versions.len() as u32;
 
         # First, walk backward to find the oldest version
         ~current_id = chunk_id;
         ~oldest_id = chunk_id;
         ~walking_back = true;
+        ~back_visited = Vec.new();
+        back_visited.push(chunk_id);
+        ~back_steps: u32 = 0;
 
-        W walking_back {
+        W walking_back && back_steps < max_steps {
             M self.find_version(current_id) {
                 Some(version) => {
                     if version.previous_chunk_id == 0 {
                         oldest_id = current_id;
                         walking_back = false;
                     } else {
-                        current_id = version.previous_chunk_id;
+                        # Cycle detection: check if prev was already visited
+                        ~is_visited = false;
+                        ~vi: u32 = 0;
+                        W vi < back_visited.len() as u32 {
+                            if *back_visited.get(vi as usize) == version.previous_chunk_id {
+                                is_visited = true;
+                            }
+                            vi = vi + 1;
+                        }
+                        if is_visited {
+                            oldest_id = current_id;
+                            walking_back = false;
+                        } else {
+                            back_visited.push(version.previous_chunk_id);
+                            current_id = version.previous_chunk_id;
+                        }
                     }
                 },
                 None => {
@@ -146,30 +183,51 @@ X VersionTracker {
                     walking_back = false;
                 },
             }
+            back_steps = back_steps + 1;
         }
 
         # Now walk forward from oldest to newest
         ~current = oldest_id;
         ~walking_fwd = true;
+        ~fwd_visited = Vec.new();
+        fwd_visited.push(oldest_id);
+        ~fwd_steps: u32 = 0;
 
-        W walking_fwd {
+        W walking_fwd && fwd_steps < max_steps {
             M self.find_version(current) {
                 Some(version) => {
                     chain.push(version);
 
                     # Find next version
                     ~found_next = false;
+                    ~next_id: u64 = 0;
                     ~i: u32 = 0;
                     W i < self.versions.len() as u32 {
                         ~v = self.versions.get(i as usize);
                         if v.previous_chunk_id == current {
-                            current = v.chunk_id;
+                            next_id = v.chunk_id;
                             found_next = true;
                         }
                         i = i + 1;
                     }
 
-                    if !found_next {
+                    if found_next {
+                        # Cycle detection
+                        ~is_visited = false;
+                        ~vi: u32 = 0;
+                        W vi < fwd_visited.len() as u32 {
+                            if *fwd_visited.get(vi as usize) == next_id {
+                                is_visited = true;
+                            }
+                            vi = vi + 1;
+                        }
+                        if is_visited {
+                            walking_fwd = false;
+                        } else {
+                            fwd_visited.push(next_id);
+                            current = next_id;
+                        }
+                    } else {
                         walking_fwd = false;
                     }
                 },
@@ -177,6 +235,7 @@ X VersionTracker {
                     walking_fwd = false;
                 },
             }
+            fwd_steps = fwd_steps + 1;
         }
 
         chain
@@ -268,17 +327,4 @@ X VersionTracker {
         }
         None
     }
-}
-
-# Helper: find graph node ID for a chunk
-F find_graph_node(chunk_id: u64, mapping: &Vec<(u64, u64)>) -> Option<u64> {
-    ~i: u32 = 0;
-    W i < mapping.len() as u32 {
-        ~entry = mapping.get(i as usize);
-        if entry.0 == chunk_id {
-            return Some(entry.1);
-        }
-        i = i + 1;
-    }
-    None
 }

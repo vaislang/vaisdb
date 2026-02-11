@@ -347,23 +347,80 @@ F find_similarity(memory_id: u64, scores: &Vec<(u64, f64)>) -> f64 {
     0.0
 }
 
-## Sort memory results by score descending (selection sort)
+## Sort memory results by score descending — O(N log N) merge sort
 F sort_memory_results_desc(results: &~Vec<MemorySearchResult>) {
     ~n = results.len() as u32;
+    if n <= 1 {
+        return;
+    }
+    # Bottom-up merge sort on indices, then reorder via swap
+    ~indices = Vec.new();
+    ~aux = Vec.new();
     ~i: u32 = 0;
     W i < n {
-        ~max_idx = i;
-        ~j = i + 1;
-        W j < n {
-            if results.get(j as usize).score > results.get(max_idx as usize).score {
-                max_idx = j;
-            }
-            j = j + 1;
-        }
-        if max_idx != i {
-            results.swap(i as usize, max_idx as usize);
-        }
+        indices.push(i);
+        aux.push(i);
         i = i + 1;
+    }
+
+    ~width: u32 = 1;
+    W width < n {
+        ~left: u32 = 0;
+        W left < n {
+            ~mid = left + width;
+            if mid > n { mid = n; }
+            ~right = left + width * 2;
+            if right > n { right = n; }
+            ~li = left;
+            ~ri = mid;
+            ~k = left;
+            W k < right {
+                if li < mid && (ri >= right ||
+                    results.get(indices.get(li as usize) as usize).score >=
+                    results.get(indices.get(ri as usize) as usize).score) {
+                    aux.set(k as usize, indices.get(li as usize));
+                    li = li + 1;
+                } else {
+                    aux.set(k as usize, indices.get(ri as usize));
+                    ri = ri + 1;
+                }
+                k = k + 1;
+            }
+            left = left + width * 2;
+        }
+        ~c: u32 = 0;
+        W c < n {
+            indices.set(c as usize, aux.get(c as usize));
+            c = c + 1;
+        }
+        width = width * 2;
+    }
+
+    # Apply permutation via swap cycles
+    ~visited = Vec.new();
+    ~vi: u32 = 0;
+    W vi < n {
+        visited.push(false);
+        vi = vi + 1;
+    }
+    ~ci: u32 = 0;
+    W ci < n {
+        if !visited.get(ci as usize) && indices.get(ci as usize) != ci {
+            ~j = ci;
+            ~done = false;
+            W !done {
+                ~next = indices.get(j as usize);
+                if next == ci {
+                    visited.set(j as usize, true);
+                    done = true;
+                } else {
+                    results.swap(j as usize, next as usize);
+                    visited.set(j as usize, true);
+                    j = next;
+                }
+            }
+        }
+        ci = ci + 1;
     }
 }
 

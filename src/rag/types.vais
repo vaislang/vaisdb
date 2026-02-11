@@ -615,3 +615,70 @@ F fnv1a_hash(data: &Str) -> u64 {
     }
     hash
 }
+
+# ============================================================================
+# MVCC Metadata Wrappers — used by visibility filter/GC functions
+# These carry MVCC tuple fields alongside entity IDs.
+# ============================================================================
+
+## Chunk MVCC metadata for visibility checks
+S ChunkMeta {
+    chunk_id: u64,
+    txn_id_create: u64,
+    txn_id_expire: u64,
+    cmd_id_create: u32,
+    cmd_id_expire: u32,
+}
+
+X ChunkMeta {
+    F new(chunk_id: u64, txn_id_create: u64) -> ChunkMeta {
+        ChunkMeta {
+            chunk_id,
+            txn_id_create,
+            txn_id_expire: 0,
+            cmd_id_create: 0,
+            cmd_id_expire: 0,
+        }
+    }
+
+    F clone(&self) -> ChunkMeta {
+        ChunkMeta {
+            chunk_id: self.chunk_id,
+            txn_id_create: self.txn_id_create,
+            txn_id_expire: self.txn_id_expire,
+            cmd_id_create: self.cmd_id_create,
+            cmd_id_expire: self.cmd_id_expire,
+        }
+    }
+}
+
+## Document MVCC metadata for visibility checks
+S DocumentMeta {
+    doc_id: u64,
+    txn_id_create: u64,
+    txn_id_expire: u64,
+    cmd_id_create: u32,
+    cmd_id_expire: u32,
+}
+
+X DocumentMeta {
+    F new(doc_id: u64, txn_id_create: u64) -> DocumentMeta {
+        DocumentMeta {
+            doc_id,
+            txn_id_create,
+            txn_id_expire: 0,
+            cmd_id_create: 0,
+            cmd_id_expire: 0,
+        }
+    }
+
+    F clone(&self) -> DocumentMeta {
+        DocumentMeta {
+            doc_id: self.doc_id,
+            txn_id_create: self.txn_id_create,
+            txn_id_expire: self.txn_id_expire,
+            cmd_id_create: self.cmd_id_create,
+            cmd_id_expire: self.cmd_id_expire,
+        }
+    }
+}

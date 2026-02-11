@@ -6,7 +6,8 @@ U std/vec.Vec;
 U storage/txn/snapshot.{Snapshot};
 U storage/txn/clog.{Clog};
 U storage/constants.{INVALID_TXN_ID};
-U rag/types.{ChunkMeta, DocumentMeta, MemoryEntry};
+U rag/types.{ChunkMeta, DocumentMeta};
+U rag/memory/types.{MemoryEntry};
 
 ## Check if a chunk is visible to the given snapshot
 ## Uses the unified 3-case visibility:

@@ -8,6 +8,7 @@
 U std/vec.Vec;
 U std/string.Str;
 U std/option.{Option, Some, None};
+U std/hashmap.HashMap;
 U storage/error.{VaisError};
 U rag/types.{
     RagSearchResult, RagFusionConfig, ScoredChunk, ChunkInfo,
@@ -299,22 +300,28 @@ F fuse_weighted_sum(
     ~norm_f = normalize_engine_scores(&fulltext_results.scored_chunks);
     ~norm_g = normalize_engine_scores(&graph_results.scored_chunks);
 
-    # Collect all unique chunk_ids
-    ~all_chunks: Vec<(u64, u64)> = Vec.new();  # (chunk_id, doc_id)
-    collect_unique_chunks(&norm_v, &~all_chunks);
-    collect_unique_chunks(&norm_f, &~all_chunks);
-    collect_unique_chunks(&norm_g, &~all_chunks);
+    # Build score HashMaps for O(1) lookup
+    ~map_v = build_score_map(&norm_v);
+    ~map_f = build_score_map(&norm_f);
+    ~map_g = build_score_map(&norm_g);
+
+    # Collect all unique chunk_ids via HashMap
+    ~chunk_doc_map: HashMap<u64, u64> = HashMap.new();  # chunk_id → doc_id
+    collect_unique_chunks_map(&norm_v, &~chunk_doc_map);
+    collect_unique_chunks_map(&norm_f, &~chunk_doc_map);
+    collect_unique_chunks_map(&norm_g, &~chunk_doc_map);
 
     # For each unique chunk, compute fused score
     ~result = Vec.new();
+    ~keys = chunk_doc_map.keys();
     ~i: u32 = 0;
-    W i < all_chunks.len() as u32 {
-        ~chunk_id = all_chunks.get(i as usize).0;
-        ~doc_id = all_chunks.get(i as usize).1;
+    W i < keys.len() as u32 {
+        ~chunk_id = keys.get(i as usize);
+        ~doc_id = chunk_doc_map.get(chunk_id);
 
-        ~score_v = find_chunk_score(chunk_id, &norm_v);
-        ~score_f = find_chunk_score(chunk_id, &norm_f);
-        ~score_g = find_chunk_score(chunk_id, &norm_g);
+        ~score_v = get_score_from_map(&map_v, chunk_id);
+        ~score_f = get_score_from_map(&map_f, chunk_id);
+        ~score_g = get_score_from_map(&map_g, chunk_id);
 
         ~fused = weight_v * score_v + weight_f * score_f + weight_g * score_g;
         result.push(ScoredChunk.new(chunk_id, doc_id, fused, ENGINE_TAG_RAG));
@@ -333,37 +340,38 @@ F fuse_rrf(
 ) -> Vec<ScoredChunk> {
     ~k_f64 = k as f64;
 
-    # Collect all unique chunk_ids
-    ~all_chunks: Vec<(u64, u64)> = Vec.new();  # (chunk_id, doc_id)
-    collect_unique_chunks(&vector_results.scored_chunks, &~all_chunks);
-    collect_unique_chunks(&fulltext_results.scored_chunks, &~all_chunks);
-    collect_unique_chunks(&graph_results.scored_chunks, &~all_chunks);
+    # Build rank HashMaps for O(1) lookup
+    ~rank_map_v = build_rank_map(&vector_results.scored_chunks);
+    ~rank_map_f = build_rank_map(&fulltext_results.scored_chunks);
+    ~rank_map_g = build_rank_map(&graph_results.scored_chunks);
+
+    # Collect all unique chunk_ids via HashMap
+    ~chunk_doc_map: HashMap<u64, u64> = HashMap.new();
+    collect_unique_chunks_map(&vector_results.scored_chunks, &~chunk_doc_map);
+    collect_unique_chunks_map(&fulltext_results.scored_chunks, &~chunk_doc_map);
+    collect_unique_chunks_map(&graph_results.scored_chunks, &~chunk_doc_map);
 
     # For each unique chunk, compute RRF score
     ~result = Vec.new();
+    ~keys = chunk_doc_map.keys();
     ~i: u32 = 0;
-    W i < all_chunks.len() as u32 {
-        ~chunk_id = all_chunks.get(i as usize).0;
-        ~doc_id = all_chunks.get(i as usize).1;
+    W i < keys.len() as u32 {
+        ~chunk_id = keys.get(i as usize);
+        ~doc_id = chunk_doc_map.get(chunk_id);
 
         ~rrf_score: f64 = 0.0;
 
-        # Check rank in vector results
-        ~rank_v = find_rank(chunk_id, &vector_results.scored_chunks);
-        if rank_v > 0 {
-            rrf_score = rrf_score + 1.0 / (k_f64 + rank_v as f64);
+        M rank_map_v.get(&chunk_id) {
+            Some(rank_v) => { rrf_score = rrf_score + 1.0 / (k_f64 + rank_v as f64); },
+            None => {},
         }
-
-        # Check rank in fulltext results
-        ~rank_f = find_rank(chunk_id, &fulltext_results.scored_chunks);
-        if rank_f > 0 {
-            rrf_score = rrf_score + 1.0 / (k_f64 + rank_f as f64);
+        M rank_map_f.get(&chunk_id) {
+            Some(rank_f) => { rrf_score = rrf_score + 1.0 / (k_f64 + rank_f as f64); },
+            None => {},
         }
-
-        # Check rank in graph results
-        ~rank_g = find_rank(chunk_id, &graph_results.scored_chunks);
-        if rank_g > 0 {
-            rrf_score = rrf_score + 1.0 / (k_f64 + rank_g as f64);
+        M rank_map_g.get(&chunk_id) {
+            Some(rank_g) => { rrf_score = rrf_score + 1.0 / (k_f64 + rank_g as f64); },
+            None => {},
         }
 
         result.push(ScoredChunk.new(chunk_id, doc_id, rrf_score, ENGINE_TAG_RAG));
@@ -416,75 +424,129 @@ F normalize_engine_scores(chunks: &Vec<ScoredChunk>) -> Vec<ScoredChunk> {
     result
 }
 
-## Collect unique (chunk_id, doc_id) pairs into accumulator
-F collect_unique_chunks(chunks: &Vec<ScoredChunk>, acc: &~Vec<(u64, u64)>) {
+## Collect unique (chunk_id → doc_id) pairs into HashMap
+F collect_unique_chunks_map(chunks: &Vec<ScoredChunk>, acc: &~HashMap<u64, u64>) {
     ~i: u32 = 0;
     W i < chunks.len() as u32 {
         ~c = chunks.get(i as usize);
-        ~already_present = false;
-        ~j: u32 = 0;
-        W j < acc.len() as u32 {
-            if acc.get(j as usize).0 == c.chunk_id {
-                already_present = true;
-                j = acc.len() as u32;  # Break
-            }
-            j = j + 1;
-        }
-        if !already_present {
-            acc.push((c.chunk_id, c.doc_id));
+        if !acc.contains_key(&c.chunk_id) {
+            acc.insert(c.chunk_id, c.doc_id);
         }
         i = i + 1;
     }
 }
 
-## Find a chunk's normalized score in a result set (0.0 if not present)
-F find_chunk_score(chunk_id: u64, chunks: &Vec<ScoredChunk>) -> f64 {
+## Build a HashMap of chunk_id → normalized score for O(1) lookup
+F build_score_map(chunks: &Vec<ScoredChunk>) -> HashMap<u64, f64> {
+    ~map: HashMap<u64, f64> = HashMap.new();
     ~i: u32 = 0;
     W i < chunks.len() as u32 {
         ~c = chunks.get(i as usize);
-        if c.chunk_id == chunk_id {
-            return c.score;
-        }
+        map.insert(c.chunk_id, c.score);
         i = i + 1;
     }
-    0.0
+    map
 }
 
-## Find 1-based rank of a chunk in a result set (0 if not present)
-## Assumes results are pre-sorted by score descending by the engine
-F find_rank(chunk_id: u64, chunks: &Vec<ScoredChunk>) -> u32 {
+## Get score from HashMap (0.0 if not present)
+F get_score_from_map(map: &HashMap<u64, f64>, chunk_id: u64) -> f64 {
+    M map.get(&chunk_id) {
+        Some(score) => score,
+        None => 0.0,
+    }
+}
+
+## Build a HashMap of chunk_id → 1-based rank for O(1) lookup
+## Assumes input is pre-sorted by score descending
+F build_rank_map(chunks: &Vec<ScoredChunk>) -> HashMap<u64, u32> {
+    ~map: HashMap<u64, u32> = HashMap.new();
     ~i: u32 = 0;
     W i < chunks.len() as u32 {
-        if chunks.get(i as usize).chunk_id == chunk_id {
-            return i + 1;  # 1-based rank
+        ~c = chunks.get(i as usize);
+        if !map.contains_key(&c.chunk_id) {
+            map.insert(c.chunk_id, i + 1);  # 1-based rank
         }
         i = i + 1;
     }
-    0
+    map
 }
 
-## Sort scored chunks by score descending (selection sort — small N expected)
+## Sort scored chunks by score descending — O(N log N) merge sort
 F sort_scored_chunks_desc(chunks: &~Vec<ScoredChunk>) {
     ~n = chunks.len() as u32;
+    if n <= 1 {
+        return;
+    }
+    # Bottom-up merge sort using auxiliary vector of indices
+    ~indices = Vec.new();
+    ~aux = Vec.new();
     ~i: u32 = 0;
     W i < n {
-        ~max_idx = i;
-        ~j = i + 1;
-        W j < n {
-            if chunks.get(j as usize).score > chunks.get(max_idx as usize).score {
-                max_idx = j;
-            }
-            j = j + 1;
-        }
-        if max_idx != i {
-            chunks.swap(i as usize, max_idx as usize);
-        }
+        indices.push(i);
+        aux.push(i);
         i = i + 1;
+    }
+
+    ~width: u32 = 1;
+    W width < n {
+        ~left: u32 = 0;
+        W left < n {
+            ~mid = left + width;
+            if mid > n { mid = n; }
+            ~right = left + width * 2;
+            if right > n { right = n; }
+            # Merge [left, mid) and [mid, right) from indices into aux
+            ~li = left;
+            ~ri = mid;
+            ~k = left;
+            W k < right {
+                if li < mid && (ri >= right ||
+                    chunks.get(indices.get(li as usize) as usize).score >=
+                    chunks.get(indices.get(ri as usize) as usize).score) {
+                    aux.set(k as usize, indices.get(li as usize));
+                    li = li + 1;
+                } else {
+                    aux.set(k as usize, indices.get(ri as usize));
+                    ri = ri + 1;
+                }
+                k = k + 1;
+            }
+            left = left + width * 2;
+        }
+        # Copy aux back to indices
+        ~c: u32 = 0;
+        W c < n {
+            indices.set(c as usize, aux.get(c as usize));
+            c = c + 1;
+        }
+        width = width * 2;
+    }
+
+    # Reorder chunks in-place based on sorted indices
+    ~sorted = Vec.new();
+    ~si: u32 = 0;
+    W si < n {
+        ~idx = indices.get(si as usize);
+        ~c = chunks.get(idx as usize);
+        sorted.push(ScoredChunk.new(c.chunk_id, c.doc_id, c.score, c.source_engine));
+        si = si + 1;
+    }
+    ~wi: u32 = 0;
+    W wi < n {
+        ~s = sorted.get(wi as usize);
+        ~target = chunks.get_mut(wi as usize);
+        target.chunk_id = s.chunk_id;
+        target.doc_id = s.doc_id;
+        target.score = s.score;
+        target.source_engine = s.source_engine;
+        wi = wi + 1;
     }
 }
 
 ## Look up chunk text from a (chunk_id, text) lookup table
 F lookup_chunk_text(chunk_id: u64, lookup: &Vec<(u64, Str)>) -> Str {
+    # Build HashMap for O(1) lookup when called in a loop
+    # Callers with many lookups should use build_chunk_text_map instead
     ~i: u32 = 0;
     W i < lookup.len() as u32 {
         ~entry = lookup.get(i as usize);
@@ -494,4 +556,16 @@ F lookup_chunk_text(chunk_id: u64, lookup: &Vec<(u64, Str)>) -> Str {
         i = i + 1;
     }
     Str.new()
+}
+
+## Build a HashMap for chunk text lookups (O(1) per lookup)
+F build_chunk_text_map(lookup: &Vec<(u64, Str)>) -> HashMap<u64, Str> {
+    ~map: HashMap<u64, Str> = HashMap.new();
+    ~i: u32 = 0;
+    W i < lookup.len() as u32 {
+        ~entry = lookup.get(i as usize);
+        map.insert(entry.0, entry.1.clone());
+        i = i + 1;
+    }
+    map
 }

@@ -98,18 +98,30 @@ X RagIndexDef {
             },
             "target_size" => {
                 ~size = parse_u32(value)?;
+                if size < 16 || size > 65536 {
+                    return Err(err_rag_invalid_option(key, value));
+                }
                 self.target_chunk_size = size;
             },
             "min_size" => {
                 ~size = parse_u32(value)?;
+                if size < 1 || size > 65536 {
+                    return Err(err_rag_invalid_option(key, value));
+                }
                 self.min_chunk_size = size;
             },
             "max_size" => {
                 ~size = parse_u32(value)?;
+                if size < 16 || size > 131072 {
+                    return Err(err_rag_invalid_option(key, value));
+                }
                 self.max_chunk_size = size;
             },
             "overlap" => {
                 ~overlap = parse_u32(value)?;
+                if overlap > 16384 {
+                    return Err(err_rag_invalid_option(key, value));
+                }
                 self.overlap_tokens = overlap;
             },
             "model" => {
@@ -255,7 +267,20 @@ X RagDDL {
 # ============================================================================
 
 F parse_u32(s: &Str) -> Result<u32, VaisError> {
-    ~result: u32 = 0;
+    if s.len() == 0 {
+        return Err(VaisError.new(
+            "VAIS-0809004",
+            "Cannot parse empty string as integer"
+        ))
+    }
+    # Max u32 = 4294967295 (10 digits). Reject strings > 10 digits upfront.
+    if s.len() > 10 {
+        return Err(VaisError.new(
+            "VAIS-0809004",
+            "Integer overflow: '{s}' exceeds u32 range"
+        ))
+    }
+    ~result: u64 = 0;
     ~i: u32 = 0;
     W i < s.len() {
         ~c = s.byte_at(i);
@@ -265,8 +290,14 @@ F parse_u32(s: &Str) -> Result<u32, VaisError> {
                 "Cannot parse '{s}' as integer"
             ));
         }
-        result = result * 10 + (c - 48) as u32;
+        result = result * 10 + (c - 48) as u64;
+        if result > 4294967295 {
+            return Err(VaisError.new(
+                "VAIS-0809004",
+                "Integer overflow: '{s}' exceeds u32 range"
+            ))
+        }
         i = i + 1;
     }
-    Ok(result)
+    Ok(result as u32)
 }

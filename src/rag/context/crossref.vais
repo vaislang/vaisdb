@@ -11,6 +11,7 @@ U rag/types.{
     EDGE_TYPE_REFERENCES, EDGE_TYPE_RELATED_TO,
     err_rag_chunk_not_found, err_rag_doc_not_found
 };
+U rag/context/helpers.{find_graph_node};
 
 # Reference type constants
 L REF_TYPE_EXPLICIT: u8 = 0;
@@ -250,17 +251,4 @@ X CrossRefTracker {
     F ref_count(&self) -> u64 {
         self.references.len() as u64
     }
-}
-
-# Helper: find graph node ID for a chunk
-F find_graph_node(chunk_id: u64, mapping: &Vec<(u64, u64)>) -> Option<u64> {
-    ~i: u32 = 0;
-    W i < mapping.len() as u32 {
-        ~entry = mapping.get(i as usize);
-        if entry.0 == chunk_id {
-            return Some(entry.1);
-        }
-        i = i + 1;
-    }
-    None
 }

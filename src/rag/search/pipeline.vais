@@ -15,6 +15,7 @@ U std/vec.Vec;
 U std/string.Str;
 U std/option.{Option, Some, None};
 U std/hashmap.HashMap;
+U std/result.{Result, Ok, Err};
 U storage/error.{VaisError};
 U rag/types.{
     RagSearchResult, RagFusionConfig, ScoredChunk, ChunkInfo, DocumentInfo,
@@ -261,6 +262,7 @@ X RagSearchPipeline {
         # For each high-scoring chunk (from vector + fulltext),
         # find 1-hop neighbors via NEXT_CHUNK edges and assign decayed score
         ~decay_factor: f64 = 0.5;
+        ~seen: HashMap<u64, bool> = HashMap.new();
 
         # Process vector results
         ~vi: u32 = 0;
@@ -268,7 +270,7 @@ X RagSearchPipeline {
             ~vc = vector_results.scored_chunks.get(vi as usize);
             add_neighbor_boosts(
                 vc.chunk_id, vc.doc_id, vc.score * decay_factor,
-                graph_edges, &~boost_set
+                graph_edges, &~boost_set, &~seen
             );
             vi = vi + 1;
         }
@@ -279,7 +281,7 @@ X RagSearchPipeline {
             ~fc = fulltext_results.scored_chunks.get(fi as usize);
             add_neighbor_boosts(
                 fc.chunk_id, fc.doc_id, fc.score * decay_factor,
-                graph_edges, &~boost_set
+                graph_edges, &~boost_set, &~seen
             );
             fi = fi + 1;
         }
@@ -329,44 +331,52 @@ F build_chunk_text_lookup(chunks: &Vec<ChunkInfo>) -> Vec<(u64, Str)> {
     lookup
 }
 
+## Build chunk info HashMap for O(1) lookup by chunk_id
+F build_chunk_info_map(chunks: &Vec<ChunkInfo>) -> HashMap<u64, u32> {
+    ~map: HashMap<u64, u32> = HashMap.new();  # chunk_id → index in chunks vec
+    ~i: u32 = 0;
+    W i < chunks.len() as u32 {
+        ~c = chunks.get(i as usize);
+        map.insert(c.chunk_id, i);
+        i = i + 1;
+    }
+    map
+}
+
+## Build document info HashMap for O(1) lookup by doc_id
+F build_doc_info_map(docs: &Vec<DocumentInfo>) -> HashMap<u64, u32> {
+    ~map: HashMap<u64, u32> = HashMap.new();  # doc_id → index in docs vec
+    ~i: u32 = 0;
+    W i < docs.len() as u32 {
+        ~d = docs.get(i as usize);
+        map.insert(d.doc_id, i);
+        i = i + 1;
+    }
+    map
+}
+
 ## Add neighbor boost scores for a chunk's graph neighbors
+## Uses a seen set to avoid O(N) dedup per neighbor
 F add_neighbor_boosts(
     chunk_id: u64,
     doc_id: u64,
     boost_score: f64,
     edges: &Vec<(u64, u64)>,
     result: &~EngineResultSet,
+    seen: &~HashMap<u64, bool>,
 ) {
     ~i: u32 = 0;
     W i < edges.len() as u32 {
         ~edge = edges.get(i as usize);
         if edge.0 == chunk_id {
-            # Forward neighbor — add boost, check for duplicate
-            ~already = false;
-            ~j: u32 = 0;
-            W j < result.scored_chunks.len() as u32 {
-                if result.scored_chunks.get(j as usize).chunk_id == edge.1 {
-                    already = true;
-                    j = result.scored_chunks.len() as u32;  # Break
-                }
-                j = j + 1;
-            }
-            if !already {
+            if !seen.contains_key(&edge.1) {
+                seen.insert(edge.1, true);
                 result.add(edge.1, doc_id, boost_score);
             }
         }
         if edge.1 == chunk_id {
-            # Backward neighbor — add boost
-            ~already = false;
-            ~j: u32 = 0;
-            W j < result.scored_chunks.len() as u32 {
-                if result.scored_chunks.get(j as usize).chunk_id == edge.0 {
-                    already = true;
-                    j = result.scored_chunks.len() as u32;  # Break
-                }
-                j = j + 1;
-            }
-            if !already {
+            if !seen.contains_key(&edge.0) {
+                seen.insert(edge.0, true);
                 result.add(edge.0, doc_id, boost_score);
             }
         }

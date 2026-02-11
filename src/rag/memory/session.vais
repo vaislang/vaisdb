@@ -8,6 +8,7 @@ U std/vec.Vec;
 U std/string.Str;
 U std/option.{Option, Some, None};
 U std/hashmap.HashMap;
+U std/result.{Result, Ok, Err};
 U storage/error.{VaisError};
 U rag/types.{
     LABEL_SESSION, EDGE_TYPE_SESSION_CONTEXT, EDGE_TYPE_TEMPORAL_NEXT,
@@ -115,9 +116,13 @@ X AgentSession {
     ## Get session duration in seconds
     F duration_seconds(&self, current_time: i64) -> u64 {
         if self.closed_at > 0 {
-            (self.closed_at - self.created_at) as u64
+            ~diff = self.closed_at - self.created_at;
+            if diff < 0 { return 0 }
+            diff as u64
         } else {
-            (current_time - self.created_at) as u64
+            ~diff = current_time - self.created_at;
+            if diff < 0 { return 0 }
+            diff as u64
         }
     }
 
@@ -212,7 +217,24 @@ X SessionManager {
         Ok(session_id)
     }
 
-    ## Get a session by ID
+    ## Get a session by ID with agent ownership validation
+    ## Returns Err if session belongs to a different agent
+    F get_session_for_agent(&self, session_id: u64, agent_id: &Str) -> Result<&AgentSession, VaisError> {
+        M self.get_session(session_id) {
+            Some(session) => {
+                if session.agent_id != *agent_id {
+                    return Err(VaisError.new(
+                        "VAIS-0808011",
+                        "Session {session_id} belongs to a different agent"
+                    ));
+                }
+                Ok(session)
+            },
+            None => Err(err_rag_session_not_found(session_id)),
+        }
+    }
+
+    ## Get a session by ID (internal, no ownership check)
     F get_session(&self, session_id: u64) -> Option<&AgentSession> {
         ~i: u32 = 0;
         W i < self.sessions.len() as u32 {
@@ -252,14 +274,21 @@ X SessionManager {
         result
     }
 
-    ## Close a session
-    F close_session(~self, session_id: u64, current_time: i64) -> Result<(), VaisError> {
+    ## Close a session (validates agent ownership)
+    F close_session(~self, session_id: u64, agent_id: &Str,
+                    current_time: i64) -> Result<(), VaisError> {
         if !self.is_open {
             return Err(err_rag_engine_closed());
         }
 
         M self.get_session_mut(session_id) {
             Some(session) => {
+                if session.agent_id != *agent_id {
+                    return Err(VaisError.new(
+                        "VAIS-0808011",
+                        "Session {session_id} belongs to a different agent"
+                    ));
+                }
                 session.close(current_time);
                 Ok(())
             },
@@ -371,7 +400,8 @@ X SessionManager {
             ~should_keep = true;
 
             if session.is_closed() {
-                ~age = (current_time - session.closed_at) as u64;
+                ~age_diff = current_time - session.closed_at;
+                ~age: u64 = if age_diff > 0 { age_diff as u64 } else { 0 };
                 if age > threshold_seconds {
                     should_keep = false;
                     removed_count = removed_count + 1;

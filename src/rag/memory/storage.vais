@@ -18,7 +18,7 @@ U std/result.{Result, Ok, Err}
 U storage/error.{VaisError}
 U rag/types.{
     LABEL_MEMORY, EDGE_TYPE_RELATED_TO, EDGE_TYPE_TEMPORAL_NEXT,
-    EDGE_TYPE_SESSION_CONTEXT,
+    EDGE_TYPE_SESSION_CONTEXT, MEMORY_TYPE_WORKING,
     err_rag_memory_not_found, err_rag_engine_closed
 }
 U rag/memory/types.{MemoryEntry, MemoryConfig, ImportanceScorer}
@@ -191,21 +191,23 @@ X MemoryStore {
             return Err(err_rag_engine_closed())
         }
 
-        ~index = None
-        E (i, entry) in self.memories.iter().enumerate() {
+        ~found_index: i64 = -1
+        ~i: u32 = 0
+        W i < self.memories.len() as u32 {
+            ~entry = self.memories.get(i as usize)
             if entry.memory_id == memory_id {
-                index = Some(i)
-                break
+                found_index = i as i64
+                i = self.memories.len() as u32  # exit loop
+            } else {
+                i = i + 1
             }
         }
 
-        M index {
-            Some(i) => {
-                self.memories.remove(i)
-                Ok(())
-            }
-            None => Err(err_rag_memory_not_found()),
+        if found_index < 0 {
+            return Err(err_rag_memory_not_found())
         }
+        self.memories.remove(found_index as usize)
+        Ok(())
     }
 
     ## Delete all expired memories
@@ -218,16 +220,22 @@ X MemoryStore {
 
         ~to_delete = Vec.new()
 
-        E (i, entry) in self.memories.iter().enumerate() {
+        ~i: u32 = 0
+        W i < self.memories.len() as u32 {
+            ~entry = self.memories.get(i as usize)
             if entry.is_expired(current_time) {
                 to_delete.push(i)
             }
+            i = i + 1
         }
 
         # Remove in reverse order to maintain indices
         ~deleted_count = to_delete.len() as u32
-        E i in to_delete.iter().rev() {
-            self.memories.remove(*i)
+        ~j: i64 = (to_delete.len() as i64) - 1
+        W j >= 0 {
+            ~idx = to_delete.get(j as usize)
+            self.memories.remove(idx as usize)
+            j = j - 1
         }
 
         deleted_count
@@ -305,28 +313,51 @@ X MemoryStore {
         ~result = Vec.new()
 
         # Collect all memories with decayed importance
-        ~scored = Vec.new()
-        E entry in &self.memories {
+        ~ids = Vec.new()
+        ~scores = Vec.new()
+        ~i: u32 = 0
+        W i < self.memories.len() as u32 {
+            ~entry = self.memories.get(i as usize)
             ~importance = entry.importance_with_decay(
                 current_time,
                 self.config.decay_half_life,
             )
-            scored.push((entry, importance))
+            ids.push(i)
+            scores.push(importance)
+            i = i + 1
         }
 
-        # Sort by importance (descending)
-        scored.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1).unwrap_or(std.cmp.Ordering.Equal)
-        })
+        # Insertion sort by importance (descending)
+        ~si: u32 = 1
+        W si < ids.len() as u32 {
+            ~key_id = ids.get(si as usize)
+            ~key_score = scores.get(si as usize)
+            ~sj: i64 = (si as i64) - 1
+            W sj >= 0 {
+                ~sj_score = scores.get(sj as usize)
+                if sj_score < key_score {
+                    ids.set((sj + 1) as usize, ids.get(sj as usize))
+                    scores.set((sj + 1) as usize, sj_score)
+                    sj = sj - 1
+                } else {
+                    sj = -1  # exit inner loop
+                }
+            }
+            ids.set((sj + 1) as usize, key_id)
+            scores.set((sj + 1) as usize, key_score)
+            si = si + 1
+        }
 
         # Take top limit
         ~count = 0u32
-        E (entry, _importance) in scored {
-            if count >= limit {
-                break
+        W count < limit {
+            if count >= ids.len() as u32 {
+                count = limit  # exit loop
+            } else {
+                ~idx = ids.get(count as usize)
+                result.push(self.memories.get(idx as usize))
+                count = count + 1
             }
-            result.push(entry)
-            count = count + 1
         }
 
         result
@@ -409,35 +440,60 @@ X MemoryStore {
         ~max_entries = self.config.max_working_memory_entries as usize
 
         # Count working memories
-        ~working_memories = Vec.new()
-        E entry in &self.memories {
+        ~wm_ids = Vec.new()
+        ~wm_scores = Vec.new()
+
+        ~i: u32 = 0
+        W i < self.memories.len() as u32 {
+            ~entry = self.memories.get(i as usize)
             if entry.memory_type == MEMORY_TYPE_WORKING {
                 ~importance = entry.importance_with_decay(
                     current_time,
                     self.config.decay_half_life,
                 )
-                working_memories.push((entry.memory_id, importance))
+                wm_ids.push(entry.memory_id)
+                wm_scores.push(importance)
             }
+            i = i + 1
         }
 
-        if working_memories.len() <= max_entries {
+        if wm_ids.len() <= max_entries {
             return 0
         }
 
-        # Sort by importance (ascending, so least important first)
-        working_memories.sort_by(|a, b| {
-            a.1.partial_cmp(&b.1).unwrap_or(std.cmp.Ordering.Equal)
-        })
+        # Insertion sort by importance (ascending, least important first)
+        ~si: u32 = 1
+        W si < wm_ids.len() as u32 {
+            ~key_id = wm_ids.get(si as usize)
+            ~key_score = wm_scores.get(si as usize)
+            ~sj: i64 = (si as i64) - 1
+            W sj >= 0 {
+                ~sj_score = wm_scores.get(sj as usize)
+                if sj_score > key_score {
+                    wm_ids.set((sj + 1) as usize, wm_ids.get(sj as usize))
+                    wm_scores.set((sj + 1) as usize, sj_score)
+                    sj = sj - 1
+                } else {
+                    sj = -1  # exit inner loop
+                }
+            }
+            wm_ids.set((sj + 1) as usize, key_id)
+            wm_scores.set((sj + 1) as usize, key_score)
+            si = si + 1
+        }
 
-        # Evict excess memories
-        ~to_evict = working_memories.len() - max_entries
+        # Evict excess memories (least important first)
+        ~to_evict = wm_ids.len() - max_entries
         ~evicted = 0u32
 
-        E (memory_id, _importance) in working_memories.iter().take(to_evict) {
-            M self.delete_memory(*memory_id) {
-                Ok(_) => evicted = evicted + 1,
+        ~ei: u32 = 0
+        W ei < to_evict as u32 {
+            ~mid = wm_ids.get(ei as usize)
+            M self.delete_memory(mid) {
+                Ok(_) => { evicted = evicted + 1 },
                 Err(_) => {},
             }
+            ei = ei + 1
         }
 
         evicted

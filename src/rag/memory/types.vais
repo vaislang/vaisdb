@@ -38,6 +38,11 @@ S MemoryEntry {
     created_at: i64,
     ttl_seconds: u64,
     session_id: u64,
+    # MVCC tuple metadata (set by storage layer on persist)
+    txn_id_create: u64,
+    txn_id_expire: u64,
+    cmd_id_create: u32,
+    cmd_id_expire: u32,
 }
 
 X MemoryEntry {
@@ -65,6 +70,10 @@ X MemoryEntry {
             created_at: current_time,
             ttl_seconds: ttl_seconds,
             session_id: session_id,
+            txn_id_create: 0,
+            txn_id_expire: 0,
+            cmd_id_create: 0,
+            cmd_id_expire: 0,
         }
     }
 
@@ -184,6 +193,7 @@ X MemoryEntry {
         ~metadata_count = buf.read_u32_le()?
 
         # Create placeholder entry (content/embedding/metadata loaded separately)
+        # MVCC fields are set by storage layer on persist, default to 0 here.
         Ok(MemoryEntry {
             memory_id: memory_id,
             memory_type: memory_type,
@@ -196,6 +206,10 @@ X MemoryEntry {
             created_at: created_at,
             ttl_seconds: ttl_seconds,
             session_id: session_id,
+            txn_id_create: 0,
+            txn_id_expire: 0,
+            cmd_id_create: 0,
+            cmd_id_expire: 0,
         })
     }
 

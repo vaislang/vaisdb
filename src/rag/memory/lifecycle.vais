@@ -185,7 +185,8 @@ X MemoryLifecycleManager {
 
             # Check if memory has expired based on TTL
             if entry.ttl_seconds > 0 {
-                ~age = (current_time - entry.created_at) as u64;
+                ~age_diff = current_time - entry.created_at;
+                ~age: u64 = if age_diff > 0 { age_diff as u64 } else { 0 };
                 if age > entry.ttl_seconds {
                     ~action = LifecycleAction.new(
                         ACTION_EXPIRE,
@@ -232,39 +233,15 @@ X MemoryLifecycleManager {
         W i < memories.len() as u32 {
             ~entry = memories.get(i as usize);
             if entry.memory_type == MEMORY_TYPE_WORKING {
-                ~age = (current_time - entry.created_at) as u64;
+                ~age_diff = current_time - entry.created_at;
+                ~age: u64 = if age_diff > 0 { age_diff as u64 } else { 0 };
                 candidates.push((entry.memory_id, entry.importance, age));
             }
             i = i + 1;
         }
 
-        # Manual bubble sort by importance (ascending), then by age (descending)
-        ~i: u32 = 0;
-        W i < candidates.len() as u32 {
-            ~j: u32 = 0;
-            W j < (candidates.len() as u32 - i - 1) {
-                ~a = candidates.get(j as usize);
-                ~b = candidates.get((j + 1) as usize);
-
-                ~should_swap = false;
-                if a.1 > b.1 {
-                    # Lower importance comes first
-                    should_swap = true;
-                } else if a.1 == b.1 && a.2 < b.2 {
-                    # Same importance, older comes first
-                    should_swap = true;
-                }
-
-                if should_swap {
-                    ~tmp = *a;
-                    candidates.set(j as usize, *b);
-                    candidates.set((j + 1) as usize, tmp);
-                }
-
-                j = j + 1;
-            }
-            i = i + 1;
-        }
+        # O(N log N) merge sort by importance ascending, then age descending
+        sort_eviction_candidates(&~candidates);
 
         # Take first evict_count candidates
         ~i: u32 = 0;
@@ -297,7 +274,8 @@ X MemoryLifecycleManager {
                 # 1. High importance (> 0.8)
                 # 2. Accessed multiple times (> 3)
                 # 3. Not too old (< 1 hour)
-                ~age = (current_time - entry.created_at) as u64;
+                ~age_diff = current_time - entry.created_at;
+                ~age: u64 = if age_diff > 0 { age_diff as u64 } else { 0 };
 
                 if entry.importance > 0.8 &&
                    entry.access_count > 3 &&
@@ -330,7 +308,8 @@ X MemoryLifecycleManager {
             ~entry = memories.get(i as usize);
 
             # Apply decay based on time since last access
-            ~time_since_access = (current_time - entry.last_accessed) as u64;
+            ~tsa_diff = current_time - entry.last_accessed;
+            ~time_since_access: u64 = if tsa_diff > 0 { tsa_diff as u64 } else { 0 };
 
             # Decay if not accessed for more than 1 hour and importance > 0.1
             if time_since_access > 3600 && entry.importance > 0.1 {
@@ -361,5 +340,110 @@ X MemoryLifecycleManager {
     ## Reset last run time (for testing)
     F reset_last_run(~self) {
         self.last_run_at = 0;
+    }
+}
+
+# ============================================================================
+# Helper: O(N log N) merge sort for eviction candidates
+# Sorts by importance ascending, then by age descending (oldest first)
+# Candidate tuple: (memory_id: u64, importance: f64, age: u64)
+# ============================================================================
+
+## Compare two candidates: returns true if a should come before b
+## (lower importance first; same importance → higher age first)
+F evict_compare_before(
+    candidates: &Vec<(u64, f64, u64)>, idx_a: u32, idx_b: u32
+) -> bool {
+    ~a = candidates.get(idx_a as usize);
+    ~b = candidates.get(idx_b as usize);
+    if a.1 < b.1 {
+        return true;
+    }
+    if a.1 > b.1 {
+        return false;
+    }
+    # Same importance — older (higher age) comes first
+    a.2 >= b.2
+}
+
+## Bottom-up merge sort on eviction candidates via index permutation
+F sort_eviction_candidates(candidates: &~Vec<(u64, f64, u64)>) {
+    ~n = candidates.len() as u32;
+    if n <= 1 {
+        return;
+    }
+
+    # Build index + aux arrays
+    ~indices = Vec.new();
+    ~aux = Vec.new();
+    ~i: u32 = 0;
+    W i < n {
+        indices.push(i);
+        aux.push(i);
+        i = i + 1;
+    }
+
+    # Bottom-up merge sort on indices
+    ~width: u32 = 1;
+    W width < n {
+        ~left: u32 = 0;
+        W left < n {
+            ~mid = left + width;
+            if mid > n { mid = n; }
+            ~right = left + width * 2;
+            if right > n { right = n; }
+
+            ~li = left;
+            ~ri = mid;
+            ~k = left;
+            W k < right {
+                if li < mid && (ri >= right ||
+                    evict_compare_before(candidates,
+                        *indices.get(li as usize),
+                        *indices.get(ri as usize))) {
+                    aux.set(k as usize, *indices.get(li as usize));
+                    li = li + 1;
+                } else {
+                    aux.set(k as usize, *indices.get(ri as usize));
+                    ri = ri + 1;
+                }
+                k = k + 1;
+            }
+            left = left + width * 2;
+        }
+        # Copy aux → indices
+        ~c: u32 = 0;
+        W c < n {
+            indices.set(c as usize, *aux.get(c as usize));
+            c = c + 1;
+        }
+        width = width * 2;
+    }
+
+    # Apply permutation via swap cycles
+    ~visited = Vec.new();
+    ~vi: u32 = 0;
+    W vi < n {
+        visited.push(false);
+        vi = vi + 1;
+    }
+    ~ci: u32 = 0;
+    W ci < n {
+        if !*visited.get(ci as usize) && *indices.get(ci as usize) != ci {
+            ~j = ci;
+            ~done = false;
+            W !done {
+                ~next = *indices.get(j as usize);
+                if next == ci {
+                    visited.set(j as usize, true);
+                    done = true;
+                } else {
+                    candidates.swap(j as usize, next as usize);
+                    visited.set(j as usize, true);
+                    j = next;
+                }
+            }
+        }
+        ci = ci + 1;
     }
 }
