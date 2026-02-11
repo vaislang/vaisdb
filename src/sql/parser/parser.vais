@@ -357,6 +357,49 @@ X Parser {
             return Ok(TableRef.Subquery { query: Box.new(query), alias });
         }
 
+        # Check for table-valued function: VECTOR_SEARCH(...), GRAPH_TRAVERSE(...), FULLTEXT_MATCH(...)
+        if self.is_identifier() {
+            let saved_pos = self.pos;
+            let name = self.expect_identifier()?;
+            let name_upper = name.to_uppercase();
+
+            # Check if this is a known table-valued function followed by LParen
+            if (name_upper == "VECTOR_SEARCH" || name_upper == "GRAPH_TRAVERSE" || name_upper == "FULLTEXT_MATCH")
+                && self.check(TokenKind.LParen) {
+                # Parse table function: name(args...) AS alias
+                self.expect(TokenKind.LParen)?;
+
+                # Parse comma-separated argument expressions
+                ~let args = Vec.new();
+                if !self.check(TokenKind.RParen) {
+                    loop {
+                        let arg = self.parse_expr()?;
+                        args.push(arg);
+                        if !self.match_token(TokenKind.Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(TokenKind.RParen)?;
+
+                # Parse optional alias
+                ~let alias = Option.None;
+                if self.match_token(TokenKind.As) {
+                    let a = self.expect_identifier()?;
+                    alias = Option.Some(a);
+                } else if self.is_identifier() && !self.is_join_keyword() {
+                    # Implicit alias (without AS) -- but not if it looks like a JOIN keyword
+                    let a = self.expect_identifier()?;
+                    alias = Option.Some(a);
+                }
+
+                return Ok(TableRef.TableFunction { name, args, alias });
+            }
+
+            # Not a table function, backtrack and parse as regular table name
+            self.pos = saved_pos;
+        }
+
         # Table name with optional alias
         let name = self.expect_identifier()?;
         ~let alias = Option.None;

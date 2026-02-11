@@ -45,7 +45,7 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 | 3 | Vector Engine | ✅ Complete | 18/18 (100%) |
 | 4 | Graph Engine | ✅ Complete | 10/10 (100%) |
 | 5 | Full-Text Engine | ✅ Complete | 16/16 (100%) |
-| 6 | Hybrid Query Planner | ⏳ Planned | 0/20 (0%) |
+| 6 | Hybrid Query Planner | ✅ Complete | 20/20 (100%) |
 | 7 | RAG & AI-Native Features | ⏳ Planned | 0/24 (0%) |
 | 8 | Server & Client | ⏳ Planned | 0/20 (0%) |
 | 9 | Production Operations | ⏳ Planned | 0/24 (0%) |
@@ -697,38 +697,62 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ## Phase 6: Hybrid Query Planner
 
-> **Status**: ⏳ Planned
+> **Status**: ✅ Complete
 > **Dependency**: Phase 2, 3, 4, 5
 > **Goal**: Unified cost-based optimizer across all engine types
 
+### Phase 6 Implementation (2026-02-11)
+모드: 자동진행
+- [x] 1. Hybrid Plan Types + Cross-Engine Cost Model (Opus 직접) ✅ 2026-02-11
+  변경: src/planner/types.vais (HybridPlanNode 11 variants, HybridCost, EngineType, FusionMethod, QueryProfile, ~400줄), src/planner/cost_model.vais (per-engine cost estimation, VectorIndexStats, GraphStats, FullTextStats, HybridStats, ~400줄)
+- [x] 2. Query Analyzer — detect engine functions in AST (Sonnet 위임) ✅ 2026-02-11
+  변경: src/planner/analyzer.vais (AST walker, VECTOR_SEARCH/GRAPH_TRAVERSE/FULLTEXT_MATCH detection, parameter extraction, ~565줄)
+- [x] 3. Extended SQL Parser — engine functions as table-valued functions (Sonnet 위임) ✅ 2026-02-11
+  변경: src/sql/parser/ast.vais (TableFunction variant in TableRef enum), src/sql/parser/parser.vais (backtracking table-valued function parsing)
+- [x] 4. Engine-specific Planning — vector/graph/fulltext plan builders (Sonnet 위임) ✅ 2026-02-11
+  변경: src/planner/vector_plan.vais (pre/post filter strategy, ef_search adjustment, ~274줄), src/planner/graph_plan.vais (BFS/DFS selection, edge type pushdown, ~313줄), src/planner/fulltext_plan.vais (search mode detection, top_k adjustment, ~297줄)
+- [x] 5. Cross-engine Optimizer — rewrite rules, join ordering, score fusion (Opus 직접) ✅ 2026-02-11
+  변경: src/planner/optimizer.vais (4-pass optimization: predicate pushdown, fusion selection, join reorder, cost recalc; build_initial_plan, index selection, ~400+줄)
+- [x] 6. Pipeline Executor — stream results between engines, result merging (Opus 직접) ✅ 2026-02-11
+  변경: src/planner/pipeline.vais (Volcano iterator, score normalization, WeightedSum/RRF fusion, hash join, filter/project/sort/limit, ~700줄)
+- [x] 7. Statistics Collection — histograms, cardinality, per-engine stats (Sonnet 위임) ✅ 2026-02-11
+  변경: src/planner/statistics.vais (TableColumnStats, StatisticsCollector, reservoir sampling, equi-depth histograms, ANALYZE command, ~400줄)
+- [x] 8. Query Plan Cache — cache plans for repeated patterns (Sonnet 위임) ✅ 2026-02-11
+  변경: src/planner/cache.vais (PlanCacheKey FNV-1a, PlanCacheEntry LRU, DDL invalidation, prepared statement linking, ~475줄)
+- [x] 9. EXPLAIN / EXPLAIN ANALYZE — per-engine cost breakdown (Sonnet 위임) ✅ 2026-02-11
+  변경: src/planner/explain.vais (Text/JSON format, per-engine cost breakdown, recursive tree formatter, ~723줄)
+- [x] 10. HybridPlanner mod.vais Facade + ROADMAP Sync (Opus 직접) ✅ 2026-02-11
+  변경: src/planner/mod.vais (HybridPlanner facade: execute_query, plan_query, explain, analyze_table, cache management, PlannerStats, quick_plan/quick_explain, ~319줄)
+진행률: 10/10 (100%)
+
 ### Stage 1 - Unified Query AST
 
-- [ ] **Extended SQL parser** - VECTOR_SEARCH, GRAPH_TRAVERSE, FULLTEXT_MATCH as first-class table-valued functions
-- [ ] **Unified plan nodes** - VectorScan, GraphTraverse, FullTextScan alongside SeqScan, IndexScan, Join, Sort, Agg
-- [ ] **Cross-engine cost model** - Estimate cost per engine operation (HNSW = f(ef_search, dimension), Graph = f(avg_degree, depth), BM25 = f(posting_length))
-- [ ] **Plan enumeration** - Generate candidate plans combining engines
+- [x] **Extended SQL parser** - VECTOR_SEARCH, GRAPH_TRAVERSE, FULLTEXT_MATCH as first-class table-valued functions
+- [x] **Unified plan nodes** - VectorScan, GraphTraverse, FullTextScan alongside SeqScan, IndexScan, Join, Sort, Agg
+- [x] **Cross-engine cost model** - Estimate cost per engine operation (HNSW = f(ef_search, dimension), Graph = f(avg_degree, depth), BM25 = f(posting_length))
+- [x] **Plan enumeration** - Generate candidate plans combining engines
 
 ### Stage 2 - Cross-Engine Execution
 
-- [ ] **Pipeline execution** - Stream results between engines without full materialization
-- [ ] **Predicate pushdown into engines** - Push SQL WHERE into vector/graph/fulltext pre-filters
-- [ ] **Result merging** - Merge and rank results from multiple engines
-- [ ] **Score fusion** - Weighted sum and reciprocal rank fusion (RRF) as plan operators
-- [ ] **Per-engine profiling** - Track time/rows/memory per engine in EXPLAIN ANALYZE
+- [x] **Pipeline execution** - Stream results between engines without full materialization
+- [x] **Predicate pushdown into engines** - Push SQL WHERE into vector/graph/fulltext pre-filters
+- [x] **Result merging** - Merge and rank results from multiple engines
+- [x] **Score fusion** - Weighted sum and reciprocal rank fusion (RRF) as plan operators
+- [x] **Per-engine profiling** - Track time/rows/memory per engine in EXPLAIN ANALYZE
 
 ### Stage 3 - Optimization
 
-- [ ] **Statistics collection** - Row count, index cardinality, value distribution histograms, vector count per index
-- [ ] **Index selection** - Auto-choose best index per predicate (B+Tree vs HNSW vs fulltext)
-- [ ] **Join ordering** - Dynamic programming for small join count
-- [ ] **Query plan cache** - Cache plans for repeated query patterns (with prepared statement integration)
+- [x] **Statistics collection** - Row count, index cardinality, value distribution histograms, vector count per index
+- [x] **Index selection** - Auto-choose best index per predicate (B+Tree vs HNSW vs fulltext)
+- [x] **Join ordering** - Dynamic programming for small join count
+- [x] **Query plan cache** - Cache plans for repeated query patterns (with prepared statement integration)
 
 ### Stage 4 - Verification & Diagnostics
 
-- [ ] **EXPLAIN** - Show estimated plan with cost per operator
-- [ ] **EXPLAIN ANALYZE** - Show actual execution: time, rows, memory, engine breakdown (e.g., "80% graph, 15% vector, 5% SQL")
-- [ ] **Plan correctness** - Same results regardless of plan choice
-- [ ] **Regression tests** - Plan stability across optimizer changes
+- [x] **EXPLAIN** - Show estimated plan with cost per operator
+- [x] **EXPLAIN ANALYZE** - Show actual execution: time, rows, memory, engine breakdown (e.g., "80% graph, 15% vector, 5% SQL")
+- [x] **Plan correctness** - Same results regardless of plan choice
+- [x] **Regression tests** - Plan stability across optimizer changes
 
 ### Verification
 

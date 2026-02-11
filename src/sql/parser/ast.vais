@@ -91,7 +91,8 @@ L TableRef =
     Table { name: Str, alias: Option<Str> } |
     Join { join: JoinClause } |
     Subquery { query: Box<SelectQuery>, alias: Str } |
-    CrossJoin { left: Box<TableRef>, right: Box<TableRef> };
+    CrossJoin { left: Box<TableRef>, right: Box<TableRef> } |
+    TableFunction { name: Str, args: Vec<Expr>, alias: Option<Str> };
 
 S JoinClause {
     join_type: JoinType,
