@@ -47,7 +47,7 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 | 5 | Full-Text Engine | ✅ Complete | 16/16 (100%) |
 | 6 | Hybrid Query Planner | ✅ Complete | 20/20 (100%) |
 | 7 | RAG & AI-Native Features | ✅ Complete | 10/10 (100%) |
-| 8 | Server & Client | 🔄 In Progress | 0/10 (0%) |
+| 8 | Server & Client | ✅ Complete | 10/10 (100%) |
 | 9 | Production Operations | ⏳ Planned | 0/24 (0%) |
 | 10 | Security & Multi-tenancy | ⏳ Planned | 0/16 (0%) |
 
@@ -930,24 +930,33 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ## Phase 8: Server & Client
 
-> **Status**: 🔄 In Progress
+> **Status**: ✅ Complete
 > **Dependency**: Phase 6 (Hybrid Query Planner)
 > **Goal**: Client/server mode + embedded mode + wire protocol
 
 ### 구현 작업 (2026-02-12)
-모드: 개별선택
+모드: 자동진행
 - [x] 1. Types & Config 정의 (Sonnet 위임) ✅
   생성: src/server/types.vais (711줄), src/server/config.vais (647줄)
-- [ ] 2. Wire Protocol 직렬화 (Opus 직접) [blockedBy: 1]
-- [ ] 3. Connection & Session 관리 (Opus 직접) [blockedBy: 1]
-- [ ] 4. Authentication & TLS (Sonnet 위임) [blockedBy: 1]
-- [ ] 5. Query Handler & Executor Bridge (Opus 직접) [blockedBy: 2, 3]
-- [ ] 6. TCP Server & Accept Loop (Opus 직접) [blockedBy: 3, 4, 5]
-- [ ] 7. Embedded Mode (Sonnet 위임) [blockedBy: 5]
-- [ ] 8. Data Import/Export - COPY (Sonnet 위임) [blockedBy: 5]
-- [ ] 9. Vais Native Client (Sonnet 위임) [blockedBy: 2]
-- [ ] 10. Server 통합 & main.vais 갱신 (Opus 직접) [blockedBy: 6, 7, 8, 9]
-진행률: 1/10 (10%)
+- [x] 2. Wire Protocol 직렬화 (Opus 직접) ✅
+  생성: src/server/protocol.vais (788줄) — 메시지 framing, 전체 프로토콜 직렬화/역직렬화
+- [x] 3. Connection & Session 관리 (Opus 직접) ✅
+  생성: src/server/connection.vais (472줄) — ConnectionPool, Connection 상태 머신, 세션 관리
+- [x] 4. Authentication & TLS (Sonnet 위임) ✅
+  생성: src/server/auth.vais (304줄) — Authenticator, CredentialStore, TlsConfig, 4종 인증
+- [x] 5. Query Handler & Executor Bridge (Opus 직접) ✅
+  생성: src/server/handler.vais (410줄) — QueryHandler, SQL 태그 분류, 메시지 라우팅
+- [x] 6. TCP Server & Accept Loop (Opus 직접) ✅
+  생성: src/server/tcp.vais (415줄) — TcpServer, ConnectionProcessor, 연결 수명주기
+- [x] 7. Embedded Mode (Sonnet 위임) ✅
+  생성: src/server/embedded.vais (330줄) — EmbeddedDatabase, flock placeholder, SQLite-like API
+- [x] 8. Data Import/Export - COPY (Sonnet 위임) ✅
+  생성: src/server/copy.vais (398줄) — CopyHandler, CSV 파싱, 그래프 import 순서 검증
+- [x] 9. Vais Native Client (Sonnet 위임) ✅
+  생성: src/client/types.vais (472줄), src/client/mod.vais (184줄) — VaisClient, 연결 문자열 파싱
+- [x] 10. Server 통합 & main.vais 갱신 (Opus 직접) ✅
+  변경: src/server/mod.vais (모듈 등록), src/main.vais (서버 시작 진입점)
+진행률: 10/10 (100%)
 
 ### Stage 1 - Wire Protocol
 

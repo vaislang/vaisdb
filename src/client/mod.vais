@@ -1,2 +1,184 @@
-# Client Library
-# Vais native client, connection string parsing
+# VaisDB Native Client
+# Connection management, query execution, prepared statements, transaction control
+# NOTE: TCP networking requires std/net (not yet available) — placeholder methods
+
+U std/vec.Vec;
+U std/string.Str;
+U std/option.{Option, Some, None};
+U std/hashmap.HashMap;
+U storage/error.VaisError;
+U client/types.{
+    ClientConfig, ClientResult, ClientState,
+    err_client_not_connected, err_client_not_in_transaction,
+    err_client_already_in_transaction, err_client_prepared_not_found,
+};
+
+# ============================================================================
+# VaisClient
+# ============================================================================
+
+S VaisClient {
+    config: ClientConfig,
+    state: ClientState,
+    # TODO: socket handle when std/net is available
+    prepared_statements: HashMap<Str, Str>,  # name -> SQL
+}
+
+X VaisClient {
+    F new(config: ClientConfig) -> VaisClient {
+        VaisClient {
+            config,
+            state: ClientState.Disconnected,
+            prepared_statements: HashMap.new(),
+        }
+    }
+
+    # Connect to VaisDB server
+    # TODO: implement TCP connection when std/net is available
+    F connect(~self) -> Result<(), VaisError> {
+        I self.is_connected() {
+            R Ok(());
+        }
+
+        # TODO: Open TCP connection to self.config.connection.host:port
+        # TODO: Send startup message with protocol version
+        # TODO: Authenticate with user/password
+        # TODO: Wait for ReadyForQuery
+
+        self.state = ClientState.Connected;
+        Ok(())
+    }
+
+    # Close connection
+    F close(~self) {
+        # TODO: Send Terminate message when std/net is available
+        self.state = ClientState.Disconnected;
+        self.prepared_statements.clear();
+    }
+
+    F is_connected(self) -> bool {
+        M &self.state {
+            ClientState.Disconnected => false,
+            ClientState.Connected => true,
+            ClientState.InTransaction => true,
+        }
+    }
+
+    # Execute query and return result set
+    # TODO: implement when std/net is available
+    F query(~self, sql: &Str) -> Result<ClientResult, VaisError> {
+        I !self.is_connected() {
+            R Err(err_client_not_connected());
+        }
+
+        # TODO: Send Query message with SQL
+        # TODO: Receive RowDescription, DataRow(s), CommandComplete, ReadyForQuery
+        # TODO: Parse and return ClientResult
+
+        Ok(ClientResult.new())
+    }
+
+    # Execute DML statement and return affected rows
+    # TODO: implement when std/net is available
+    F execute(~self, sql: &Str) -> Result<u64, VaisError> {
+        I !self.is_connected() {
+            R Err(err_client_not_connected());
+        }
+
+        # TODO: Send Query message with SQL
+        # TODO: Receive CommandComplete with affected row count
+        # TODO: Receive ReadyForQuery
+
+        Ok(0)
+    }
+
+    # Prepare a named statement
+    F prepare(~self, name: &Str, sql: &Str) -> Result<(), VaisError> {
+        I !self.is_connected() {
+            R Err(err_client_not_connected());
+        }
+
+        # TODO: Send Parse, Describe, Sync messages
+        # TODO: Receive ParseComplete, ParameterDescription, RowDescription
+
+        self.prepared_statements.insert(name.clone(), sql.clone());
+        Ok(())
+    }
+
+    # Execute prepared statement with parameters
+    # TODO: implement when std/net is available
+    F execute_prepared(~self, name: &Str, params: &Vec<Vec<u8>>) -> Result<ClientResult, VaisError> {
+        I !self.is_connected() {
+            R Err(err_client_not_connected());
+        }
+
+        I !self.prepared_statements.contains_key(name) {
+            R Err(err_client_prepared_not_found(name.clone()));
+        }
+
+        # TODO: Send Bind, Execute, Sync messages
+        # TODO: Receive BindComplete, DataRow(s), CommandComplete, ReadyForQuery
+
+        Ok(ClientResult.new())
+    }
+
+    # Begin transaction
+    F begin(~self) -> Result<(), VaisError> {
+        I !self.is_connected() {
+            R Err(err_client_not_connected());
+        }
+
+        M &self.state {
+            ClientState.InTransaction => {
+                R Err(err_client_already_in_transaction());
+            },
+            _ => {},
+        }
+
+        # TODO: Send Query "BEGIN"
+        self.state = ClientState.InTransaction;
+        Ok(())
+    }
+
+    # Commit transaction
+    F commit(~self) -> Result<(), VaisError> {
+        I !self.is_connected() {
+            R Err(err_client_not_connected());
+        }
+
+        M &self.state {
+            ClientState.InTransaction => {},
+            _ => {
+                R Err(err_client_not_in_transaction());
+            },
+        }
+
+        # TODO: Send Query "COMMIT"
+        self.state = ClientState.Connected;
+        Ok(())
+    }
+
+    # Rollback transaction
+    F rollback(~self) -> Result<(), VaisError> {
+        I !self.is_connected() {
+            R Err(err_client_not_connected());
+        }
+
+        M &self.state {
+            ClientState.InTransaction => {},
+            _ => {
+                R Err(err_client_not_in_transaction());
+            },
+        }
+
+        # TODO: Send Query "ROLLBACK"
+        self.state = ClientState.Connected;
+        Ok(())
+    }
+}
+
+# Convenience: create client from connection string
+F create_client(conn_str: &Str) -> Result<VaisClient, VaisError> {
+    ~config = ClientConfig.from_connection_string(conn_str)?;
+    Ok(VaisClient.new(config))
+}
