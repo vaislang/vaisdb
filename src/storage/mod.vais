@@ -6,6 +6,7 @@ pub mod constants;
 pub mod error;
 pub mod bytes;
 pub mod checksum;
+pub mod hash;
 
 # Page management
 pub mod page;

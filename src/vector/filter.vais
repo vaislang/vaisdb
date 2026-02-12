@@ -214,11 +214,11 @@ X FilteredVectorSearch {
 
                 # Get tuple data
                 M heap.get_slot(slot_id) {
-                    None => continue,
+                    None => C,
                     Some(tuple_data) => {
                         # Check MVCC visibility
                         M heap.get_mvcc_tuple(slot_id) {
-                            None => continue,
+                            None => C,
                             Some(mvcc_tuple) => {
                                 I !is_tuple_visible(
                                     mvcc_tuple,

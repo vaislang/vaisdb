@@ -79,7 +79,7 @@ X ReindexProgress {
     }
 
     ## Calculate completion percentage
-    F percent_complete(&self) -> f64 {
+    F percent_complete(self) -> f64 {
         I self.total_vectors == 0 {
             R 100.0;
         }
@@ -87,7 +87,7 @@ X ReindexProgress {
     }
 
     ## Estimate remaining time based on current rate (seconds)
-    F estimated_remaining_seconds(&self, current_time: i64) -> u64 {
+    F estimated_remaining_seconds(self, current_time: i64) -> u64 {
         I self.processed_vectors == 0 || self.started_at == 0 {
             R 0;
         }
@@ -116,7 +116,7 @@ X ReindexProgress {
     }
 
     ## Check if reindex is still running
-    F is_running(&self) -> bool {
+    F is_running(self) -> bool {
         self.status == REINDEX_STATUS_RUNNING
     }
 }
@@ -190,19 +190,19 @@ X EmbeddingManager {
     }
 
     ## Get the currently active model
-    F active_model(&self) -> Option<&EmbeddingModelInfo> {
+    F active_model(self) -> Option<&EmbeddingModelInfo> {
         self.registry.get_active_model()
     }
 
     ## Get model by ID
-    F get_model(&self, model_id: u32) -> Option<&EmbeddingModelInfo> {
+    F get_model(self, model_id: u32) -> Option<&EmbeddingModelInfo> {
         self.registry.get_model(model_id)
     }
 
     ## Embed text using the active model
     ## For precomputed embeddings, this is a no-op (caller provides vector)
     ## For external API models, this prepares the request (actual API call is external)
-    F prepare_embedding(&self, text: &Str) -> Result<EmbeddingRequest, VaisError> {
+    F prepare_embedding(self, text: &Str) -> Result<EmbeddingRequest, VaisError> {
         I !self.is_open {
             R Err(err_rag_engine_closed());
         }
@@ -222,7 +222,7 @@ X EmbeddingManager {
     }
 
     ## Validate a pre-computed vector against the active model
-    F validate_vector(&self, vector: &Vec<f32>) -> Result<(), VaisError> {
+    F validate_vector(self, vector: &Vec<f32>) -> Result<(), VaisError> {
         M self.registry.get_active_model() {
             Some(model) => model.validate_vector(vector),
             None => Err(err_rag_model_not_found(&"No active model")),
@@ -307,7 +307,7 @@ X EmbeddingManager {
     }
 
     ## Get reindex status for SHOW REINDEX STATUS
-    F get_reindex_status(&self) -> Option<&ReindexProgress> {
+    F get_reindex_status(self) -> Option<&ReindexProgress> {
         M &self.reindex_progress {
             Some(progress) => Some(progress),
             None => None,
@@ -315,12 +315,12 @@ X EmbeddingManager {
     }
 
     ## Check if dual embedding is active (during reindex)
-    F is_dual_embed_active(&self) -> bool {
+    F is_dual_embed_active(self) -> bool {
         self.dual_embed_enabled
     }
 
     ## Get the old model ID during reindex (for dual embedding)
-    F get_reindex_old_model_id(&self) -> Option<u32> {
+    F get_reindex_old_model_id(self) -> Option<u32> {
         M &self.reindex_progress {
             Some(progress) => {
                 I progress.is_running() {
@@ -334,7 +334,7 @@ X EmbeddingManager {
     }
 
     ## Access the registry directly
-    F registry(&self) -> &EmbeddingModelRegistry {
+    F registry(self) -> &EmbeddingModelRegistry {
         &self.registry
     }
 

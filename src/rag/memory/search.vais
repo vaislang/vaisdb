@@ -81,7 +81,7 @@ X MemorySearchParams {
     }
 
     ## Validate parameters
-    F validate(&self) -> Result<(), VaisError> {
+    F validate(self) -> Result<(), VaisError> {
         I self.query_text.is_empty() {
             R Err(err_memory_search_failed(&"query_text is empty"));
         }
@@ -128,7 +128,7 @@ X MemorySearchResult {
     }
 
     ## Convert to RagSearchResult for unified pipeline
-    F to_rag_result(&self) -> RagSearchResult {
+    F to_rag_result(self) -> RagSearchResult {
         ~result = RagSearchResult.new(
             self.memory_id, 0, self.score, self.content.clone()
         );
@@ -136,7 +136,7 @@ X MemorySearchResult {
     }
 
     ## Format memory type as string
-    F type_name(&self) -> Str {
+    F type_name(self) -> Str {
         M self.memory_type {
             0 => "episodic",
             1 => "semantic",
@@ -320,12 +320,12 @@ X MemorySearchExecutor {
     }
 
     ## Get result count
-    F result_count(&self) -> u32 {
+    F result_count(self) -> u32 {
         self.results.len() as u32
     }
 
     ## Get all results
-    F get_results(&self) -> &Vec<MemorySearchResult> {
+    F get_results(self) -> &Vec<MemorySearchResult> {
         &self.results
     }
 }

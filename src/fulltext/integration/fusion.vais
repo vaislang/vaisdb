@@ -41,10 +41,10 @@ F fuse_results(
     results_b: &Vec<ScoredDoc>,
 ) -> Vec<ScoredDoc> {
     M method {
-        ScoreFusionMethod::WeightedSum { weight_a, weight_b } => {
+        ScoreFusionMethod.WeightedSum { weight_a, weight_b } => {
             fuse_weighted_sum(results_a, results_b, *weight_a, *weight_b)
         },
-        ScoreFusionMethod::ReciprocalRankFusion { k } => {
+        ScoreFusionMethod.ReciprocalRankFusion { k } => {
             fuse_rrf(results_a, results_b, *k)
         },
     }
@@ -66,7 +66,7 @@ F fuse_weighted_sum(
     ~norm_b = normalize_scores(results_b);
 
     # Build combined result set
-    ~combined: Vec<ScoredDoc> = Vec::new();
+    ~combined: Vec<ScoredDoc> = Vec.new();
 
     # Process all docs from result set A
     L i: 0..norm_a.len() {
@@ -83,7 +83,7 @@ F fuse_weighted_sum(
         }
 
         ~fused_score = weight_a * score_a + weight_b * score_b;
-        combined.push(ScoredDoc::new(doc_id, fused_score));
+        combined.push(ScoredDoc.new(doc_id, fused_score));
     }
 
     # Add docs only in result set B
@@ -100,7 +100,7 @@ F fuse_weighted_sum(
 
         I !found {
             ~fused_score = weight_b * norm_b[i].score;
-            combined.push(ScoredDoc::new(doc_id, fused_score));
+            combined.push(ScoredDoc.new(doc_id, fused_score));
         }
     }
 
@@ -124,7 +124,7 @@ F fuse_rrf(
     k: u32,
 ) -> Vec<ScoredDoc> {
     # Build map of doc_id -> RRF score
-    ~combined: Vec<ScoredDoc> = Vec::new();
+    ~combined: Vec<ScoredDoc> = Vec.new();
     ~k_f64 = k as f64;
 
     # Process result set A
@@ -144,7 +144,7 @@ F fuse_rrf(
         }
 
         I !found {
-            combined.push(ScoredDoc::new(doc_id, rrf_contribution));
+            combined.push(ScoredDoc.new(doc_id, rrf_contribution));
         }
     }
 
@@ -165,7 +165,7 @@ F fuse_rrf(
         }
 
         I !found {
-            combined.push(ScoredDoc::new(doc_id, rrf_contribution));
+            combined.push(ScoredDoc.new(doc_id, rrf_contribution));
         }
     }
 
@@ -179,7 +179,7 @@ F fuse_rrf(
 # Edge case: if max == min, all scores become 1.0
 F normalize_scores(results: &Vec<ScoredDoc>) -> Vec<ScoredDoc> {
     I results.len() == 0 {
-        R Vec::new();
+        R Vec.new();
     }
 
     # Find min and max scores
@@ -197,18 +197,18 @@ F normalize_scores(results: &Vec<ScoredDoc>) -> Vec<ScoredDoc> {
     }
 
     # Normalize
-    ~normalized: Vec<ScoredDoc> = Vec::new();
+    ~normalized: Vec<ScoredDoc> = Vec.new();
     ~range = max_score - min_score;
 
     I range < 0.000001 {
         # All scores are essentially equal
         L i: 0..results.len() {
-            normalized.push(ScoredDoc::new(results[i].doc_id, 1.0));
+            normalized.push(ScoredDoc.new(results[i].doc_id, 1.0));
         }
     } E {
         L i: 0..results.len() {
             ~norm_score = (results[i].score - min_score) / range;
-            normalized.push(ScoredDoc::new(results[i].doc_id, norm_score));
+            normalized.push(ScoredDoc.new(results[i].doc_id, norm_score));
         }
     }
 

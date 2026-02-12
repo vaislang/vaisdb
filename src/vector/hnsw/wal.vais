@@ -40,7 +40,7 @@ X HnswWalManager {
         affected_pages: &[(u8, u32)]
     ) -> Result<u64, VaisError> {
         # Build neighbor list from node
-        L ~neighbors: Vec<(u64, f32)> = Vec::new();
+        L ~neighbors: Vec<(u64, f32)> = Vec.new();
         L i: u64 = 0;
         L layer_count = node.neighbors.len();
         L {
@@ -188,14 +188,14 @@ F redo_hnsw_insert(
         node_id: payload.node_id,
         vector_page_id: payload.page_id,
         max_layer: payload.layer,
-        neighbors: Vec::new()
+        neighbors: Vec.new()
     };
 
     # Build neighbor layers
     L i: u64 = 0;
     L {
         I i > payload.layer as u64 { B }
-        L ~layer_neighbors: Vec<HnswNeighbor> = Vec::new();
+        L ~layer_neighbors: Vec<HnswNeighbor> = Vec.new();
 
         # Filter neighbors for this layer
         L j: u64 = 0;
@@ -236,11 +236,11 @@ F redo_hnsw_update_edges(
     # Update neighbors at layer
     I payload.layer as u64 >= node.neighbors.len() {
         # Error: invalid layer
-        R Err(VaisError::new(0x020900, "REDO: invalid layer for edge update"));
+        R Err(VaisError.new(0x020900, "REDO: invalid layer for edge update"));
     }
 
     # Build new neighbor list
-    L ~new_neighbors: Vec<HnswNeighbor> = Vec::new();
+    L ~new_neighbors: Vec<HnswNeighbor> = Vec.new();
     L i: u64 = 0;
     L {
         I i >= payload.new_neighbors.len() { B }
@@ -271,7 +271,7 @@ F redo_hnsw_layer_promote(
     # Ensure neighbors vector has enough layers
     L {
         I node.neighbors.len() > payload.new_max_layer as u64 { B }
-        node.neighbors.push(Vec::new());
+        node.neighbors.push(Vec.new());
     }
 
     # Write back
@@ -291,7 +291,7 @@ F redo_vector_data_write(
     L page_data = frame.get_page_data_mut();
     I payload.offset as u64 + payload.vector_data.len() > page_data.len() {
         pool.unpin_page(payload.file_id, payload.page_id, false);
-        R Err(VaisError::new(0x020901, "REDO: vector data write out of bounds"));
+        R Err(VaisError.new(0x020901, "REDO: vector data write out of bounds"));
     }
 
     L i: u64 = 0;
@@ -328,7 +328,7 @@ F undo_hnsw_delete(
 
     # Physical undo not supported (would need node snapshot)
     # Return error to indicate missing undo data
-    Err(VaisError::new(0x020902, "UNDO: delete requires node snapshot (MVCC mode only)"))
+    Err(VaisError.new(0x020902, "UNDO: delete requires node snapshot (MVCC mode only)"))
 }
 
 # Dispatcher for vector REDO operations
@@ -341,23 +341,23 @@ F dispatch_vector_redo(
 ) -> Result<(), VaisError> {
     M record_type {
         HNSW_INSERT_NODE => {
-            L payload = HnswInsertNodePayload::deserialize(payload_data)?;
+            L payload = HnswInsertNodePayload.deserialize(payload_data)?;
             redo_hnsw_insert(&payload, store)
         },
         HNSW_DELETE_NODE => {
-            L payload = HnswDeleteNodePayload::deserialize(payload_data)?;
+            L payload = HnswDeleteNodePayload.deserialize(payload_data)?;
             redo_hnsw_delete(&payload, store)
         },
         HNSW_UPDATE_EDGES => {
-            L payload = HnswUpdateEdgesPayload::deserialize(payload_data)?;
+            L payload = HnswUpdateEdgesPayload.deserialize(payload_data)?;
             redo_hnsw_update_edges(&payload, store)
         },
         HNSW_LAYER_PROMOTE => {
-            L payload = HnswLayerPromotePayload::deserialize(payload_data)?;
+            L payload = HnswLayerPromotePayload.deserialize(payload_data)?;
             redo_hnsw_layer_promote(&payload, store)
         },
         VECTOR_DATA_WRITE => {
-            L payload = VectorDataWritePayload::deserialize(payload_data)?;
+            L payload = VectorDataWritePayload.deserialize(payload_data)?;
             redo_vector_data_write(&payload, pool)
         },
         QUANTIZATION_UPDATE => {
@@ -366,7 +366,7 @@ F dispatch_vector_redo(
             Ok(())
         },
         _ => {
-            Err(VaisError::new(0x020903, "Unknown vector WAL record type"))
+            Err(VaisError.new(0x020903, "Unknown vector WAL record type"))
         }
     }
 }
@@ -380,26 +380,26 @@ F dispatch_vector_undo(
 ) -> Result<(), VaisError> {
     M record_type {
         HNSW_INSERT_NODE => {
-            L payload = HnswInsertNodePayload::deserialize(payload_data)?;
+            L payload = HnswInsertNodePayload.deserialize(payload_data)?;
             undo_hnsw_insert(&payload, store)
         },
         HNSW_DELETE_NODE => {
-            L payload = HnswDeleteNodePayload::deserialize(payload_data)?;
+            L payload = HnswDeleteNodePayload.deserialize(payload_data)?;
             undo_hnsw_delete(&payload, store)
         },
         HNSW_UPDATE_EDGES => {
             # Undo edge update: restore old neighbors
-            L payload = HnswUpdateEdgesPayload::deserialize(payload_data)?;
+            L payload = HnswUpdateEdgesPayload.deserialize(payload_data)?;
 
             # Load node
             L ~node = store.get_node(payload.node_id)?;
 
             I payload.layer as u64 >= node.neighbors.len() {
-                R Err(VaisError::new(0x020904, "UNDO: invalid layer for edge update"));
+                R Err(VaisError.new(0x020904, "UNDO: invalid layer for edge update"));
             }
 
             # Restore old neighbors
-            L ~old_neighbors: Vec<HnswNeighbor> = Vec::new();
+            L ~old_neighbors: Vec<HnswNeighbor> = Vec.new();
             L i: u64 = 0;
             L {
                 I i >= payload.old_neighbors.len() { B }
@@ -414,19 +414,19 @@ F dispatch_vector_undo(
         HNSW_LAYER_PROMOTE => {
             # Undo layer promote: would need old_max_layer in payload
             # Current design: layer promote is monotonic (no undo)
-            Err(VaisError::new(0x020905, "UNDO: layer promote requires old_max_layer"))
+            Err(VaisError.new(0x020905, "UNDO: layer promote requires old_max_layer"))
         },
         VECTOR_DATA_WRITE => {
             # Undo vector write: would need old data in payload
             # Current design: use undo log for physical undo
-            Err(VaisError::new(0x020906, "UNDO: vector write requires old data snapshot"))
+            Err(VaisError.new(0x020906, "UNDO: vector write requires old data snapshot"))
         },
         QUANTIZATION_UPDATE => {
             # Undo quantization: would need old codebook
-            Err(VaisError::new(0x020907, "UNDO: quantization update requires old codebook"))
+            Err(VaisError.new(0x020907, "UNDO: quantization update requires old codebook"))
         },
         _ => {
-            Err(VaisError::new(0x020908, "Unknown vector WAL record type for undo"))
+            Err(VaisError.new(0x020908, "Unknown vector WAL record type for undo"))
         }
     }
 }

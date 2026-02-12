@@ -67,6 +67,17 @@ L DICTIONARY_DELETE: u8 = 0x43;
 L TERM_FREQ_UPDATE: u8 = 0x44;
 
 # ============================================================================
+# RAG Records (0x50-0x5F)
+# ============================================================================
+
+L RAG_DOC_INSERT: u8 = 0x50;
+L RAG_DOC_DELETE: u8 = 0x51;
+L RAG_CHUNK_INSERT: u8 = 0x52;
+L RAG_CHUNK_DELETE: u8 = 0x53;
+L RAG_MEMORY_INSERT: u8 = 0x54;
+L RAG_MEMORY_DELETE: u8 = 0x55;
+
+# ============================================================================
 # Meta Record Payloads
 # ============================================================================
 
@@ -76,7 +87,7 @@ S TxnBeginPayload {
 }
 
 X TxnBeginPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.isolation_level);
     }
 
@@ -90,7 +101,7 @@ X TxnBeginPayload {
 S TxnCommitPayload {}
 
 X TxnCommitPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         # No fields
     }
 
@@ -103,7 +114,7 @@ X TxnCommitPayload {
 S TxnAbortPayload {}
 
 X TxnAbortPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         # No fields
     }
 
@@ -118,7 +129,7 @@ S CheckpointBeginPayload {
 }
 
 X CheckpointBeginPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         write_vec_u64(buf, &self.active_txns);
     }
 
@@ -132,7 +143,7 @@ X CheckpointBeginPayload {
 S CheckpointEndPayload {}
 
 X CheckpointEndPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         # No fields
     }
 
@@ -148,7 +159,7 @@ S SchemaChangePayload {
 }
 
 X SchemaChangePayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.change_type);
         write_bytes(buf, &self.schema_data);
     }
@@ -169,7 +180,7 @@ S ClrPayload {
 }
 
 X ClrPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.original_record_type);
         buf.put_u64_le(self.undo_next_lsn);
         buf.put_u8(self.file_id);
@@ -198,7 +209,7 @@ S PageAllocPayload {
 }
 
 X PageAllocPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u32_le(self.page_id);
         buf.put_u8(self.page_type);
@@ -219,7 +230,7 @@ S PageDeallocPayload {
 }
 
 X PageDeallocPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u32_le(self.page_id);
     }
@@ -239,7 +250,7 @@ S FpiPayload {
 }
 
 X FpiPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u32_le(self.page_id);
         write_bytes(buf, &self.page_data);

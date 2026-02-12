@@ -94,7 +94,7 @@ X MemoryEntry {
     ## - content_len: 4 bytes (u32 LE)
     ## - metadata_count: 4 bytes (u32 LE)
     ## - pad: 4 bytes
-    F serialize_meta(&self) -> Vec<u8> {
+    F serialize_meta(self) -> Vec<u8> {
         ~buf = ByteBuffer.with_capacity(72)
 
         # memory_id (8 bytes)
@@ -220,7 +220,7 @@ X MemoryEntry {
     }
 
     ## Check if memory has expired based on TTL
-    F is_expired(&self, current_time: i64) -> bool {
+    F is_expired(self, current_time: i64) -> bool {
         I self.ttl_seconds == 0 {
             R false  # TTL=0 means never expire
         }
@@ -233,7 +233,7 @@ X MemoryEntry {
     ##
     ## Decay formula: importance * exp(-ln(2) * elapsed / half_life)
     ## Where elapsed is time since last access in seconds.
-    F importance_with_decay(&self, current_time: i64, half_life: f64) -> f64 {
+    F importance_with_decay(self, current_time: i64, half_life: f64) -> f64 {
         I half_life <= 0.0 {
             R self.importance
         }
@@ -369,7 +369,7 @@ X ImportanceScorer {
     }
 
     ## Sigmoid normalization: 1 / (1 + exp(-k * (x - midpoint)))
-    F sigmoid_normalize(&self, x: f64, midpoint: f64) -> f64 {
+    F sigmoid_normalize(self, x: f64, midpoint: f64) -> f64 {
         ~k = 0.5  # Steepness parameter
         1.0 / (1.0 + (-k * (x - midpoint)).exp())
     }
@@ -401,7 +401,7 @@ X MemoryConfig {
     }
 
     ## Get default TTL for memory type
-    F get_default_ttl(&self, memory_type: u8) -> u64 {
+    F get_default_ttl(self, memory_type: u8) -> u64 {
         M memory_type {
             MEMORY_TYPE_EPISODIC => self.ttl_episodic,
             MEMORY_TYPE_SEMANTIC => self.ttl_semantic,

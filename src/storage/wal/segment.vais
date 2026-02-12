@@ -31,7 +31,7 @@ X WalSegmentHeader {
     }
 
     # Serialize header to ByteBuffer (little-endian)
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u32_le(self.magic);
         buf.put_u32_le(self.segment_number);
         buf.put_u64_le(self.first_lsn);
@@ -60,7 +60,7 @@ X WalSegmentHeader {
     }
 
     # Serialize header to byte array (32 bytes)
-    F to_bytes(&self) -> [u8; 32] {
+    F to_bytes(self) -> [u8; 32] {
         ~buf = ByteBuffer.with_capacity(WAL_SEGMENT_HEADER_SIZE as u64);
         self.serialize(&~buf);
         ~bytes = [0u8; 32];
@@ -75,7 +75,7 @@ X WalSegmentHeader {
     }
 
     # Verify header integrity
-    F verify(&self) -> Result<(), VaisError> {
+    F verify(self) -> Result<(), VaisError> {
         # Check magic number
         I self.magic != WAL_SEGMENT_MAGIC {
             R Err(err_invalid_magic());
@@ -125,7 +125,7 @@ X WalSegmentHeader {
         }
 
         ~number_str = parts[0];
-        M number_str.parse::<u32>() {
+        M number_str.parse.<u32>() {
             Ok(num) => Ok(num),
             Err(_) => Err(VaisError.new(
                 "VAIS-0005001",

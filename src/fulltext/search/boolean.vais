@@ -100,8 +100,8 @@ X BooleanQueryParser {
     # - Combined: "word1 -word2 OR word3 \"phrase query\""
     #
     # Grammar:
-    # query ::= term+
-    # term ::= ["-"] (word | OR word | "phrase")
+    # query .= term+
+    # term .= ["-"] (word | OR word | "phrase")
     #
     # Returns: Query enum
     F parse(self, query_str: &Str) -> Result<Query, VaisError> {

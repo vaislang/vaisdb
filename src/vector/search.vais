@@ -55,7 +55,7 @@ X VectorSearchExecutor {
             params: params,
             results: None,
             cursor: 0,
-            stats: ExecStats::new(),
+            stats: ExecStats.new(),
             ctx: ctx,
         }
     }
@@ -75,7 +75,7 @@ X VectorSearchExecutor {
 
         L col: table_meta.columns.iter() {
             M col.col_type {
-                SqlValue::VectorVal { .. } => {
+                SqlValue.VectorVal { .. } => {
                     I col.name == self.params.column_name {
                         column_found = true;
                         column_idx = col.column_id as u64;
@@ -135,7 +135,7 @@ X VectorSearchExecutor {
         self.stats.add_scanned(search_result.total_candidates);
 
         # 8. Materialize results by loading original rows
-        ~materialized = Vec::with_capacity(search_result.results.len());
+        ~materialized = Vec.with_capacity(search_result.results.len());
 
         L entry: search_result.results.iter() {
             # Load original row from table using node_id as TID
@@ -169,10 +169,10 @@ X VectorSearchExecutor {
                 self.cursor += 1;
 
                 # Build output row: (distance, ...original_columns)
-                ~output_row = Row::new();
+                ~output_row = Row.new();
 
                 # First column: distance
-                output_row.add_column(SqlValue::FloatVal { v: result_row.distance as f64 });
+                output_row.add_column(SqlValue.FloatVal { v: result_row.distance as f64 });
 
                 # Append all original columns
                 L i: 0..result_row.row.column_count() {
@@ -180,7 +180,7 @@ X VectorSearchExecutor {
                 }
 
                 # Return as virtual ExecutorRow (no physical TID)
-                Ok(Some(ExecutorRow::virtual(output_row)))
+                Ok(Some(ExecutorRow.virtual(output_row)))
             }
         }
     }
@@ -214,12 +214,12 @@ X VectorSearchExecutor {
         page_guard := page.read();
 
         # Parse heap page and extract slot
-        heap_page := HeapPage::from_bytes(page_guard.data())?;
+        heap_page := HeapPage.from_bytes(page_guard.data())?;
         tuple_data := heap_page.get_slot(slot_id)
             .ok_or(error_code(2, 3, 9, "Slot not found in heap page"))?;
 
         # Deserialize row
-        row := Row::deserialize(tuple_data, &table_meta.columns)?;
+        row := Row.deserialize(tuple_data, &table_meta.columns)?;
 
         # Check MVCC visibility
         mvcc_tuple := heap_page.get_mvcc_tuple(slot_id)
@@ -253,7 +253,7 @@ F parse_vector_search_args(
 
     # Argument 1: table.column reference
     (table_name, column_name) := M &args[0] {
-        Expr::ColumnRef { table, column } => {
+        Expr.ColumnRef { table, column } => {
             (table.clone(), column.clone())
         },
         _ => R Err(error_code(2, 3, 7, "First arg must be column reference"))
@@ -261,14 +261,14 @@ F parse_vector_search_args(
 
     # Argument 2: query vector (ARRAY[...] or vector literal)
     query_vector := M &args[1] {
-        Expr::ArrayLiteral { elements } => {
-            ~vec = Vec::with_capacity(elements.len());
+        Expr.ArrayLiteral { elements } => {
+            ~vec = Vec.with_capacity(elements.len());
             L elem: elements.iter() {
                 M elem {
-                    Expr::Literal { value: SqlValue::FloatVal { v } } => {
+                    Expr.Literal { value: SqlValue.FloatVal { v } } => {
                         vec.push(*v as f32);
                     },
-                    Expr::Literal { value: SqlValue::IntVal { v } } => {
+                    Expr.Literal { value: SqlValue.IntVal { v } } => {
                         vec.push(*v as f32);
                     },
                     _ => R Err(error_code(2, 3, 7, "Array elements must be numeric"))
@@ -276,13 +276,13 @@ F parse_vector_search_args(
             }
             vec
         },
-        Expr::Literal { value: SqlValue::VectorVal { v } } => v.clone(),
+        Expr.Literal { value: SqlValue.VectorVal { v } } => v.clone(),
         _ => R Err(error_code(2, 3, 7, "Second arg must be vector"))
     };
 
     # Argument 3: top_k
     top_k := M &args[2] {
-        Expr::Literal { value: SqlValue::IntVal { v } } => {
+        Expr.Literal { value: SqlValue.IntVal { v } } => {
             I *v <= 0 {
                 R Err(error_code(2, 3, 7, "top_k must be positive"));
             }
@@ -294,7 +294,7 @@ F parse_vector_search_args(
     # Argument 4: ef_search (optional)
     ef_search := I args.len() == 4 {
         M &args[3] {
-            Expr::Literal { value: SqlValue::IntVal { v } } => {
+            Expr.Literal { value: SqlValue.IntVal { v } } => {
                 I *v <= 0 {
                     R Err(error_code(2, 3, 7, "ef_search must be positive"));
                 }
@@ -323,10 +323,10 @@ F execute_vector_search(
     params: &VectorSearchParams,
     ctx: &ExecContext
 ) -> Result<Vec<VectorSearchRow>, VaisError> {
-    ~executor = VectorSearchExecutor::new(params.clone(), ctx);
+    ~executor = VectorSearchExecutor.new(params.clone(), ctx);
     executor.open()?;
 
-    ~results = Vec::new();
+    ~results = Vec.new();
     L {
         M executor.next()? {
             Some(exec_row) => {
@@ -339,7 +339,7 @@ F execute_vector_search(
 
     M executor.results {
         Some(materialized) => Ok(materialized),
-        None => Ok(Vec::new())
+        None => Ok(Vec.new())
     }
 }
 

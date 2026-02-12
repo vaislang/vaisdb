@@ -94,12 +94,12 @@ X HybridRetrievalConfig {
     }
 
     ## Calculate how many document results to fetch
-    F doc_budget(&self) -> u32 {
+    F doc_budget(self) -> u32 {
         (self.total_budget as f64 * self.doc_budget_ratio) as u32
     }
 
     ## Calculate how many memory results to fetch
-    F memory_budget(&self) -> u32 {
+    F memory_budget(self) -> u32 {
         (self.total_budget as f64 * self.memory_budget_ratio) as u32
     }
 }
@@ -149,17 +149,17 @@ X HybridResult {
     }
 
     ## Check if this is a document chunk
-    F is_document(&self) -> bool {
+    F is_document(self) -> bool {
         self.source_type == 0
     }
 
     ## Check if this is a memory entry
-    F is_memory(&self) -> bool {
+    F is_memory(self) -> bool {
         self.source_type == 1
     }
 
     ## Format source description
-    F source_description(&self) -> Str {
+    F source_description(self) -> Str {
         I self.source_type == 0 {
             "doc:{self.doc_id}/chunk:{self.source_id}"
         } E {
@@ -353,7 +353,7 @@ X HybridRetriever {
     }
 
     ## Format merged results as a context string for LLM
-    F format_context(&self, results: &Vec<HybridResult>) -> Str {
+    F format_context(self, results: &Vec<HybridResult>) -> Str {
         ~ctx = Str.new();
         ~i: u32 = 0;
         W i < results.len() as u32 {

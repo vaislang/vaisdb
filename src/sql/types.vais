@@ -880,8 +880,8 @@ X SqlValue {
 # Internal LIKE pattern matching implementation
 # Supports % (any sequence) and _ (any single char)
 F like_match_internal(text: &Str, pattern: &Str) -> bool {
-    ~t_chars = text.chars().collect::<Vec<char>>();
-    ~p_chars = pattern.chars().collect::<Vec<char>>();
+    ~t_chars = text.chars().collect.<Vec<char>>();
+    ~p_chars = pattern.chars().collect.<Vec<char>>();
     ~t_idx = 0;
     ~p_idx = 0;
     ~star_idx = -1i32;

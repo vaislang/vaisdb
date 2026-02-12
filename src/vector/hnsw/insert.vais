@@ -68,11 +68,11 @@ F err_insert_failed(node_id: u64, detail: Str) -> VaisError {
 # This allows insert.vais to be storage-agnostic (e.g., in-memory for tests,
 # page manager for production).
 T NodeStore {
-    F load_node(&self, node_id: u64) -> Result<HnswNode, VaisError>;
-    F load_vector(&self, node_id: u64) -> Result<Vec<f32>, VaisError>;
+    F load_node(self, node_id: u64) -> Result<HnswNode, VaisError>;
+    F load_vector(self, node_id: u64) -> Result<Vec<f32>, VaisError>;
     F store_node(&~self, node: HnswNode) -> Result<(), VaisError>;
     F allocate_node_id(&~self) -> u64;
-    F get_file_page(&self, node_id: u64) -> Result<(u8, u32), VaisError>;
+    F get_file_page(self, node_id: u64) -> Result<(u8, u32), VaisError>;
 }
 
 # ============================================================================

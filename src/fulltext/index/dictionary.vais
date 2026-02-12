@@ -18,7 +18,8 @@ U storage/btree/search.{search_lower_bound};
 U storage/btree/key.{encode_u64_key};
 U storage/btree/cursor.{BTreeCursor, ScanDirection};
 U storage/wal/group_commit.{GroupCommitManager};
-U fulltext/types.{DictEntry, fnv1a_hash, err_fulltext_term_not_found, err_fulltext_dict_corrupt};
+U fulltext/types.{DictEntry, err_fulltext_term_not_found, err_fulltext_dict_corrupt};
+U storage/hash.{fnv1a_hash};
 
 # ============================================================================
 # Error codes: EE=04 (fulltext), CC=06 (dictionary index)

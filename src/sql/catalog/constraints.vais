@@ -5,6 +5,7 @@
 
 U std/bytes.{ByteBuffer};
 U storage/error.{VaisError};
+U storage/constants.{DEFAULT_PAGE_SIZE};
 U storage/buffer/pool.{BufferPool};
 U storage/btree/tree.{BTree};
 U storage/btree/search.{search_cursor};
@@ -129,7 +130,7 @@ X ConstraintChecker {
                 ~key_bytes = build_index_key(&pk_values)?;
 
                 # Search in the PK index B+Tree
-                ~tree = BTree.new(pk_idx.root_page_id, 0, 4096);
+                ~tree = BTree.new(pk_idx.root_page_id, 0, DEFAULT_PAGE_SIZE);
                 ~cursor = search_cursor(&tree, &key_bytes, pool)?;
 
                 I cursor.valid() {
@@ -181,7 +182,7 @@ X ConstraintChecker {
                 ~key_bytes = build_index_key(&unique_values)?;
 
                 # Search in the UNIQUE index B+Tree
-                ~tree = BTree.new(idx.root_page_id, 0, 4096);
+                ~tree = BTree.new(idx.root_page_id, 0, DEFAULT_PAGE_SIZE);
                 ~cursor = search_cursor(&tree, &key_bytes, pool)?;
 
                 I cursor.valid() {

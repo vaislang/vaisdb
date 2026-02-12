@@ -49,7 +49,7 @@ X ContextWindow {
     }
 
     ## Get all chunk IDs in order (before + center + after)
-    F all_chunk_ids(&self) -> Vec<u64> {
+    F all_chunk_ids(self) -> Vec<u64> {
         ~result = Vec.new();
 
         # Add chunks before (in order)
@@ -73,7 +73,7 @@ X ContextWindow {
     }
 
     ## Check if adding more would exceed token budget
-    F can_expand(&self, additional_tokens: u32, max_tokens: u32) -> bool {
+    F can_expand(self, additional_tokens: u32, max_tokens: u32) -> bool {
         self.total_tokens + additional_tokens <= max_tokens
     }
 }

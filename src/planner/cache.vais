@@ -8,34 +8,8 @@
 # - Cache statistics (hits, misses, evictions, hit_rate)
 
 U storage/error.{VaisError};
+U storage/hash.{fnv1a_hash, fnv1a_hash_bytes};
 U planner/types.{HybridPlanNode, HybridCost};
-
-# ============================================================================
-# FNV-1a Hash Constants
-# ============================================================================
-
-L FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-L FNV_PRIME: u64 = 0x100000001b3;
-
-# Hash a string using FNV-1a algorithm
-F fnv1a_hash_str(s: &Str) -> u64 {
-    ~hash = FNV_OFFSET_BASIS;
-    L byte: s.bytes() {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    hash
-}
-
-# Hash bytes using FNV-1a algorithm
-F fnv1a_hash_bytes(bytes: &[u8]) -> u64 {
-    ~hash = FNV_OFFSET_BASIS;
-    L &byte: bytes {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    hash
-}
 
 # ============================================================================
 # Plan Cache Key — Normalized Query Fingerprint
@@ -54,7 +28,7 @@ S PlanCacheKey {
 X PlanCacheKey {
     # Create a new cache key from normalized SQL
     F new(normalized_sql: Str) -> PlanCacheKey {
-        L hash = fnv1a_hash_str(&normalized_sql);
+        L hash = fnv1a_hash(&normalized_sql);
         PlanCacheKey {
             hash,
             normalized_sql,
@@ -70,7 +44,7 @@ X PlanCacheKey {
     }
 
     # Check equality by hash
-    F eq(&self, other: &PlanCacheKey) -> bool {
+    F eq(self, other: &PlanCacheKey) -> bool {
         self.hash == other.hash
     }
 }

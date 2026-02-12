@@ -10,7 +10,8 @@ U storage/error.{VaisError};
 U storage/buffer/pool.{BufferPool};
 U storage/page/allocator.{PageAllocator};
 U storage/wal/group_commit.{GroupCommitManager};
-U fulltext/types.{PostingEntry, PostingPageHeader, POSTING_PAGE_HEADER_SIZE, fnv1a_hash};
+U fulltext/types.{PostingEntry, PostingPageHeader, POSTING_PAGE_HEADER_SIZE};
+U storage/hash.{fnv1a_hash};
 U fulltext/index/posting.{PostingStore};
 
 # Result of compacting a single posting list
@@ -118,7 +119,7 @@ X PostingListCompactor {
         posting_store: &PostingStore,
         gcm: &GroupCommitManager,
     ) -> Result<CompactionResult, VaisError> {
-        L ~result = CompactionResult::new();
+        L ~result = CompactionResult.new();
 
         # Step 1: Read all entries in the posting list
         L entries = posting_store.read_all_entries(head_page_id)?;
@@ -129,7 +130,7 @@ X PostingListCompactor {
 
         # Step 2: Filter out garbage entries
         # An entry is garbage if it was expired AND the expiring txn is old enough
-        L ~live_entries = Vec::new();
+        L ~live_entries = Vec.new();
         L ~removed_count: u64 = 0;
 
         L ~i: u64 = 0;
@@ -192,7 +193,7 @@ X PostingListCompactor {
         posting_store: &PostingStore,
         gcm: &GroupCommitManager,
     ) -> Result<CompactionStats, VaisError> {
-        L ~stats = CompactionStats::new();
+        L ~stats = CompactionStats.new();
 
         L ~i: u64 = 0;
         L n = dict_entries.len();

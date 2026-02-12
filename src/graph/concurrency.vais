@@ -215,7 +215,7 @@ X GraphLockManager {
         ~slot_idx = self.hash(node_id);
         ~lock = self.slots[slot_idx].get_or_create_lock(node_id);
         lock.read_lock();
-        Ok(NodeLockGuard.new(&self, node_id, LockMode.Shared))
+        Ok(NodeLockGuard.new(self, node_id, LockMode.Shared))
     }
 
     # Acquire exclusive (write) lock on node
@@ -223,7 +223,7 @@ X GraphLockManager {
         ~slot_idx = self.hash(node_id);
         ~lock = self.slots[slot_idx].get_or_create_lock(node_id);
         lock.write_lock();
-        Ok(NodeLockGuard.new(&self, node_id, LockMode.Exclusive))
+        Ok(NodeLockGuard.new(self, node_id, LockMode.Exclusive))
     }
 
     # Try to acquire shared lock without blocking
@@ -231,7 +231,7 @@ X GraphLockManager {
         ~slot_idx = self.hash(node_id);
         ~lock = self.slots[slot_idx].get_or_create_lock(node_id);
         I lock.try_read_lock() {
-            Ok(Some(NodeLockGuard.new(&self, node_id, LockMode.Shared)))
+            Ok(Some(NodeLockGuard.new(self, node_id, LockMode.Shared)))
         } E {
             Ok(None)
         }
@@ -242,7 +242,7 @@ X GraphLockManager {
         ~slot_idx = self.hash(node_id);
         ~lock = self.slots[slot_idx].get_or_create_lock(node_id);
         I lock.try_write_lock() {
-            Ok(Some(NodeLockGuard.new(&self, node_id, LockMode.Exclusive)))
+            Ok(Some(NodeLockGuard.new(self, node_id, LockMode.Exclusive)))
         } E {
             Ok(None)
         }

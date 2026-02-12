@@ -256,7 +256,7 @@ X FusionMethod {
 }
 
 # ============================================================================
-# Vector Scan Parameters (for HybridPlanNode::VectorScan)
+# Vector Scan Parameters (for HybridPlanNode.VectorScan)
 # ============================================================================
 
 S VectorScanParams {
@@ -299,7 +299,7 @@ X VectorScanParams {
 }
 
 # ============================================================================
-# Graph Traverse Parameters (for HybridPlanNode::GraphTraverse)
+# Graph Traverse Parameters (for HybridPlanNode.GraphTraverse)
 # ============================================================================
 
 L DIRECTION_OUTGOING: u8 = 0;
@@ -356,7 +356,7 @@ X GraphTraverseNodeParams {
 }
 
 # ============================================================================
-# FullText Scan Parameters (for HybridPlanNode::FullTextScan)
+# FullText Scan Parameters (for HybridPlanNode.FullTextScan)
 # ============================================================================
 
 E FullTextSearchMode {

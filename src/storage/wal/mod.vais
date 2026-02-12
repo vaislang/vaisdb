@@ -16,7 +16,7 @@ pub mod buffer;
 pub mod lsn;
 
 # Re-export commonly used types
-pub use header.{WalRecordHeader, ENGINE_META, ENGINE_RELATIONAL, ENGINE_VECTOR, ENGINE_GRAPH, ENGINE_FULLTEXT};
+pub use header.{WalRecordHeader, ENGINE_META, ENGINE_RELATIONAL, ENGINE_VECTOR, ENGINE_GRAPH, ENGINE_FULLTEXT, ENGINE_RAG};
 pub use segment.{WalSegmentHeader};
 pub use serializer.{WalRecord, WalRecordSerializer};
 pub use writer.{WalWriter};
@@ -47,6 +47,11 @@ pub use record_types.{
     # Full-text records
     POSTING_LIST_APPEND, POSTING_LIST_DELETE,
     DICTIONARY_INSERT, DICTIONARY_DELETE, TERM_FREQ_UPDATE,
+
+    # RAG records
+    RAG_DOC_INSERT, RAG_DOC_DELETE,
+    RAG_CHUNK_INSERT, RAG_CHUNK_DELETE,
+    RAG_MEMORY_INSERT, RAG_MEMORY_DELETE,
 };
 
 # Re-export payload types

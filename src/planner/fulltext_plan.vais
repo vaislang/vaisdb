@@ -1,5 +1,5 @@
 # Full-Text Query Planning — Search Mode Detection and top_k Adjustment
-# Builds HybridPlanNode::FullTextScan with optimal search mode and result size
+# Builds HybridPlanNode.FullTextScan with optimal search mode and result size
 #
 # Search Mode Detection:
 # - Quoted phrases ("exact match") → Phrase mode with slop=0
@@ -184,7 +184,7 @@ F push_predicates(
 # - where_clause: Optional WHERE predicate from SQL query
 #
 # Returns:
-# - HybridPlanNode::FullTextScan with computed HybridCost and optimal search mode
+# - HybridPlanNode.FullTextScan with computed HybridCost and optimal search mode
 F build_fulltext_plan(
     params: FullTextScanParams,
     stats: &FullTextStats,
@@ -218,7 +218,7 @@ F build_fulltext_plan(
     # Step 5: Estimate cost
     ~cost = estimate_fulltext_scan_cost(&final_params, stats);
 
-    # Step 6: Build HybridPlanNode::FullTextScan
+    # Step 6: Build HybridPlanNode.FullTextScan
     Ok(HybridPlanNode.FullTextScan {
         params: final_params,
         alias: None,

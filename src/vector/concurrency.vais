@@ -33,26 +33,26 @@ X HnswLock {
     # Create new lock manager
     F new() -> HnswLock {
         HnswLock {
-            rw_lock: RwLock::new(()),
-            write_queue: Mutex::new(Vec::new()),
-            active_readers: AtomicU64::new(0),
-            active_writer: AtomicU64::new(0),
+            rw_lock: RwLock.new(()),
+            write_queue: Mutex.new(Vec.new()),
+            active_readers: AtomicU64.new(0),
+            active_writer: AtomicU64.new(0),
         }
     }
 
     # Acquire read lock for concurrent searches
     # Returns guard that auto-releases on drop
-    F read_lock(&self) -> Result<HnswReadGuard, VaisError> {
+    F read_lock(self) -> Result<HnswReadGuard, VaisError> {
         # Acquire read portion of RwLock
         guard := self.rw_lock.read()
             .map_err(|_| VaisError {
                 code: ERROR_LOCK_POISONED,
                 message: "HNSW read lock poisoned".to_string(),
-                category: ErrorCategory::Concurrency,
+                category: ErrorCategory.Concurrency,
             })?;
 
         # Increment active reader count
-        self.active_readers.fetch_add(1, Ordering::SeqCst);
+        self.active_readers.fetch_add(1, Ordering.SeqCst);
 
         Ok(HnswReadGuard {
             lock: self,
@@ -62,14 +62,14 @@ X HnswLock {
 
     # Acquire write lock for mutations (insert/delete)
     # Serializes through write queue for FIFO ordering
-    F write_lock(&self, txn_id: u64) -> Result<HnswWriteGuard, VaisError> {
+    F write_lock(self, txn_id: u64) -> Result<HnswWriteGuard, VaisError> {
         # Add to write queue
         {
             ~queue = self.write_queue.lock()
                 .map_err(|_| VaisError {
                     code: ERROR_LOCK_POISONED,
                     message: "HNSW write queue lock poisoned".to_string(),
-                    category: ErrorCategory::Concurrency,
+                    category: ErrorCategory.Concurrency,
                 })?;
             queue.push(txn_id);
         }
@@ -80,14 +80,14 @@ X HnswLock {
                 .map_err(|_| VaisError {
                     code: ERROR_LOCK_POISONED,
                     message: "HNSW write queue lock poisoned".to_string(),
-                    category: ErrorCategory::Concurrency,
+                    category: ErrorCategory.Concurrency,
                 })?;
 
             I queue.is_empty() {
                 R Err(VaisError {
                     code: ERROR_WRITE_CONFLICT,
                     message: "Transaction removed from write queue".to_string(),
-                    category: ErrorCategory::Concurrency,
+                    category: ErrorCategory.Concurrency,
                 });
             }
 
@@ -96,7 +96,7 @@ X HnswLock {
 
             # Release queue lock and yield
             drop(queue);
-            std::thread::yield_now();
+            std.thread.yield_now();
         }
 
         # Acquire exclusive write lock
@@ -104,11 +104,11 @@ X HnswLock {
             .map_err(|_| VaisError {
                 code: ERROR_LOCK_POISONED,
                 message: "HNSW write lock poisoned".to_string(),
-                category: ErrorCategory::Concurrency,
+                category: ErrorCategory.Concurrency,
             })?;
 
         # Set active writer
-        self.active_writer.store(txn_id, Ordering::SeqCst);
+        self.active_writer.store(txn_id, Ordering.SeqCst);
 
         Ok(HnswWriteGuard {
             lock: self,
@@ -119,13 +119,13 @@ X HnswLock {
 
     # Try to acquire write lock without blocking
     # Returns None if lock unavailable, Some(guard) if acquired
-    F try_write_lock(&self, txn_id: u64) -> Result<Option<HnswWriteGuard>, VaisError> {
+    F try_write_lock(self, txn_id: u64) -> Result<Option<HnswWriteGuard>, VaisError> {
         # Check if queue is empty and we can acquire immediately
         ~queue = self.write_queue.lock()
             .map_err(|_| VaisError {
                 code: ERROR_LOCK_POISONED,
                 message: "HNSW write queue lock poisoned".to_string(),
-                category: ErrorCategory::Concurrency,
+                category: ErrorCategory.Concurrency,
             })?;
 
         I !queue.is_empty() {
@@ -143,7 +143,7 @@ X HnswLock {
         drop(queue);
 
         # Set active writer
-        self.active_writer.store(txn_id, Ordering::SeqCst);
+        self.active_writer.store(txn_id, Ordering.SeqCst);
 
         Ok(Some(HnswWriteGuard {
             lock: self,
@@ -153,23 +153,23 @@ X HnswLock {
     }
 
     # Get count of active readers
-    F active_reader_count(&self) -> u64 {
-        self.active_readers.load(Ordering::SeqCst)
+    F active_reader_count(self) -> u64 {
+        self.active_readers.load(Ordering.SeqCst)
     }
 
     # Check if there's an active writer
-    F has_active_writer(&self) -> bool {
-        self.active_writer.load(Ordering::SeqCst) != 0
+    F has_active_writer(self) -> bool {
+        self.active_writer.load(Ordering.SeqCst) != 0
     }
 
     # Internal: decrement reader count
-    F decrement_readers(&self) {
-        self.active_readers.fetch_sub(1, Ordering::SeqCst);
+    F decrement_readers(self) {
+        self.active_readers.fetch_sub(1, Ordering.SeqCst);
     }
 
     # Internal: clear active writer and remove from queue
-    F release_writer(&self, txn_id: u64) {
-        self.active_writer.store(0, Ordering::SeqCst);
+    F release_writer(self, txn_id: u64) {
+        self.active_writer.store(0, Ordering.SeqCst);
 
         # Remove from write queue
         ~queue = self.write_queue.lock()!;
@@ -224,59 +224,59 @@ S ConcurrencyStats {
 X ConcurrencyStats {
     F new() -> ConcurrencyStats {
         ConcurrencyStats {
-            total_reads: AtomicU64::new(0),
-            total_writes: AtomicU64::new(0),
-            write_wait_total_us: AtomicU64::new(0),
-            max_concurrent_readers: AtomicU64::new(0),
-            write_conflicts: AtomicU64::new(0),
+            total_reads: AtomicU64.new(0),
+            total_writes: AtomicU64.new(0),
+            write_wait_total_us: AtomicU64.new(0),
+            max_concurrent_readers: AtomicU64.new(0),
+            write_conflicts: AtomicU64.new(0),
         }
     }
 
     # Record a read operation
-    F record_read(&self, concurrent_readers: u64) {
-        self.total_reads.fetch_add(1, Ordering::Relaxed);
+    F record_read(self, concurrent_readers: u64) {
+        self.total_reads.fetch_add(1, Ordering.Relaxed);
 
         # Update max concurrent readers
-        ~current_max = self.max_concurrent_readers.load(Ordering::Relaxed);
+        ~current_max = self.max_concurrent_readers.load(Ordering.Relaxed);
         I concurrent_readers > current_max {
             self.max_concurrent_readers.compare_exchange(
                 current_max,
                 concurrent_readers,
-                Ordering::Relaxed,
-                Ordering::Relaxed
+                Ordering.Relaxed,
+                Ordering.Relaxed
             ).ok();
         }
     }
 
     # Record a write operation
-    F record_write(&self, wait_time_us: u64) {
-        self.total_writes.fetch_add(1, Ordering::Relaxed);
-        self.write_wait_total_us.fetch_add(wait_time_us, Ordering::Relaxed);
+    F record_write(self, wait_time_us: u64) {
+        self.total_writes.fetch_add(1, Ordering.Relaxed);
+        self.write_wait_total_us.fetch_add(wait_time_us, Ordering.Relaxed);
     }
 
     # Record a write conflict
-    F record_conflict(&self) {
-        self.write_conflicts.fetch_add(1, Ordering::Relaxed);
+    F record_conflict(self) {
+        self.write_conflicts.fetch_add(1, Ordering.Relaxed);
     }
 
     # Get average write wait time in microseconds
-    F avg_write_wait_us(&self) -> f64 {
-        total_writes := self.total_writes.load(Ordering::Relaxed);
+    F avg_write_wait_us(self) -> f64 {
+        total_writes := self.total_writes.load(Ordering.Relaxed);
         I total_writes == 0 {
             R 0.0;
         }
-        total_wait := self.write_wait_total_us.load(Ordering::Relaxed);
+        total_wait := self.write_wait_total_us.load(Ordering.Relaxed);
         (total_wait as f64) / (total_writes as f64)
     }
 
     # Get statistics snapshot
-    F snapshot(&self) -> ConcurrencyStatsSnapshot {
+    F snapshot(self) -> ConcurrencyStatsSnapshot {
         ConcurrencyStatsSnapshot {
-            total_reads: self.total_reads.load(Ordering::Relaxed),
-            total_writes: self.total_writes.load(Ordering::Relaxed),
+            total_reads: self.total_reads.load(Ordering.Relaxed),
+            total_writes: self.total_writes.load(Ordering.Relaxed),
             avg_write_wait_us: self.avg_write_wait_us(),
-            max_concurrent_readers: self.max_concurrent_readers.load(Ordering::Relaxed),
-            write_conflicts: self.write_conflicts.load(Ordering::Relaxed),
+            max_concurrent_readers: self.max_concurrent_readers.load(Ordering.Relaxed),
+            write_conflicts: self.write_conflicts.load(Ordering.Relaxed),
         }
     }
 }
@@ -306,9 +306,9 @@ X ConcurrentHnswIndex {
     # Create new concurrent HNSW index
     F new(meta: HnswMeta) -> ConcurrentHnswIndex {
         ConcurrentHnswIndex {
-            lock: HnswLock::new(),
-            meta: RwLock::new(meta),
-            stats: ConcurrencyStats::new(),
+            lock: HnswLock.new(),
+            meta: RwLock.new(meta),
+            stats: ConcurrencyStats.new(),
         }
     }
 
@@ -332,8 +332,8 @@ X ConcurrentHnswIndex {
         # For now, return placeholder
         # TODO: Integrate with actual HnswIndex.search() when available
         Ok(SearchResult {
-            ids: Vec::new(),
-            distances: Vec::new(),
+            ids: Vec.new(),
+            distances: Vec.new(),
             visited_nodes: 0,
         })
     }
@@ -347,7 +347,7 @@ X ConcurrentHnswIndex {
         vector: &[f32],
     ) -> Result<(), VaisError> {
         # Record start time
-        start := std::time::Instant::now();
+        start := std.time.Instant.now();
 
         # Acquire write lock (blocks until our turn)
         _guard := self.lock.write_lock(txn_id)?;
@@ -368,7 +368,7 @@ X ConcurrentHnswIndex {
         vector_id: VectorId,
     ) -> Result<(), VaisError> {
         # Record start time
-        start := std::time::Instant::now();
+        start := std.time.Instant.now();
 
         # Acquire write lock
         _guard := self.lock.write_lock(txn_id)?;
@@ -409,19 +409,19 @@ X ConcurrentHnswIndex {
     }
 
     # Get metadata snapshot (acquires read lock on meta)
-    F get_meta(&self) -> Result<HnswMeta, VaisError> {
+    F get_meta(self) -> Result<HnswMeta, VaisError> {
         meta_guard := self.meta.read()
             .map_err(|_| VaisError {
                 code: ERROR_LOCK_POISONED,
                 message: "HNSW meta lock poisoned".to_string(),
-                category: ErrorCategory::Concurrency,
+                category: ErrorCategory.Concurrency,
             })?;
 
         Ok(meta_guard.clone())
     }
 
     # Update metadata (acquires write lock on meta)
-    F update_meta<F>(&self, update_fn: F) -> Result<(), VaisError>
+    F update_meta<F>(self, update_fn: F) -> Result<(), VaisError>
     where
         F: FnOnce(&~HnswMeta),
     {
@@ -429,7 +429,7 @@ X ConcurrentHnswIndex {
             .map_err(|_| VaisError {
                 code: ERROR_LOCK_POISONED,
                 message: "HNSW meta lock poisoned".to_string(),
-                category: ErrorCategory::Concurrency,
+                category: ErrorCategory.Concurrency,
             })?;
 
         update_fn(&~*meta_guard);
@@ -437,17 +437,17 @@ X ConcurrentHnswIndex {
     }
 
     # Get concurrency statistics snapshot
-    F stats(&self) -> ConcurrencyStatsSnapshot {
+    F stats(self) -> ConcurrencyStatsSnapshot {
         self.stats.snapshot()
     }
 
     # Get active reader count
-    F active_readers(&self) -> u64 {
+    F active_readers(self) -> u64 {
         self.lock.active_reader_count()
     }
 
     # Check if write is in progress
-    F has_active_writer(&self) -> bool {
+    F has_active_writer(self) -> bool {
         self.lock.has_active_writer()
     }
 }
@@ -458,11 +458,11 @@ X ConcurrentHnswIndex {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    U super.*
 
     #[test]
     F test_hnsw_lock_single_reader() {
-        lock := HnswLock::new();
+        lock := HnswLock.new();
 
         # Acquire read lock
         _guard := lock.read_lock()!;
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     F test_hnsw_lock_multiple_readers() {
-        lock := HnswLock::new();
+        lock := HnswLock.new();
 
         # Acquire multiple read locks
         _guard1 := lock.read_lock()!;
@@ -488,7 +488,7 @@ mod tests {
 
     #[test]
     F test_hnsw_lock_single_writer() {
-        lock := HnswLock::new();
+        lock := HnswLock.new();
 
         # Acquire write lock
         _guard := lock.write_lock(100)!;
@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     F test_concurrency_stats() {
-        stats := ConcurrencyStats::new();
+        stats := ConcurrencyStats.new();
 
         # Record operations
         stats.record_read(1);

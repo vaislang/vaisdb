@@ -38,7 +38,7 @@ X DeletionBitmap {
     # Create new empty deletion bitmap
     F new() -> DeletionBitmap {
         DeletionBitmap {
-            words: Vec::new(),
+            words: Vec.new(),
             max_doc_id: 0,
         }
     }
@@ -46,7 +46,7 @@ X DeletionBitmap {
     # Create bitmap with initial capacity for doc_ids up to max_doc_id
     F with_capacity(max_doc_id: u64) -> DeletionBitmap {
         word_count := ((max_doc_id + 63) / 64) as u64;
-        ~words = Vec::with_capacity(word_count);
+        ~words = Vec.with_capacity(word_count);
 
         # Initialize all words to 0 (no deletions)
         ~i: u64 = 0;
@@ -78,7 +78,7 @@ X DeletionBitmap {
 
     # Check if entry is deleted
     # Fast check: test bit value
-    F is_deleted(&self, doc_id: u64) -> bool {
+    F is_deleted(self, doc_id: u64) -> bool {
         I doc_id > self.max_doc_id {
             R false;  # Beyond bitmap range = not deleted
         }
@@ -173,7 +173,7 @@ X DeletionBitmap {
         entries: &Vec<PostingEntry>,
         low_water_mark: u64,
     ) -> Result<Vec<u64>, VaisError> {
-        ~to_remove = Vec::new();
+        ~to_remove = Vec.new();
 
         ~i: u64 = 0;
         L W i < entries.len() {
@@ -199,7 +199,7 @@ X DeletionBitmap {
     }
 
     # Count total deleted entries (marked bits)
-    F deleted_count(&self) -> u64 {
+    F deleted_count(self) -> u64 {
         ~count: u64 = 0;
         ~i: u64 = 0;
         L W i < self.words.len() {
@@ -215,7 +215,7 @@ X DeletionBitmap {
     }
 
     # Get bitmap memory usage in bytes
-    F memory_usage(&self) -> u64 {
+    F memory_usage(self) -> u64 {
         self.words.len() * 8  # 8 bytes per u64
     }
 
@@ -253,9 +253,9 @@ X DeletionBitmap {
 
     # Serialize bitmap to byte vector
     # Format: max_doc_id(8) + word_count(4) + words(8 each)
-    F to_bytes(&self) -> Vec<u8> {
+    F to_bytes(self) -> Vec<u8> {
         size := 8 + 4 + (self.words.len() * 8);
-        ~buf = Vec::with_capacity(size);
+        ~buf = Vec.with_capacity(size);
 
         # Serialize max_doc_id (8 bytes)
         buf.extend_from_slice(&self.max_doc_id.to_le_bytes());
@@ -279,19 +279,19 @@ X DeletionBitmap {
             R Err(VaisError {
                 code: error_code(4, 8, 2),  # 04-08-002: invalid bitmap data
                 message: "Deletion bitmap data too short".to_string(),
-                category: ErrorCategory::Corruption,
+                category: ErrorCategory.Corruption,
             });
         }
 
         # Deserialize max_doc_id (8 bytes)
         ~max_doc_id_bytes: [u8; 8] = [0; 8];
         max_doc_id_bytes.copy_from_slice(&data[0..8]);
-        max_doc_id := u64::from_le_bytes(max_doc_id_bytes);
+        max_doc_id := u64.from_le_bytes(max_doc_id_bytes);
 
         # Deserialize word count (4 bytes)
         ~word_count_bytes: [u8; 4] = [0; 4];
         word_count_bytes.copy_from_slice(&data[8..12]);
-        word_count := u32::from_le_bytes(word_count_bytes) as u64;
+        word_count := u32.from_le_bytes(word_count_bytes) as u64;
 
         # Verify data length
         expected_len := 12 + (word_count * 8);
@@ -299,18 +299,18 @@ X DeletionBitmap {
             R Err(VaisError {
                 code: error_code(4, 8, 2),
                 message: "Deletion bitmap data truncated".to_string(),
-                category: ErrorCategory::Corruption,
+                category: ErrorCategory.Corruption,
             });
         }
 
         # Deserialize words
-        ~words = Vec::with_capacity(word_count);
+        ~words = Vec.with_capacity(word_count);
         ~i: u64 = 0;
         L W i < word_count {
             offset := 12 + (i * 8);
             ~word_bytes: [u8; 8] = [0; 8];
             word_bytes.copy_from_slice(&data[offset..offset+8]);
-            words.push(u64::from_le_bytes(word_bytes));
+            words.push(u64.from_le_bytes(word_bytes));
             i += 1;
         }
 
@@ -321,7 +321,7 @@ X DeletionBitmap {
     }
 
     # Check if bitmap is empty (no deletions)
-    F is_empty(&self) -> bool {
+    F is_empty(self) -> bool {
         ~i: u64 = 0;
         L W i < self.words.len() {
             I self.words[i] != 0 {
@@ -333,8 +333,8 @@ X DeletionBitmap {
     }
 
     # Get all deleted doc_ids (for debugging/testing)
-    F get_deleted_doc_ids(&self) -> Vec<u64> {
-        ~result = Vec::new();
+    F get_deleted_doc_ids(self) -> Vec<u64> {
+        ~result = Vec.new();
 
         ~word_idx: u64 = 0;
         L W word_idx < self.words.len() {
@@ -374,7 +374,7 @@ F filter_visible_entries(
     snapshot: &Snapshot,
     clog: &CommitLog,
 ) -> Vec<PostingEntry> {
-    ~result = Vec::with_capacity(entries.len());
+    ~result = Vec.with_capacity(entries.len());
 
     ~i: u64 = 0;
     L W i < entries.len() {
@@ -472,11 +472,11 @@ F is_committed_before(txn_id: u64, snapshot: &Snapshot, clog: &CommitLog) -> boo
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    U super.*
 
     #[test]
     F test_deletion_bitmap_basic() {
-        ~bitmap = DeletionBitmap::new();
+        ~bitmap = DeletionBitmap.new();
 
         # Mark some entries as deleted
         bitmap.set_deleted(10)!;
@@ -496,7 +496,7 @@ mod tests {
 
     #[test]
     F test_deletion_bitmap_clear() {
-        ~bitmap = DeletionBitmap::new();
+        ~bitmap = DeletionBitmap.new();
 
         bitmap.set_deleted(10)!;
         bitmap.set_deleted(50)!;
@@ -511,7 +511,7 @@ mod tests {
 
     #[test]
     F test_deletion_bitmap_serialization() {
-        ~bitmap = DeletionBitmap::with_capacity(200);
+        ~bitmap = DeletionBitmap.with_capacity(200);
 
         bitmap.set_deleted(10)!;
         bitmap.set_deleted(150)!;
@@ -520,7 +520,7 @@ mod tests {
         bytes := bitmap.to_bytes();
 
         # Deserialize
-        restored := DeletionBitmap::from_bytes(&bytes)!;
+        restored := DeletionBitmap.from_bytes(&bytes)!;
 
         assert!(restored.is_deleted(10));
         assert!(restored.is_deleted(150));
@@ -530,7 +530,7 @@ mod tests {
 
     #[test]
     F test_deletion_bitmap_capacity_expansion() {
-        ~bitmap = DeletionBitmap::new();
+        ~bitmap = DeletionBitmap.new();
 
         # Mark entries beyond initial capacity
         bitmap.set_deleted(1000)!;
@@ -543,7 +543,7 @@ mod tests {
 
     #[test]
     F test_deletion_bitmap_get_deleted_ids() {
-        ~bitmap = DeletionBitmap::new();
+        ~bitmap = DeletionBitmap.new();
 
         bitmap.set_deleted(5)!;
         bitmap.set_deleted(10)!;

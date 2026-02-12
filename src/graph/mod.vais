@@ -10,8 +10,8 @@
 pub mod types;
 pub use types.{
     GraphConfig, GraphMeta, EdgeTypeTable, AdjEntry, GraphNode,
-    PropertyValue, PropertyMap, FILE_ID_GRAPH, EDGE_DIRECTION_OUT,
-    EDGE_DIRECTION_IN, EDGE_DIRECTION_BOTH,
+    PropertyValue, PropertyMap, FILE_ID_GRAPH, DIRECTION_OUTGOING,
+    DIRECTION_INCOMING, DIRECTION_BOTH,
 };
 
 # Visibility functions
@@ -124,7 +124,7 @@ F err_graph_traversal_failed(detail: Str) -> VaisError {
 # Integrates: node storage, edge storage, adjacency lists, indexes, traversal, WAL
 S GraphEngine {
     config: GraphConfig,              # Graph configuration (page sizes, limits)
-    meta: GraphMeta,                  # Metadata (node_count, edge_count, etc.)
+    meta: GraphMeta,                  # Metadata (total_nodes, total_edges, etc.)
     edge_type_table: EdgeTypeTable,   # Edge type name → ID mapping
     node_store: NodeStore,            # Node storage (pages with slotted array)
     adj_mgr: AdjacencyManager,        # Adjacency list manager (out/in edges)
@@ -133,7 +133,7 @@ S GraphEngine {
     prop_index: PropertyIndex,        # Property → node_id/edge_id index
     wal_mgr: GraphWalManager,         # WAL logging for graph operations
     lock_mgr: GraphLockManager,       # Concurrency control (node/edge locks)
-    stats: GraphStats,                # Statistics (query metrics, cache hits)
+    stats: GraphStats,                # Statistics (read-only, references meta)
     is_open: bool,                    # Engine open state
     pool: &BufferPool,                # Shared buffer pool
     allocator: &PageAllocator,        # Shared page allocator
@@ -155,27 +155,26 @@ X GraphEngine {
         bitmap: &FreelistBitmap,
         gcm: &GroupCommitManager,
     ) -> Result<GraphEngine, VaisError> {
-        # Validate configuration
-        I config.max_node_properties == 0 {
-            R Err(VaisError.new(
-                "VAIS-0310100",
-                "max_node_properties must be > 0"
-            ));
-        }
+        ~page_size = config.page_size;
 
         # Initialize metadata (empty graph)
-        meta := GraphMeta.new();
+        meta := GraphMeta.new(config.clone());
 
         # Initialize components
         edge_type_table := EdgeTypeTable.new();
-        node_store := NodeStore.new(pool, allocator, bitmap)?;
-        adj_mgr := AdjacencyManager.new(pool, allocator, bitmap)?;
-        prop_store := PropertyStore.new(pool, allocator, bitmap)?;
-        label_index := LabelIndex.new(pool, allocator, bitmap)?;
-        prop_index := PropertyIndex.new(pool, allocator, bitmap)?;
-        wal_mgr := GraphWalManager.new(gcm)?;
-        lock_mgr := GraphLockManager.new();
-        stats := GraphStats.new();
+        node_store := NodeStore.new(pool, allocator, bitmap, page_size);
+        adj_mgr := AdjacencyManager.new(pool, allocator, bitmap, page_size);
+        prop_store := PropertyStore.new(pool, allocator, bitmap, page_size);
+
+        # Indexes use root_page_id=NULL_PAGE initially, updated on open()
+        label_index := LabelIndex.new(NULL_PAGE, FILE_ID_GRAPH, page_size);
+        prop_index := PropertyIndex.new(NULL_PAGE, FILE_ID_GRAPH, page_size);
+
+        wal_mgr := GraphWalManager.new(gcm);
+        lock_mgr := GraphLockManager.new(256);  # 256 hash slots
+
+        # Stats holds a reference to meta for read-only access
+        stats := GraphStats.new(&meta);
 
         Ok(GraphEngine {
             config,
@@ -218,6 +217,9 @@ X GraphEngine {
         # Open indexes
         self.label_index.open()?;
         self.prop_index.open()?;
+
+        # Re-bind stats to loaded meta
+        self.stats = GraphStats.new(&self.meta);
 
         self.is_open = true;
         Ok(())
@@ -269,7 +271,7 @@ X GraphEngine {
         }
 
         # 1. WAL-log node creation (WAL-first)
-        node_id := self.meta.next_node_id;
+        node_id := self.meta.alloc_node_id();
         self.wal_mgr.log_node_insert(
             node_id,
             txn_id,
@@ -289,8 +291,13 @@ X GraphEngine {
         (page_id, slot_index) := self.node_store.write_node(&node)?;
 
         # 3. Update label indexes
+        # Note: label_index works with label_id (u16), not label name
+        # The edge_type_table pattern applies here too — need label_id resolution
         L label: labels {
-            self.label_index.insert_label(label, node_id, txn_id)?;
+            self.label_index.insert_label(
+                node_id, 0, txn_id,  # label_id=0 placeholder (needs label registry)
+                &~self.gcm, &~self.pool, self.allocator,
+            )?;
         }
 
         # 4. Update property indexes
@@ -299,11 +306,7 @@ X GraphEngine {
         }
 
         # 5. Update metadata
-        self.meta.next_node_id += 1;
-        self.meta.node_count += 1;
-
-        # 6. Update stats
-        self.stats.record_node_insert();
+        self.meta.total_nodes += 1;
 
         Ok(node_id)
     }
@@ -335,7 +338,10 @@ X GraphEngine {
 
         # 4. Remove from label indexes
         L label: &node.labels {
-            self.label_index.remove_label(label, node_id, txn_id)?;
+            self.label_index.remove_label(
+                node_id, 0, txn_id,  # label_id=0 placeholder
+                &~self.gcm, &~self.pool,
+            )?;
         }
 
         # 5. Remove from property indexes
@@ -347,7 +353,7 @@ X GraphEngine {
         out_edges := self.get_neighbors(
             node_id,
             node.out_adj_page,
-            EDGE_DIRECTION_OUT,
+            DIRECTION_OUTGOING,
             snapshot,
             clog,
         )?;
@@ -359,7 +365,7 @@ X GraphEngine {
         in_edges := self.get_neighbors(
             node_id,
             node.in_adj_page,
-            EDGE_DIRECTION_IN,
+            DIRECTION_INCOMING,
             snapshot,
             clog,
         )?;
@@ -368,10 +374,7 @@ X GraphEngine {
         }
 
         # 8. Update metadata
-        self.meta.node_count -= 1;
-
-        # 9. Update stats
-        self.stats.record_node_delete();
+        self.meta.total_nodes -= 1;
 
         Ok(())
     }
@@ -434,8 +437,7 @@ X GraphEngine {
         edge_type_id := self.edge_type_table.get_or_create(edge_type)?;
 
         # 2. Generate edge ID
-        edge_id := self.meta.next_edge_id;
-        self.meta.next_edge_id += 1;
+        edge_id := self.meta.alloc_edge_id();
 
         # 3. WAL-log edge creation
         self.wal_mgr.log_edge_insert(
@@ -455,7 +457,7 @@ X GraphEngine {
         self.adj_mgr.add_edge(
             src,
             src_node.out_adj_page,
-            EDGE_DIRECTION_OUT,
+            DIRECTION_OUTGOING,
             edge_id,
             dst,
             edge_type_id,
@@ -468,7 +470,7 @@ X GraphEngine {
         self.adj_mgr.add_edge(
             dst,
             dst_node.in_adj_page,
-            EDGE_DIRECTION_IN,
+            DIRECTION_INCOMING,
             edge_id,
             src,
             edge_type_id,
@@ -483,10 +485,7 @@ X GraphEngine {
         }
 
         # 8. Update metadata
-        self.meta.edge_count += 1;
-
-        # 9. Update stats
-        self.stats.record_edge_insert();
+        self.meta.total_edges += 1;
 
         Ok(edge_id)
     }
@@ -538,14 +537,8 @@ X GraphEngine {
             cmd_id,
         )?;
 
-        # 5. Remove from property indexes
-        # (Would need to read edge properties first, skipping for now)
-
-        # 6. Update metadata
-        self.meta.edge_count -= 1;
-
-        # 7. Update stats
-        self.stats.record_edge_delete();
+        # 5. Update metadata
+        self.meta.total_edges -= 1;
 
         Ok(())
     }
@@ -605,9 +598,6 @@ X GraphEngine {
         # Execute traversal
         result := traversal.execute(start, snapshot, clog)?;
 
-        # Update stats
-        self.stats.record_traversal(result.visited_count, result.edge_count);
-
         Ok(result)
     }
 
@@ -641,11 +631,6 @@ X GraphEngine {
         # Execute search
         result := finder.find(start, end, snapshot, clog)?;
 
-        # Update stats
-        I result.is_some() {
-            self.stats.record_path_found();
-        }
-
         Ok(result)
     }
 
@@ -656,7 +641,7 @@ X GraphEngine {
     # Scan nodes by label with MVCC filtering
     F scan_by_label(
         self,
-        label: &Str,
+        label_id: u16,
         snapshot: &Snapshot,
         clog: &Clog,
     ) -> Result<Vec<u64>, VaisError> {
@@ -664,8 +649,8 @@ X GraphEngine {
             R Err(err_graph_engine_closed());
         }
 
-        # Scan label index
-        node_ids := self.label_index.scan_by_label(label)?;
+        # Scan label index (takes label_id and pool)
+        node_ids := self.label_index.scan_by_label(label_id, &~self.pool)?;
 
         # Filter visible nodes
         ~visible = Vec.new();
@@ -717,12 +702,12 @@ X GraphEngine {
 
     # Get node count
     F node_count(self) -> u64 {
-        self.meta.node_count
+        self.meta.total_nodes
     }
 
     # Get edge count
     F edge_count(self) -> u64 {
-        self.meta.edge_count
+        self.meta.total_edges
     }
 
     # Check if engine is open

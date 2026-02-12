@@ -68,7 +68,7 @@ X EmbeddingModelInfo {
     }
 
     ## Validate that a vector matches this model's expected dimensions
-    F validate_vector(&self, vector: &Vec<f32>) -> Result<(), VaisError> {
+    F validate_vector(self, vector: &Vec<f32>) -> Result<(), VaisError> {
         I vector.len() as u32 != self.dimensions {
             R Err(err_rag_dimension_mismatch(self.dimensions, vector.len() as u32));
         }
@@ -76,12 +76,12 @@ X EmbeddingModelInfo {
     }
 
     ## Check if this model requires external API for embedding
-    F requires_api(&self) -> bool {
+    F requires_api(self) -> bool {
         self.provider != "precomputed" && self.provider != "local"
     }
 
     ## Distance metric name for display
-    F distance_name(&self) -> Str {
+    F distance_name(self) -> Str {
         M self.distance_metric {
             0 => "cosine",
             1 => "l2",
@@ -91,7 +91,7 @@ X EmbeddingModelInfo {
     }
 
     ## Serialize fixed metadata (32 bytes, excluding variable-length strings)
-    F serialize_meta(&self, buf: &~ByteBuffer) {
+    F serialize_meta(self, buf: &~ByteBuffer) {
         buf.put_u32_le(self.model_id);
         buf.put_u32_le(self.model_version);
         buf.put_u32_le(self.dimensions);
@@ -175,7 +175,7 @@ X EmbeddingModelRegistry {
     }
 
     ## Get the currently active model
-    F get_active_model(&self) -> Option<&EmbeddingModelInfo> {
+    F get_active_model(self) -> Option<&EmbeddingModelInfo> {
         ~i: u32 = 0;
         W i < self.models.len() as u32 {
             ~model = self.models.get(i as u64);
@@ -188,7 +188,7 @@ X EmbeddingModelRegistry {
     }
 
     ## Get model by ID
-    F get_model(&self, model_id: u32) -> Option<&EmbeddingModelInfo> {
+    F get_model(self, model_id: u32) -> Option<&EmbeddingModelInfo> {
         ~i: u32 = 0;
         W i < self.models.len() as u32 {
             ~model = self.models.get(i as u64);
@@ -201,7 +201,7 @@ X EmbeddingModelRegistry {
     }
 
     ## Get model by name
-    F get_model_by_name(&self, name: &Str) -> Option<&EmbeddingModelInfo> {
+    F get_model_by_name(self, name: &Str) -> Option<&EmbeddingModelInfo> {
         ~i: u32 = 0;
         W i < self.models.len() as u32 {
             ~model = self.models.get(i as u64);
@@ -214,7 +214,7 @@ X EmbeddingModelRegistry {
     }
 
     ## Check if a vector is compatible with the given model
-    F validate_compatibility(&self, model_id: u32, vector: &Vec<f32>) -> Result<(), VaisError> {
+    F validate_compatibility(self, model_id: u32, vector: &Vec<f32>) -> Result<(), VaisError> {
         M self.get_model(model_id) {
             Some(model) => model.validate_vector(vector),
             None => Err(err_rag_model_not_found(&"unknown")),
@@ -222,7 +222,7 @@ X EmbeddingModelRegistry {
     }
 
     ## Check version compatibility between index model and current model
-    F check_version(&self, index_model_id: u32, index_model_version: u32) -> Result<(), VaisError> {
+    F check_version(self, index_model_id: u32, index_model_version: u32) -> Result<(), VaisError> {
         M self.get_model(index_model_id) {
             Some(model) => {
                 I model.model_version != index_model_version {
@@ -270,7 +270,7 @@ X EmbeddingModelRegistry {
     }
 
     ## Get total registered models
-    F model_count(&self) -> u32 {
+    F model_count(self) -> u32 {
         self.models.len() as u32
     }
 }

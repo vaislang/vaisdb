@@ -1,5 +1,5 @@
 # Graph Query Planning — BFS/DFS Selection and Edge Type Pushdown
-# Builds HybridPlanNode::GraphTraverse with optimal traversal algorithm and edge filters
+# Builds HybridPlanNode.GraphTraverse with optimal traversal algorithm and edge filters
 #
 # Traversal Algorithm Selection:
 # - BFS (Breadth-First Search): best for shortest-path queries, bounded depth, path enumeration
@@ -249,7 +249,7 @@ F push_predicates(
 # - where_clause: Optional WHERE predicate from SQL query
 #
 # Returns:
-# - HybridPlanNode::GraphTraverse with computed HybridCost and optimal traversal algorithm
+# - HybridPlanNode.GraphTraverse with computed HybridCost and optimal traversal algorithm
 F build_graph_plan(
     params: GraphTraverseNodeParams,
     stats: &GraphStats,
@@ -278,7 +278,7 @@ F build_graph_plan(
     # Step 5: Estimate cost
     ~cost = estimate_graph_traverse_cost(&final_params, stats);
 
-    # Step 6: Build HybridPlanNode::GraphTraverse
+    # Step 6: Build HybridPlanNode.GraphTraverse
     Ok(HybridPlanNode.GraphTraverse {
         params: final_params,
         alias: None,

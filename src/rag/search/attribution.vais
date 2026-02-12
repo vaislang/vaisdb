@@ -74,7 +74,7 @@ X Attribution {
 
     ## Format as citation string
     ## Example: "[Doc: 'ML Guide', Section 3, Position 12]"
-    F format_citation(&self) -> Str {
+    F format_citation(self) -> Str {
         I self.doc_title.is_empty() {
             R "[Chunk {self.chunk_id}, Doc {self.doc_id}]";
         }
@@ -83,7 +83,7 @@ X Attribution {
 
     ## Format as URI-like reference
     ## Example: "vaisdb://doc/42/chunk/17"
-    F format_ref(&self) -> Str {
+    F format_ref(self) -> Str {
         "vaisdb://doc/{self.doc_id}/chunk/{self.chunk_id}"
     }
 }
@@ -116,7 +116,7 @@ X ScoreBreakdown {
     }
 
     ## Format as human-readable breakdown
-    F format(&self) -> Str {
+    F format(self) -> Str {
         ~parts = Vec.new();
         I self.vector_score > 0.0 {
             parts.push("vector={self.vector_score:.3}(rank:{self.vector_rank})");
@@ -245,12 +245,12 @@ X AttributionBuilder {
     }
 
     ## Get the built attributions
-    F get_attributions(&self) -> &Vec<Attribution> {
+    F get_attributions(self) -> &Vec<Attribution> {
         &self.attributions
     }
 
     ## Format all attributions as a report
-    F format_report(&self) -> Str {
+    F format_report(self) -> Str {
         ~report = "=== RAG Search Attribution Report ===\n";
         ~i: u32 = 0;
         W i < self.attributions.len() as u32 {

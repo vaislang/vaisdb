@@ -66,12 +66,12 @@ X AgentSession {
     }
 
     ## Check if session is active
-    F is_active(&self) -> bool {
+    F is_active(self) -> bool {
         self.status == SESSION_STATUS_ACTIVE
     }
 
     ## Check if session is closed
-    F is_closed(&self) -> bool {
+    F is_closed(self) -> bool {
         self.status == SESSION_STATUS_CLOSED
     }
 
@@ -92,7 +92,7 @@ X AgentSession {
     }
 
     ## Check if token budget is exceeded
-    F is_budget_exceeded(&self) -> bool {
+    F is_budget_exceeded(self) -> bool {
         self.tokens_used > self.token_budget
     }
 
@@ -114,7 +114,7 @@ X AgentSession {
     }
 
     ## Get session duration in seconds
-    F duration_seconds(&self, current_time: i64) -> u64 {
+    F duration_seconds(self, current_time: i64) -> u64 {
         I self.closed_at > 0 {
             ~diff = self.closed_at - self.created_at;
             I diff < 0 { R 0 }
@@ -127,7 +127,7 @@ X AgentSession {
     }
 
     ## Get memory count for this session
-    F memory_count(&self) -> u32 {
+    F memory_count(self) -> u32 {
         self.memory_ids.len() as u32
     }
 
@@ -147,7 +147,7 @@ X AgentSession {
     }
 
     ## Get metadata value
-    F get_metadata(&self, key: &Str) -> Option<&Str> {
+    F get_metadata(self, key: &Str) -> Option<&Str> {
         self.metadata.get(key)
     }
 }
@@ -219,7 +219,7 @@ X SessionManager {
 
     ## Get a session by ID with agent ownership validation
     ## Returns Err if session belongs to a different agent
-    F get_session_for_agent(&self, session_id: u64, agent_id: &Str) -> Result<&AgentSession, VaisError> {
+    F get_session_for_agent(self, session_id: u64, agent_id: &Str) -> Result<&AgentSession, VaisError> {
         M self.get_session(session_id) {
             Some(session) => {
                 I session.agent_id != *agent_id {
@@ -235,7 +235,7 @@ X SessionManager {
     }
 
     ## Get a session by ID (internal, no ownership check)
-    F get_session(&self, session_id: u64) -> Option<&AgentSession> {
+    F get_session(self, session_id: u64) -> Option<&AgentSession> {
         ~i: u32 = 0;
         W i < self.sessions.len() as u32 {
             ~session = self.sessions.get(i as u64);
@@ -261,7 +261,7 @@ X SessionManager {
     }
 
     ## Get active sessions for an agent
-    F get_active_sessions(&self, agent_id: &Str) -> Vec<&AgentSession> {
+    F get_active_sessions(self, agent_id: &Str) -> Vec<&AgentSession> {
         ~result = Vec.new();
         ~i: u32 = 0;
         W i < self.sessions.len() as u32 {
@@ -309,7 +309,7 @@ X SessionManager {
     }
 
     ## Get memory IDs for a session (for memory retrieval)
-    F get_session_memories(&self, session_id: u64) -> Vec<u64> {
+    F get_session_memories(self, session_id: u64) -> Vec<u64> {
         M self.get_session(session_id) {
             Some(session) => {
                 ~result = Vec.new();
@@ -327,7 +327,7 @@ X SessionManager {
 
     ## Build session graph edges: SESSION_CONTEXT edges from session to memories
     ## Returns list of (from_node_id, to_node_id) pairs
-    F build_session_edges(&self, session_id: u64,
+    F build_session_edges(self, session_id: u64,
                           memory_to_graph: &Vec<(u64, u64)>,
                           session_graph_node: u64) -> Vec<(u64, u64)> {
         ~edges = Vec.new();
@@ -361,7 +361,7 @@ X SessionManager {
     }
 
     ## Get session count by status
-    F count_by_status(&self, status: u8) -> u32 {
+    F count_by_status(self, status: u8) -> u32 {
         ~count: u32 = 0;
         ~i: u32 = 0;
         W i < self.sessions.len() as u32 {
@@ -375,17 +375,17 @@ X SessionManager {
     }
 
     ## Get total session count
-    F session_count(&self) -> u64 {
+    F session_count(self) -> u64 {
         self.sessions.len() as u64
     }
 
     ## Get count of active sessions
-    F active_session_count(&self) -> u32 {
+    F active_session_count(self) -> u32 {
         self.count_by_status(SESSION_STATUS_ACTIVE)
     }
 
     ## Get count of closed sessions
-    F closed_session_count(&self) -> u32 {
+    F closed_session_count(self) -> u32 {
         self.count_by_status(SESSION_STATUS_CLOSED)
     }
 

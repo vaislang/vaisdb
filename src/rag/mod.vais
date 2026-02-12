@@ -17,9 +17,10 @@ pub use types.{
     EDGE_TYPE_NEXT_CHUNK, EDGE_TYPE_SAME_SECTION, EDGE_TYPE_SAME_DOCUMENT,
     EDGE_TYPE_CONTAINS, EDGE_TYPE_REFERENCES, EDGE_TYPE_SUPERSEDES, EDGE_TYPE_RELATED_TO,
     LABEL_DOCUMENT, LABEL_SECTION, LABEL_PARAGRAPH, LABEL_CHUNK, LABEL_MEMORY, LABEL_SESSION,
-    fnv1a_hash, err_rag_engine_closed, err_rag_doc_not_found, err_rag_chunk_not_found,
+    err_rag_engine_closed, err_rag_doc_not_found, err_rag_chunk_not_found,
     err_rag_model_not_found, err_rag_memory_not_found, err_rag_session_not_found,
 };
+pub use storage/hash.{fnv1a_hash};
 
 # Embedding management
 pub mod embedding;
@@ -303,7 +304,7 @@ X RagEngine {
         fusion_config.validate()?;
 
         # Create search parameters
-        ~params = RagSearchParams.from_fusion_config(query_text.clone(), fusion_config);
+        ~params = RagSearchParams.from_config(query_text.clone(), fusion_config);
 
         # Execute via pipeline
         ~executor = RagSearchExecutor.new(params);
@@ -494,42 +495,42 @@ X RagEngine {
     # ========================================================================
 
     ## Get document count
-    F doc_count(&self) -> u64 {
+    F doc_count(self) -> u64 {
         self.meta.doc_count
     }
 
     ## Get chunk count
-    F chunk_count(&self) -> u64 {
+    F chunk_count(self) -> u64 {
         self.meta.chunk_count
     }
 
     ## Get memory count
-    F memory_count(&self) -> u64 {
+    F memory_count(self) -> u64 {
         self.meta.memory_count
     }
 
     ## Get session count
-    F session_count(&self) -> u64 {
+    F session_count(self) -> u64 {
         self.meta.session_count
     }
 
     ## Get active session count
-    F active_session_count(&self) -> u32 {
+    F active_session_count(self) -> u32 {
         self.session_mgr.active_session_count()
     }
 
     ## Check if engine is open
-    F is_engine_open(&self) -> bool {
+    F is_engine_open(self) -> bool {
         self.is_open
     }
 
     ## Get config reference
-    F get_config(&self) -> &RagConfig {
+    F get_config(self) -> &RagConfig {
         &self.config
     }
 
     ## Get meta reference
-    F get_meta(&self) -> &RagMeta {
+    F get_meta(self) -> &RagMeta {
         &self.meta
     }
 }

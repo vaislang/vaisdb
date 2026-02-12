@@ -96,7 +96,7 @@ X RagSearchParams {
     }
 
     ## Validate parameters
-    F validate(&self) -> Result<(), VaisError> {
+    F validate(self) -> Result<(), VaisError> {
         I self.query_text.is_empty() {
             R Err(err_rag_search_invalid_params(&"query_text is empty"));
         }
@@ -134,12 +134,12 @@ X EngineResultSet {
     }
 
     ## Get result count
-    F len(&self) -> u32 {
+    F len(self) -> u32 {
         self.scored_chunks.len() as u32
     }
 
     ## Check if empty
-    F is_empty(&self) -> bool {
+    F is_empty(self) -> bool {
         self.scored_chunks.len() == 0
     }
 }
@@ -260,17 +260,17 @@ X RagSearchExecutor {
     }
 
     ## Get total result count
-    F result_count(&self) -> u32 {
+    F result_count(self) -> u32 {
         self.results.len() as u32
     }
 
     ## Get all results (for non-iterator access)
-    F get_results(&self) -> &Vec<RagSearchResult> {
+    F get_results(self) -> &Vec<RagSearchResult> {
         &self.results
     }
 
     ## Get execution time
-    F exec_time(&self) -> u64 {
+    F exec_time(self) -> u64 {
         self.exec_time_us
     }
 

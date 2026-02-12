@@ -42,10 +42,10 @@ X FullTextRowSource {
     # Volcano interface: get next row
     #
     # Returns ExecutorRow with schema:
-    # - Column 0: doc_id (u64) → SqlValue::BigInt
-    # - Column 1: score (f64) → SqlValue::Float
-    # - Column 2: table_id (u32) → SqlValue::Int
-    # - Column 3: row_tid (u32) → SqlValue::Int
+    # - Column 0: doc_id (u64) → SqlValue.BigInt
+    # - Column 1: score (f64) → SqlValue.Float
+    # - Column 2: table_id (u32) → SqlValue.Int
+    # - Column 3: row_tid (u32) → SqlValue.Int
     F next(~self) -> Option<ExecutorRow> {
         I !self.is_open || self.cursor >= self.results.len() {
             R None;
@@ -64,39 +64,39 @@ X FullTextRowSource {
     }
 
     # Convert FullTextMatchResult to ExecutorRow
-    F convert_to_row(&self, result: &FullTextMatchResult) -> ExecutorRow {
-        ~values: Vec<SqlValue> = Vec::new();
+    F convert_to_row(self, result: &FullTextMatchResult) -> ExecutorRow {
+        ~values: Vec<SqlValue> = Vec.new();
 
         # Column 0: doc_id (u64)
-        values.push(SqlValue::BigInt(result.doc_id as i64));
+        values.push(SqlValue.BigInt(result.doc_id as i64));
 
         # Column 1: score (f64)
-        values.push(SqlValue::Float(result.score));
+        values.push(SqlValue.Float(result.score));
 
         # Column 2: table_id (u32)
-        values.push(SqlValue::Int(result.table_id as i32));
+        values.push(SqlValue.Int(result.table_id as i32));
 
         # Column 3: row_tid (u32)
-        values.push(SqlValue::Int(result.row_tid as i32));
+        values.push(SqlValue.Int(result.row_tid as i32));
 
-        ~row = Row::new(values);
+        ~row = Row.new(values);
 
         # Return virtual row (no physical page location)
-        ExecutorRow::virtual(row)
+        ExecutorRow.virtual(row)
     }
 
     # Get current cursor position
-    F cursor_position(&self) -> u64 {
+    F cursor_position(self) -> u64 {
         self.cursor
     }
 
     # Get total result count
-    F result_count(&self) -> u64 {
+    F result_count(self) -> u64 {
         self.results.len()
     }
 
     # Check if iterator is open
-    F is_open(&self) -> bool {
+    F is_open(self) -> bool {
         self.is_open
     }
 
@@ -118,7 +118,7 @@ F filter_by_predicate(
     results: &Vec<FullTextMatchResult>,
     predicate_fn: fn(&FullTextMatchResult) -> bool,
 ) -> Vec<FullTextMatchResult> {
-    ~filtered: Vec<FullTextMatchResult> = Vec::new();
+    ~filtered: Vec<FullTextMatchResult> = Vec.new();
 
     L i: 0..results.len() {
         I predicate_fn(&results[i]) {
@@ -134,7 +134,7 @@ F filter_by_min_score(
     results: &Vec<FullTextMatchResult>,
     min_score: f64,
 ) -> Vec<FullTextMatchResult> {
-    ~filtered: Vec<FullTextMatchResult> = Vec::new();
+    ~filtered: Vec<FullTextMatchResult> = Vec.new();
 
     L i: 0..results.len() {
         I results[i].score >= min_score {
@@ -150,7 +150,7 @@ F filter_by_table(
     results: &Vec<FullTextMatchResult>,
     table_id: u32,
 ) -> Vec<FullTextMatchResult> {
-    ~filtered: Vec<FullTextMatchResult> = Vec::new();
+    ~filtered: Vec<FullTextMatchResult> = Vec.new();
 
     L i: 0..results.len() {
         I results[i].table_id == table_id {
@@ -188,11 +188,11 @@ F sort_by_score_desc(results: &~Vec<FullTextMatchResult>) {
 # Example SQL integration usage:
 #
 # # Execute full-text search
-# ~executor = FullTextMatchExecutor::new(index_id, "machine learning", 100);
+# ~executor = FullTextMatchExecutor.new(index_id, "machine learning", 100);
 # executor.execute_search(meta, config, dict_index, posting_store, snapshot, clog, pool)?;
 #
 # # Create row source
-# ~row_source = FullTextRowSource::new(executor.results);
+# ~row_source = FullTextRowSource.new(executor.results);
 #
 # # Use in SQL executor pipeline
 # row_source.open();
@@ -204,4 +204,4 @@ F sort_by_score_desc(results: &~Vec<FullTextMatchResult>) {
 #
 # # Or filter before creating row source
 # ~filtered = filter_by_min_score(&executor.results, 0.5);
-# ~row_source = FullTextRowSource::new(filtered);
+# ~row_source = FullTextRowSource.new(filtered);

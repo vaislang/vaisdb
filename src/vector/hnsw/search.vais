@@ -49,7 +49,7 @@ S SearchResult {
 X SearchResult {
     F new() -> SearchResult {
         SearchResult {
-            results: Vec::new(),
+            results: Vec.new(),
             nodes_visited: 0,
             distance_computations: 0,
         }
@@ -57,7 +57,7 @@ X SearchResult {
 
     F with_capacity(k: u64) -> SearchResult {
         SearchResult {
-            results: Vec::with_capacity(k),
+            results: Vec.with_capacity(k),
             nodes_visited: 0,
             distance_computations: 0,
         }
@@ -100,8 +100,8 @@ X SearchResult {
 # ============================================================================
 
 T NodeStore {
-    F get_node(&self, node_id: u64) -> Result<&HnswNode, VaisError>;
-    F get_vector(&self, node_id: u64) -> Result<&[f32], VaisError>;
+    F get_node(self, node_id: u64) -> Result<&HnswNode, VaisError>;
+    F get_vector(self, node_id: u64) -> Result<&[f32], VaisError>;
 }
 
 # ============================================================================
@@ -116,13 +116,13 @@ S MinHeap {
 X MinHeap {
     F new() -> MinHeap {
         MinHeap {
-            candidates: Vec::new(),
+            candidates: Vec.new(),
         }
     }
 
     F with_capacity(capacity: u64) -> MinHeap {
         MinHeap {
-            candidates: Vec::with_capacity(capacity),
+            candidates: Vec.with_capacity(capacity),
         }
     }
 
@@ -144,17 +144,17 @@ X MinHeap {
 
     F pop_min(~self) -> Option<SearchCandidate> {
         I self.candidates.is_empty() {
-            Option::None
+            Option.None
         } E {
-            Option::Some(self.candidates.remove(0))
+            Option.Some(self.candidates.remove(0))
         }
     }
 
-    F is_empty(&self) -> bool {
+    F is_empty(self) -> bool {
         self.candidates.is_empty()
     }
 
-    F len(&self) -> u64 {
+    F len(self) -> u64 {
         self.candidates.len()
     }
 }
@@ -168,13 +168,13 @@ S MaxHeap {
 X MaxHeap {
     F new() -> MaxHeap {
         MaxHeap {
-            candidates: Vec::new(),
+            candidates: Vec.new(),
         }
     }
 
     F with_capacity(capacity: u64) -> MaxHeap {
         MaxHeap {
-            candidates: Vec::with_capacity(capacity),
+            candidates: Vec.with_capacity(capacity),
         }
     }
 
@@ -196,25 +196,25 @@ X MaxHeap {
 
     F pop_max(~self) -> Option<SearchCandidate> {
         I self.candidates.is_empty() {
-            Option::None
+            Option.None
         } E {
-            Option::Some(self.candidates.remove(0))
+            Option.Some(self.candidates.remove(0))
         }
     }
 
-    F peek_max(&self) -> Option<&SearchCandidate> {
+    F peek_max(self) -> Option<&SearchCandidate> {
         I self.candidates.is_empty() {
-            Option::None
+            Option.None
         } E {
-            Option::Some(&self.candidates[0])
+            Option.Some(&self.candidates[0])
         }
     }
 
-    F is_empty(&self) -> bool {
+    F is_empty(self) -> bool {
         self.candidates.is_empty()
     }
 
-    F len(&self) -> u64 {
+    F len(self) -> u64 {
         self.candidates.len()
     }
 
@@ -251,17 +251,17 @@ F search_layer_ef(
     distance: &DistanceComputer,
     ~stats: &~SearchResult,
 ) -> Result<Vec<SearchCandidate>, VaisError> {
-    ~visited: HashSet<u64> = HashSet::new();
-    ~candidates = MinHeap::with_capacity(ef as u64);
-    ~result = MaxHeap::with_capacity(ef as u64);
+    ~visited: HashSet<u64> = HashSet.new();
+    ~candidates = MinHeap.with_capacity(ef as u64);
+    ~result = MaxHeap.with_capacity(ef as u64);
 
     # Initialize with entry points
     ~ep_idx: u64 = 0;
     L while ep_idx < entry_points.len() {
         ~ep = &entry_points[ep_idx];
         visited.insert(ep.node_id);
-        candidates.push(SearchCandidate::new(ep.node_id, ep.distance));
-        result.push(SearchCandidate::new(ep.node_id, ep.distance));
+        candidates.push(SearchCandidate.new(ep.node_id, ep.distance));
+        result.push(SearchCandidate.new(ep.node_id, ep.distance));
         ep_idx = ep_idx + 1;
     }
 
@@ -269,16 +269,16 @@ F search_layer_ef(
     L while !candidates.is_empty() {
         ~c_opt = candidates.pop_min();
         M c_opt {
-            Option::None => break,
-            Option::Some(c) => {
+            Option.None => B,
+            Option.Some(c) => {
                 # Check if we can still improve result set
                 ~f_opt = result.peek_max();
                 M f_opt {
-                    Option::Some(f) => {
+                    Option.Some(f) => {
                         I c.distance > f.distance {
                             B                        }
                     },
-                    Option::None => {},
+                    Option.None => {},
                 }
 
                 # Get current node
@@ -316,19 +316,19 @@ F search_layer_ef(
                     ~should_add = false;
                     ~f_dist_opt = result.peek_max();
                     M f_dist_opt {
-                        Option::Some(f_dist) => {
+                        Option.Some(f_dist) => {
                             I dist_n < f_dist.distance || (result.len() as u32) < ef {
                                 should_add = true;
                             }
                         },
-                        Option::None => {
+                        Option.None => {
                             should_add = true;
                         },
                     }
 
                     I should_add {
-                        ~new_candidate = SearchCandidate::new(n_id, dist_n);
-                        candidates.push(SearchCandidate::new(n_id, dist_n));
+                        ~new_candidate = SearchCandidate.new(n_id, dist_n);
+                        candidates.push(SearchCandidate.new(n_id, dist_n));
                         result.push(new_candidate);
 
                         # Evict farthest if result set exceeds ef
@@ -374,32 +374,32 @@ F knn_search(
 ) -> Result<SearchResult, VaisError> {
     # Validate parameters
     I meta.is_empty() {
-        ~err_msg = Str::from("Cannot search in empty HNSW index");
-        R Err(VaisError::new(
-            ErrorCategory::Vector,
+        ~err_msg = Str.from("Cannot search in empty HNSW index");
+        R Err(VaisError.new(
+            ErrorCategory.Vector,
             "VE-02-03-001",
             err_msg,
         ));
     }
 
     I k == 0 || (k as u64) > meta.total_nodes {
-        ~err_msg = Str::from("Invalid K parameter: must be 0 < K <= total_nodes");
-        R Err(VaisError::new(
-            ErrorCategory::Vector,
+        ~err_msg = Str.from("Invalid K parameter: must be 0 < K <= total_nodes");
+        R Err(VaisError.new(
+            ErrorCategory.Vector,
             "VE-02-03-002",
             err_msg,
         ));
     }
 
     # Initialize search result with statistics tracking
-    ~result = SearchResult::with_capacity(k);
+    ~result = SearchResult.with_capacity(k);
 
     # Get entry point
     ~ep_id = meta.entry_point;
     I ep_id == INVALID_NODE_ID {
-        ~err_msg = Str::from("Invalid entry point in HNSW meta");
-        R Err(VaisError::new(
-            ErrorCategory::Vector,
+        ~err_msg = Str.from("Invalid entry point in HNSW meta");
+        R Err(VaisError.new(
+            ErrorCategory.Vector,
             "VE-02-03-001",
             err_msg,
         ));
@@ -410,8 +410,8 @@ F knn_search(
     ~ep_dist = distance.compute(query, ep_vec)?;
     result.increment_computations();
 
-    ~current_candidates = Vec::with_capacity(1);
-    current_candidates.push(SearchCandidate::new(ep_id, ep_dist));
+    ~current_candidates = Vec.with_capacity(1);
+    current_candidates.push(SearchCandidate.new(ep_id, ep_dist));
 
     # Phase 1: Greedy descent from max_layer down to layer 1
     # At each upper layer, use ef=1 to find single closest node
@@ -428,9 +428,9 @@ F knn_search(
         )?;
 
         I layer_result.is_empty() {
-            ~err_msg = Str::from("Search layer returned empty result during descent");
-            R Err(VaisError::new(
-                ErrorCategory::Vector,
+            ~err_msg = Str.from("Search layer returned empty result during descent");
+            R Err(VaisError.new(
+                ErrorCategory.Vector,
                 "VE-02-03-003",
                 err_msg,
             ));
@@ -461,7 +461,7 @@ F knn_search(
     ~idx: u64 = 0;
     L while idx < final_candidates.len() {
         ~candidate = &final_candidates[idx];
-        result.add_result(SearchResultEntry::new(
+        result.add_result(SearchResultEntry.new(
             candidate.node_id,
             candidate.distance,
         ));
@@ -528,5 +528,5 @@ F greedy_search_single(
         }
     }
 
-    Ok(SearchCandidate::new(current_id, current_dist))
+    Ok(SearchCandidate.new(current_id, current_dist))
 }

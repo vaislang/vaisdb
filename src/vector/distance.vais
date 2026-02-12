@@ -194,19 +194,19 @@ X DistanceComputer {
 
     # Compute distance between two vectors
     # Returns error if dimensions don't M or vectors are invalid
-    F compute(&self, a: &[f32], b: &[f32]) -> Result<f32, VaisError> {
+    F compute(self, a: &[f32], b: &[f32]) -> Result<f32, VaisError> {
         # Validate dimensions
         validate_dimensions(a, b)?;
 
         # Dispatch based on metric type
         ~ distance = M self.metric {
-            DistanceMetric::Cosine => {
+            DistanceMetric.Cosine => {
                 cosine_distance_scalar(a, b)
             },
-            DistanceMetric::L2 => {
+            DistanceMetric.L2 => {
                 l2_distance_scalar(a, b)
             },
-            DistanceMetric::DotProduct => {
+            DistanceMetric.DotProduct => {
                 dot_product_scalar(a, b)
             },
         };
@@ -216,7 +216,7 @@ X DistanceComputer {
 
     # Compute distance with SIMD optimization (if available)
     # Falls back to scalar implementation if SIMD not supported
-    F compute_simd(&self, a: &[f32], b: &[f32]) -> Result<f32, VaisError> {
+    F compute_simd(self, a: &[f32], b: &[f32]) -> Result<f32, VaisError> {
         # Validate dimensions
         validate_dimensions(a, b)?;
 
@@ -227,7 +227,7 @@ X DistanceComputer {
     }
 
     # Get the distance metric type
-    F metric(&self) -> DistanceMetric {
+    F metric(self) -> DistanceMetric {
         self.metric
     }
 }
@@ -261,7 +261,7 @@ F normalize_vector(v: &[f32]) -> Result<Vec<f32>, VaisError> {
     }
 
     # Create normalized vector
-    ~ normalized = Vec::new();
+    ~ normalized = Vec.new();
     i = 0;
     L {
         I i >= v.len() { B }
@@ -347,7 +347,7 @@ F batch_compute_distances(
     query: &[f32],
     candidates: &[&[f32]]
 ) -> Result<Vec<f32>, VaisError> {
-    ~ distances = Vec::new();
+    ~ distances = Vec.new();
 
     ~ i: u64 = 0;
     L {
@@ -422,7 +422,7 @@ F test_normalize_vector() {
 
 #[test]
 F test_dimension_mismatch() {
-    ~ computer = DistanceComputer::new(DistanceMetric::Cosine);
+    ~ computer = DistanceComputer.new(DistanceMetric.Cosine);
     ~ a = vec![1.0, 2.0];
     ~ b = vec![1.0, 2.0, 3.0];
 
@@ -432,7 +432,7 @@ F test_dimension_mismatch() {
 
 #[test]
 F test_batch_compute() {
-    ~ computer = DistanceComputer::new(DistanceMetric::L2);
+    ~ computer = DistanceComputer.new(DistanceMetric.L2);
     ~ query = vec![0.0, 0.0];
     ~ candidates = vec![
         &vec![1.0, 0.0],

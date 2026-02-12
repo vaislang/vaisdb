@@ -24,37 +24,37 @@ X RagConcurrencyStats {
     }
 
     ## Increment read lock counter
-    F inc_read(&self) {
+    F inc_read(self) {
         self.read_count.fetch_add(1);
     }
 
     ## Increment write lock counter
-    F inc_write(&self) {
+    F inc_write(self) {
         self.write_count.fetch_add(1);
     }
 
     ## Increment contention counter
-    F inc_contention(&self) {
+    F inc_contention(self) {
         self.contention_count.fetch_add(1);
     }
 
     ## Get total read locks acquired
-    F get_read_count(&self) -> u64 {
+    F get_read_count(self) -> u64 {
         self.read_count.load()
     }
 
     ## Get total write locks acquired
-    F get_write_count(&self) -> u64 {
+    F get_write_count(self) -> u64 {
         self.write_count.load()
     }
 
     ## Get total contentions detected
-    F get_contention_count(&self) -> u64 {
+    F get_contention_count(self) -> u64 {
         self.contention_count.load()
     }
 
     ## Reset all counters to zero
-    F reset(&self) {
+    F reset(self) {
         self.read_count.store(0);
         self.write_count.store(0);
         self.contention_count.store(0);
@@ -80,21 +80,21 @@ X RagLock {
 
     ## Acquire read lock (shared access)
     ## Multiple readers can hold lock simultaneously
-    F read_lock(&self) -> RwLockReadGuard {
+    F read_lock(self) -> RwLockReadGuard {
         self.stats.inc_read();
         self.lock.read()
     }
 
     ## Acquire write lock (exclusive access)
     ## Only one writer can hold lock at a time
-    F write_lock(&self) -> RwLockWriteGuard {
+    F write_lock(self) -> RwLockWriteGuard {
         self.stats.inc_write();
         self.lock.write()
     }
 
     ## Try to acquire read lock without blocking
     ## Returns None if lock is held by writer
-    F try_read_lock(&self) -> Option<RwLockReadGuard> {
+    F try_read_lock(self) -> Option<RwLockReadGuard> {
         L result = self.lock.try_read();
         M result {
             Some(guard) => {
@@ -110,7 +110,7 @@ X RagLock {
 
     ## Try to acquire write lock without blocking
     ## Returns None if lock is held by any reader or writer
-    F try_write_lock(&self) -> Option<RwLockWriteGuard> {
+    F try_write_lock(self) -> Option<RwLockWriteGuard> {
         L result = self.lock.try_write();
         M result {
             Some(guard) => {
@@ -125,12 +125,12 @@ X RagLock {
     }
 
     ## Get lock statistics
-    F get_stats(&self) -> &RagConcurrencyStats {
+    F get_stats(self) -> &RagConcurrencyStats {
         &self.stats
     }
 
     ## Reset lock statistics
-    F reset_stats(&self) {
+    F reset_stats(self) {
         self.stats.reset();
     }
 }
@@ -157,33 +157,33 @@ X DocumentLockManager {
     }
 
     ## Get lock for document ID
-    F get_lock(&self, doc_id: u64) -> &RagLock {
+    F get_lock(self, doc_id: u64) -> &RagLock {
         L stripe = (doc_id % self.stripe_count as u64) as u64;
         &self.locks[stripe]
     }
 
     ## Acquire read lock for document
-    F read_lock_document(&self, doc_id: u64) -> RwLockReadGuard {
+    F read_lock_document(self, doc_id: u64) -> RwLockReadGuard {
         self.get_lock(doc_id).read_lock()
     }
 
     ## Acquire write lock for document
-    F write_lock_document(&self, doc_id: u64) -> RwLockWriteGuard {
+    F write_lock_document(self, doc_id: u64) -> RwLockWriteGuard {
         self.get_lock(doc_id).write_lock()
     }
 
     ## Try to acquire read lock for document
-    F try_read_lock_document(&self, doc_id: u64) -> Option<RwLockReadGuard> {
+    F try_read_lock_document(self, doc_id: u64) -> Option<RwLockReadGuard> {
         self.get_lock(doc_id).try_read_lock()
     }
 
     ## Try to acquire write lock for document
-    F try_write_lock_document(&self, doc_id: u64) -> Option<RwLockWriteGuard> {
+    F try_write_lock_document(self, doc_id: u64) -> Option<RwLockWriteGuard> {
         self.get_lock(doc_id).try_write_lock()
     }
 
     ## Get aggregate statistics across all stripes
-    F get_aggregate_stats(&self) -> RagConcurrencyStats {
+    F get_aggregate_stats(self) -> RagConcurrencyStats {
         ~total = RagConcurrencyStats.new();
         E lock in &self.locks {
             L stats = lock.get_stats();
@@ -195,7 +195,7 @@ X DocumentLockManager {
     }
 
     ## Reset statistics for all stripes
-    F reset_all_stats(&self) {
+    F reset_all_stats(self) {
         E lock in &self.locks {
             lock.reset_stats();
         }
@@ -223,33 +223,33 @@ X ChunkLockManager {
     }
 
     ## Get lock for chunk ID
-    F get_lock(&self, chunk_id: u64) -> &RagLock {
+    F get_lock(self, chunk_id: u64) -> &RagLock {
         L stripe = (chunk_id % self.stripe_count as u64) as u64;
         &self.locks[stripe]
     }
 
     ## Acquire read lock for chunk
-    F read_lock_chunk(&self, chunk_id: u64) -> RwLockReadGuard {
+    F read_lock_chunk(self, chunk_id: u64) -> RwLockReadGuard {
         self.get_lock(chunk_id).read_lock()
     }
 
     ## Acquire write lock for chunk
-    F write_lock_chunk(&self, chunk_id: u64) -> RwLockWriteGuard {
+    F write_lock_chunk(self, chunk_id: u64) -> RwLockWriteGuard {
         self.get_lock(chunk_id).write_lock()
     }
 
     ## Try to acquire read lock for chunk
-    F try_read_lock_chunk(&self, chunk_id: u64) -> Option<RwLockReadGuard> {
+    F try_read_lock_chunk(self, chunk_id: u64) -> Option<RwLockReadGuard> {
         self.get_lock(chunk_id).try_read_lock()
     }
 
     ## Try to acquire write lock for chunk
-    F try_write_lock_chunk(&self, chunk_id: u64) -> Option<RwLockWriteGuard> {
+    F try_write_lock_chunk(self, chunk_id: u64) -> Option<RwLockWriteGuard> {
         self.get_lock(chunk_id).try_write_lock()
     }
 
     ## Get aggregate statistics across all stripes
-    F get_aggregate_stats(&self) -> RagConcurrencyStats {
+    F get_aggregate_stats(self) -> RagConcurrencyStats {
         ~total = RagConcurrencyStats.new();
         E lock in &self.locks {
             L stats = lock.get_stats();
@@ -261,7 +261,7 @@ X ChunkLockManager {
     }
 
     ## Reset statistics for all stripes
-    F reset_all_stats(&self) {
+    F reset_all_stats(self) {
         E lock in &self.locks {
             lock.reset_stats();
         }
@@ -289,33 +289,33 @@ X MemoryLockManager {
     }
 
     ## Get lock for memory ID
-    F get_lock(&self, memory_id: u64) -> &RagLock {
+    F get_lock(self, memory_id: u64) -> &RagLock {
         L stripe = (memory_id % self.stripe_count as u64) as u64;
         &self.locks[stripe]
     }
 
     ## Acquire read lock for memory entry
-    F read_lock_memory(&self, memory_id: u64) -> RwLockReadGuard {
+    F read_lock_memory(self, memory_id: u64) -> RwLockReadGuard {
         self.get_lock(memory_id).read_lock()
     }
 
     ## Acquire write lock for memory entry
-    F write_lock_memory(&self, memory_id: u64) -> RwLockWriteGuard {
+    F write_lock_memory(self, memory_id: u64) -> RwLockWriteGuard {
         self.get_lock(memory_id).write_lock()
     }
 
     ## Try to acquire read lock for memory entry
-    F try_read_lock_memory(&self, memory_id: u64) -> Option<RwLockReadGuard> {
+    F try_read_lock_memory(self, memory_id: u64) -> Option<RwLockReadGuard> {
         self.get_lock(memory_id).try_read_lock()
     }
 
     ## Try to acquire write lock for memory entry
-    F try_write_lock_memory(&self, memory_id: u64) -> Option<RwLockWriteGuard> {
+    F try_write_lock_memory(self, memory_id: u64) -> Option<RwLockWriteGuard> {
         self.get_lock(memory_id).try_write_lock()
     }
 
     ## Get aggregate statistics across all stripes
-    F get_aggregate_stats(&self) -> RagConcurrencyStats {
+    F get_aggregate_stats(self) -> RagConcurrencyStats {
         ~total = RagConcurrencyStats.new();
         E lock in &self.locks {
             L stats = lock.get_stats();
@@ -327,7 +327,7 @@ X MemoryLockManager {
     }
 
     ## Reset statistics for all stripes
-    F reset_all_stats(&self) {
+    F reset_all_stats(self) {
         E lock in &self.locks {
             lock.reset_stats();
         }

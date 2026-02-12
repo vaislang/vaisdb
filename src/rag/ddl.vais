@@ -141,7 +141,7 @@ X RagIndexDef {
     }
 
     ## Convert to RagConfig (merging with base config)
-    F to_rag_config(&self, page_size: u32) -> RagConfig {
+    F to_rag_config(self, page_size: u32) -> RagConfig {
         RagConfig {
             chunk_strategy: self.chunk_strategy,
             target_chunk_size: self.target_chunk_size,
@@ -230,7 +230,7 @@ X RagDDL {
     }
 
     ## Get a RAG index definition by name
-    F get_index(&self, name: &Str) -> Option<&RagIndexDef> {
+    F get_index(self, name: &Str) -> Option<&RagIndexDef> {
         ~i: u32 = 0;
         W i < self.indexes.len() as u32 {
             ~idx = self.indexes.get(i as u64);
@@ -243,7 +243,7 @@ X RagDDL {
     }
 
     ## Get all indexes for a table
-    F get_indexes_for_table(&self, table_name: &Str) -> Vec<&RagIndexDef> {
+    F get_indexes_for_table(self, table_name: &Str) -> Vec<&RagIndexDef> {
         ~result = Vec.new();
         ~i: u32 = 0;
         W i < self.indexes.len() as u32 {
@@ -257,7 +257,7 @@ X RagDDL {
     }
 
     ## Get total index count
-    F index_count(&self) -> u32 {
+    F index_count(self) -> u32 {
         self.indexes.len() as u32
     }
 }

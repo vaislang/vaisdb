@@ -36,26 +36,26 @@ U src/storage/wal/record_vector.HnswDeleteNodePayload;
 # ============================================================================
 
 F err_delete_failed(node_id: u64, detail: Str) -> VaisError {
-    VaisError::new(
-        ErrorCategory::Vector,
+    VaisError.new(
+        ErrorCategory.Vector,
         "VE-02-03-004",
-        Str::from("Failed to delete HNSW node {node_id}: {detail}"),
+        Str.from("Failed to delete HNSW node {node_id}: {detail}"),
     )
 }
 
 F err_mvcc_filter_failed(detail: Str) -> VaisError {
-    VaisError::new(
-        ErrorCategory::Vector,
+    VaisError.new(
+        ErrorCategory.Vector,
         "VE-02-03-005",
-        Str::from("MVCC post-filter failed: {detail}"),
+        Str.from("MVCC post-filter failed: {detail}"),
     )
 }
 
 F err_insufficient_results(k: u64, found: u64) -> VaisError {
-    VaisError::new(
-        ErrorCategory::Vector,
+    VaisError.new(
+        ErrorCategory.Vector,
         "VE-02-03-006",
-        Str::from("Insufficient visible results after max retries: requested {k}, found {found}"),
+        Str.from("Insufficient visible results after max retries: requested {k}, found {found}"),
     )
 }
 
@@ -125,7 +125,7 @@ F hnsw_delete(
     I node_id == INVALID_NODE_ID {
         R Err(err_delete_failed(
             node_id,
-            Str::from("Invalid node ID"),
+            Str.from("Invalid node ID"),
         ));
     }
 
@@ -134,7 +134,7 @@ F hnsw_delete(
         Ok(n) => n,
         Err(e) => R Err(err_delete_failed(
             node_id,
-            Str::from("Node not found in store"),
+            Str.from("Node not found in store"),
         )),
     };
 
@@ -142,7 +142,7 @@ F hnsw_delete(
     I node.is_deleted {
         R Err(err_delete_failed(
             node_id,
-            Str::from("Node already deleted"),
+            Str.from("Node already deleted"),
         ));
     }
 
@@ -153,7 +153,7 @@ F hnsw_delete(
     meta.delete_node();
 
     # Step 5: Collect affected layers for WAL record
-    ~layers_affected = Vec::with_capacity((node.max_layer + 1) as u64);
+    ~layers_affected = Vec.with_capacity((node.max_layer + 1) as u64);
     ~layer: u8 = 0;
     L while layer <= node.max_layer {
         layers_affected.push(layer);
@@ -274,7 +274,7 @@ F mvcc_filtered_search(
         )?;
 
         # Filter results by MVCC visibility
-        ~visible_results = Vec::with_capacity(k);
+        ~visible_results = Vec.with_capacity(k);
         ~idx: u64 = 0;
         L while idx < search_result.results.len() {
             ~entry = &search_result.results[idx];
@@ -292,7 +292,7 @@ F mvcc_filtered_search(
 
             # Check MVCC visibility
             I is_vector_visible(node, snapshot, clog) {
-                visible_results.push(SearchResultEntry::new(
+                visible_results.push(SearchResultEntry.new(
                     entry.node_id,
                     entry.distance,
                 ));
@@ -308,7 +308,7 @@ F mvcc_filtered_search(
                 visible_results.truncate(k);
             }
 
-            ~final_result = SearchResult::with_capacity(k);
+            ~final_result = SearchResult.with_capacity(k);
             final_result.results = visible_results;
             final_result.nodes_visited = search_result.nodes_visited;
             final_result.distance_computations = search_result.distance_computations;
@@ -343,7 +343,7 @@ F mvcc_filtered_search(
     )?;
 
     # Final visibility filter
-    ~final_visible = Vec::with_capacity(k);
+    ~final_visible = Vec.with_capacity(k);
     ~final_idx: u64 = 0;
     L while final_idx < final_search.results.len() {
         ~final_entry = &final_search.results[final_idx];
@@ -358,7 +358,7 @@ F mvcc_filtered_search(
         };
 
         I is_vector_visible(final_node, snapshot, clog) {
-            final_visible.push(SearchResultEntry::new(
+            final_visible.push(SearchResultEntry.new(
                 final_entry.node_id,
                 final_entry.distance,
             ));
@@ -372,7 +372,7 @@ F mvcc_filtered_search(
         final_visible.truncate(k);
     }
 
-    ~result = SearchResult::with_capacity(k);
+    ~result = SearchResult.with_capacity(k);
     result.results = final_visible;
     result.nodes_visited = final_search.nodes_visited;
     result.distance_computations = final_search.distance_computations;
@@ -463,7 +463,7 @@ F scan_gc_candidates(
     low_water_mark: u64,
     clog: &Clog,
 ) -> Vec<u64> {
-    ~ready_nodes = Vec::new();
+    ~ready_nodes = Vec.new();
 
     ~idx: u64 = 0;
     L while idx < node_ids.len() {
@@ -492,14 +492,14 @@ F scan_gc_candidates(
 # Helper: NodeStore Trait Extension (for get_node_mut)
 # ============================================================================
 
-# Note: NodeStore trait in search.vais only has get_node(&self).
+# Note: NodeStore trait in search.vais only has get_node(self).
 # For hnsw_delete to work, we need a mutable version.
 # In real implementation, NodeStore would be extended like:
 #
 # T NodeStore {
-#     F get_node(&self, node_id: u64) -> Result<&HnswNode, VaisError>;
+#     F get_node(self, node_id: u64) -> Result<&HnswNode, VaisError>;
 #     F get_node_mut(&~self, node_id: u64) -> Result<&~HnswNode, VaisError>;
-#     F get_vector(&self, node_id: u64) -> Result<&[f32], VaisError>;
+#     F get_vector(self, node_id: u64) -> Result<&[f32], VaisError>;
 # }
 #
 # For this file to compile standalone, we assume get_node_mut exists.

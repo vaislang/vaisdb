@@ -83,7 +83,7 @@ X DirtyTracker {
     # Get the minimum first_dirty_lsn (for recovery start point)
     F min_dirty_lsn(self) -> u64 {
         ~guard = self.lock.lock();
-        ~min_lsn: u64 = u64::MAX;
+        ~min_lsn: u64 = u64.MAX;
         L entry: &self.entries {
             I entry.first_dirty_lsn < min_lsn {
                 min_lsn = entry.first_dirty_lsn;

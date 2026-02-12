@@ -641,7 +641,7 @@ F err_tls_error(detail: Str) -> VaisError {
 F err_auth_failed(user: Str) -> VaisError {
     VaisError.new(
         "VAIS-0006001",
-        "Authentication failed L user '{user}'"
+        "Authentication failed for user '{user}'"
     )
 }
 

@@ -11,9 +11,10 @@ pub mod types;
 pub use types.{
     FullTextConfig, FullTextMeta, PostingEntry, PostingPageHeader,
     DictEntry, TokenInfo, DocumentStats, FULLTEXT_FORMAT_VERSION,
-    fnv1a_hash, err_fulltext_engine_closed, err_fulltext_index_not_found,
+    err_fulltext_engine_closed, err_fulltext_index_not_found,
     err_fulltext_term_not_found, err_fulltext_doc_not_found,
 };
+pub use storage/hash.{fnv1a_hash};
 
 # Tokenizer
 pub mod tokenizer;

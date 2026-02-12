@@ -88,10 +88,10 @@ X QuantizationManager {
     # Initially uses None strategy (full precision)
     F new(dim: u32) -> QuantizationManager {
         QuantizationManager {
-            strategy: QuantizationStrategy::None,
+            strategy: QuantizationStrategy.None,
             dim: dim,
-            scalar_quantizer: Option::None,
-            pq_quantizer: Option::None,
+            scalar_quantizer: Option.None,
+            pq_quantizer: Option.None,
             oversample_factor: 3.0,
             trained: false,
         }
@@ -115,36 +115,36 @@ X QuantizationManager {
         ~ mem_pq = vector_count * (num_subspaces as u64);  # u8 per subspace
 
         # Select strategy based on vector count and memory budget
-        ~ selected_strategy: QuantizationStrategy = QuantizationStrategy::None;
+        ~ selected_strategy: QuantizationStrategy = QuantizationStrategy.None;
 
         I vector_count < 10000 {
             # Small dataset: prefer full precision
-            selected_strategy = QuantizationStrategy::None;
+            selected_strategy = QuantizationStrategy.None;
 
             # Check memory budget
             I mem_none > memory_budget_bytes {
                 # Escalate to Scalar
                 I mem_scalar <= memory_budget_bytes {
-                    selected_strategy = QuantizationStrategy::Scalar;
+                    selected_strategy = QuantizationStrategy.Scalar;
                 } E I mem_pq <= memory_budget_bytes {
                     # Escalate to PQ
-                    selected_strategy = QuantizationStrategy::PQ;
+                    selected_strategy = QuantizationStrategy.PQ;
                 }
             }
         } E I vector_count < 1000000 {
             # Medium dataset: prefer Scalar
-            selected_strategy = QuantizationStrategy::Scalar;
+            selected_strategy = QuantizationStrategy.Scalar;
 
             # Check memory budget
             I mem_scalar > memory_budget_bytes {
                 # Escalate to PQ
                 I mem_pq <= memory_budget_bytes {
-                    selected_strategy = QuantizationStrategy::PQ;
+                    selected_strategy = QuantizationStrategy.PQ;
                 }
             }
         } E {
             # Large dataset (>= 1M): prefer PQ
-            selected_strategy = QuantizationStrategy::PQ;
+            selected_strategy = QuantizationStrategy.PQ;
 
             # If PQ exceeds budget, stay with PQ (best compression)
             # User must increase budget or reduce dataset size
@@ -159,20 +159,20 @@ X QuantizationManager {
     # Requires at least 100 vectors for Scalar, 256 for PQ
     F train(&~self, vectors: &[&[f32]]) -> Result<(), VaisError> {
         M self.strategy {
-            QuantizationStrategy::None => {
+            QuantizationStrategy.None => {
                 # No training needed for full precision
                 self.trained = true;
                 Ok(())
             },
-            QuantizationStrategy::Scalar => {
+            QuantizationStrategy.Scalar => {
                 # Initialize and train scalar quantizer
-                ~ quantizer = ScalarQuantizer::new(self.dim);
+                ~ quantizer = ScalarQuantizer.new(self.dim);
                 quantizer.train(vectors)?;
-                self.scalar_quantizer = Option::Some(quantizer);
+                self.scalar_quantizer = Option.Some(quantizer);
                 self.trained = true;
                 Ok(())
             },
-            QuantizationStrategy::PQ => {
+            QuantizationStrategy.PQ => {
                 # Initialize and train PQ quantizer
                 # Use 96 subspaces for standard 1536D vectors (16D per subspace)
                 ~ num_subspaces: u32 = 96;
@@ -196,10 +196,10 @@ X QuantizationManager {
                     }
                 }
 
-                ~ quantizer = ProductQuantizer::new(self.dim, num_subspaces)?;
+                ~ quantizer = ProductQuantizer.new(self.dim, num_subspaces)?;
                 ~ max_iterations: u32 = 20;
                 quantizer.train(vectors, max_iterations)?;
-                self.pq_quantizer = Option::Some(quantizer);
+                self.pq_quantizer = Option.Some(quantizer);
                 self.trained = true;
                 Ok(())
             },
@@ -209,16 +209,16 @@ X QuantizationManager {
     # Encode a vector using the current quantization strategy
     # Returns variable-length encoded bytes depending on strategy
     # Format: [strategy_tag: u8] [encoded_data: variable]
-    F encode(&self, vector: &[f32]) -> Result<Vec<u8>, VaisError> {
+    F encode(self, vector: &[f32]) -> Result<Vec<u8>, VaisError> {
         I !self.trained {
             R Err(err_manager_not_trained());
         }
 
         M self.strategy {
-            QuantizationStrategy::None => {
+            QuantizationStrategy.None => {
                 # No compression: just serialize f32 values
                 # Tag: 0 for None
-                ~ encoded = Vec::new();
+                ~ encoded = Vec.new();
                 encoded.push(0_u8);  # Strategy tag
 
                 ~ i: u64 = 0;
@@ -238,13 +238,13 @@ X QuantizationManager {
 
                 Ok(encoded)
             },
-            QuantizationStrategy::Scalar => {
+            QuantizationStrategy.Scalar => {
                 # Scalar quantization (i8)
                 # Tag: 1 for Scalar
                 M self.scalar_quantizer {
-                    Option::Some(ref q) => {
+                    Option.Some(ref q) => {
                         ~ quantized = q.quantize(vector)?;
-                        ~ encoded = Vec::new();
+                        ~ encoded = Vec.new();
                         encoded.push(1_u8);  # Strategy tag
 
                         # Append i8 values as u8 (reinterpret cast)
@@ -257,16 +257,16 @@ X QuantizationManager {
 
                         Ok(encoded)
                     },
-                    Option::None => Err(err_invalid_strategy()),
+                    Option.None => Err(err_invalid_strategy()),
                 }
             },
-            QuantizationStrategy::PQ => {
+            QuantizationStrategy.PQ => {
                 # Product quantization
                 # Tag: 2 for PQ
                 M self.pq_quantizer {
-                    Option::Some(ref q) => {
+                    Option.Some(ref q) => {
                         ~ code = q.encode(vector)?;
-                        ~ encoded = Vec::new();
+                        ~ encoded = Vec.new();
                         encoded.push(2_u8);  # Strategy tag
 
                         # Append PQ code
@@ -279,7 +279,7 @@ X QuantizationManager {
 
                         Ok(encoded)
                     },
-                    Option::None => Err(err_invalid_strategy()),
+                    Option.None => Err(err_invalid_strategy()),
                 }
             },
         }
@@ -287,7 +287,7 @@ X QuantizationManager {
 
     # Decode encoded bytes back to approximate f32 vector
     # Reads strategy tag and delegates to appropriate quantizer
-    F decode(&self, encoded: &[u8]) -> Result<Vec<f32>, VaisError> {
+    F decode(self, encoded: &[u8]) -> Result<Vec<f32>, VaisError> {
         I !self.trained {
             R Err(err_manager_not_trained());
         }
@@ -306,14 +306,14 @@ X QuantizationManager {
                     R Err(err_invalid_strategy());
                 }
 
-                ~ vector = Vec::new();
+                ~ vector = Vec.new();
                 ~ i: u64 = 0;
                 L {
                     I i >= data.len() { B }
 
                     # Read 4 bytes as f32 (little-endian)
                     ~ bytes: [u8; 4] = [data[i], data[i+1], data[i+2], data[i+3]];
-                    ~ val = f32::from_le_bytes(bytes);
+                    ~ val = f32.from_le_bytes(bytes);
                     vector.push(val);
 
                     i = i + 4;
@@ -324,9 +324,9 @@ X QuantizationManager {
             1 => {
                 # Scalar strategy
                 M self.scalar_quantizer {
-                    Option::Some(ref q) => {
+                    Option.Some(ref q) => {
                         # Convert u8 back to i8
-                        ~ quantized = Vec::new();
+                        ~ quantized = Vec.new();
                         ~ i: u64 = 0;
                         L {
                             I i >= data.len() { B }
@@ -336,17 +336,17 @@ X QuantizationManager {
 
                         q.dequantize(&quantized)
                     },
-                    Option::None => Err(err_invalid_strategy()),
+                    Option.None => Err(err_invalid_strategy()),
                 }
             },
             2 => {
                 # PQ strategy
                 M self.pq_quantizer {
-                    Option::Some(ref q) => {
+                    Option.Some(ref q) => {
                         ~ code = data.to_vec();
                         q.decode(&code)
                     },
-                    Option::None => Err(err_invalid_strategy()),
+                    Option.None => Err(err_invalid_strategy()),
                 }
             },
             _ => Err(err_strategy_mismatch(self.strategy, strategy_tag)),
@@ -381,12 +381,12 @@ X QuantizationManager {
             1 => {
                 # Scalar strategy: quantized distance
                 M self.scalar_quantizer {
-                    Option::Some(ref q) => {
+                    Option.Some(ref q) => {
                         # Quantize query and compute quantized L2 distance
                         ~ query_quantized = q.quantize(query)?;
 
                         # Convert data from u8 to i8
-                        ~ vec_quantized = Vec::new();
+                        ~ vec_quantized = Vec.new();
                         ~ i: u64 = 0;
                         L {
                             I i >= data.len() { B }
@@ -397,19 +397,19 @@ X QuantizationManager {
                         ~ dist = q.quantized_l2_distance(&query_quantized, &vec_quantized);
                         Ok(dist)
                     },
-                    Option::None => Err(err_invalid_strategy()),
+                    Option.None => Err(err_invalid_strategy()),
                 }
             },
             2 => {
                 # PQ strategy: ADC distance
                 M self.pq_quantizer {
-                    Option::Some(ref q) => {
+                    Option.Some(ref q) => {
                         ~ dist_table = q.build_distance_table(query)?;
                         ~ code = data;
                         ~ dist = q.adc_distance(&dist_table, code);
                         Ok(dist)
                     },
-                    Option::None => Err(err_invalid_strategy()),
+                    Option.None => Err(err_invalid_strategy()),
                 }
             },
             _ => Err(err_strategy_mismatch(self.strategy, strategy_tag)),
@@ -417,33 +417,33 @@ X QuantizationManager {
     }
 
     # Get current quantization strategy
-    F get_strategy(&self) -> QuantizationStrategy {
+    F get_strategy(self) -> QuantizationStrategy {
         self.strategy
     }
 
     # Get compression ratio for current strategy
-    F compression_ratio(&self) -> f32 {
+    F compression_ratio(self) -> f32 {
         M self.strategy {
-            QuantizationStrategy::None => 1.0,
-            QuantizationStrategy::Scalar => 4.0,
-            QuantizationStrategy::PQ => {
+            QuantizationStrategy.None => 1.0,
+            QuantizationStrategy.Scalar => 4.0,
+            QuantizationStrategy.PQ => {
                 M self.pq_quantizer {
-                    Option::Some(ref q) => q.compression_ratio(),
-                    Option::None => 1.0,
+                    Option.Some(ref q) => q.compression_ratio(),
+                    Option.None => 1.0,
                 }
             },
         }
     }
 
     # Get memory per encoded vector in bytes (excluding strategy tag)
-    F memory_per_vector(&self) -> u64 {
+    F memory_per_vector(self) -> u64 {
         M self.strategy {
-            QuantizationStrategy::None => (self.dim as u64) * 4,
-            QuantizationStrategy::Scalar => self.dim as u64,
-            QuantizationStrategy::PQ => {
+            QuantizationStrategy.None => (self.dim as u64) * 4,
+            QuantizationStrategy.Scalar => self.dim as u64,
+            QuantizationStrategy.PQ => {
                 M self.pq_quantizer {
-                    Option::Some(ref q) => q.memory_per_vector(),
-                    Option::None => (self.dim as u64) * 4,
+                    Option.Some(ref q) => q.memory_per_vector(),
+                    Option.None => (self.dim as u64) * 4,
                 }
             },
         }
@@ -462,12 +462,12 @@ X QuantizationManager {
     # - oversample_factor (f32)
     # - trained (u8): 0 or 1
     # - quantizer data (if Scalar or PQ)
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         # Write strategy tag
         ~ strategy_tag: u8 = M self.strategy {
-            QuantizationStrategy::None => 0,
-            QuantizationStrategy::Scalar => 1,
-            QuantizationStrategy::PQ => 2,
+            QuantizationStrategy.None => 0,
+            QuantizationStrategy.Scalar => 1,
+            QuantizationStrategy.PQ => 2,
         };
         buf.put_u8(strategy_tag);
 
@@ -478,19 +478,19 @@ X QuantizationManager {
 
         # Write quantizer data
         M self.strategy {
-            QuantizationStrategy::None => {
+            QuantizationStrategy.None => {
                 # No quantizer data for None strategy
             },
-            QuantizationStrategy::Scalar => {
+            QuantizationStrategy.Scalar => {
                 M self.scalar_quantizer {
-                    Option::Some(ref q) => q.serialize(buf),
-                    Option::None => {},
+                    Option.Some(ref q) => q.serialize(buf),
+                    Option.None => {},
                 }
             },
-            QuantizationStrategy::PQ => {
+            QuantizationStrategy.PQ => {
                 M self.pq_quantizer {
-                    Option::Some(ref q) => q.serialize(buf),
-                    Option::None => {},
+                    Option.Some(ref q) => q.serialize(buf),
+                    Option.None => {},
                 }
             },
         }
@@ -509,22 +509,22 @@ X QuantizationManager {
 
         # Reconstruct strategy and quantizer
         ~ strategy: QuantizationStrategy;
-        ~ scalar_quantizer: Option<ScalarQuantizer> = Option::None;
-        ~ pq_quantizer: Option<ProductQuantizer> = Option::None;
+        ~ scalar_quantizer: Option<ScalarQuantizer> = Option.None;
+        ~ pq_quantizer: Option<ProductQuantizer> = Option.None;
 
         M strategy_tag {
             0 => {
-                strategy = QuantizationStrategy::None;
+                strategy = QuantizationStrategy.None;
             },
             1 => {
-                strategy = QuantizationStrategy::Scalar;
-                ~ q = ScalarQuantizer::deserialize(buf)?;
-                scalar_quantizer = Option::Some(q);
+                strategy = QuantizationStrategy.Scalar;
+                ~ q = ScalarQuantizer.deserialize(buf)?;
+                scalar_quantizer = Option.Some(q);
             },
             2 => {
-                strategy = QuantizationStrategy::PQ;
-                ~ q = ProductQuantizer::deserialize(buf)?;
-                pq_quantizer = Option::Some(q);
+                strategy = QuantizationStrategy.PQ;
+                ~ q = ProductQuantizer.deserialize(buf)?;
+                pq_quantizer = Option.Some(q);
             },
             _ => {
                 R Err(err_invalid_strategy());
@@ -542,12 +542,12 @@ X QuantizationManager {
     }
 
     # Check if manager is trained
-    F is_trained(&self) -> bool {
+    F is_trained(self) -> bool {
         self.trained
     }
 
     # Get vector dimension
-    F dimension(&self) -> u32 {
+    F dimension(self) -> u32 {
         self.dim
     }
 }
@@ -558,7 +558,7 @@ X QuantizationManager {
 
 #[test]
 F test_quantization_manager_new() {
-    ~ manager = QuantizationManager::new(128);
+    ~ manager = QuantizationManager.new(128);
     assert_eq!(manager.dimension(), 128);
     assert!(!manager.is_trained());
     assert_eq!(manager.compression_ratio(), 1.0);  # None strategy by default
@@ -566,39 +566,39 @@ F test_quantization_manager_new() {
 
 #[test]
 F test_auto_select_strategy() {
-    ~ manager = QuantizationManager::new(1536);
+    ~ manager = QuantizationManager.new(1536);
 
     # Small dataset (< 10K) with sufficient memory → None
     ~ strategy = manager.auto_select(5000, 100_000_000);
     M strategy {
-        QuantizationStrategy::None => assert!(true),
+        QuantizationStrategy.None => assert!(true),
         _ => assert!(false),
     }
 
     # Medium dataset (10K - 1M) with sufficient memory → Scalar
-    ~ manager2 = QuantizationManager::new(1536);
+    ~ manager2 = QuantizationManager.new(1536);
     strategy = manager2.auto_select(50000, 100_000_000);
     M strategy {
-        QuantizationStrategy::Scalar => assert!(true),
+        QuantizationStrategy.Scalar => assert!(true),
         _ => assert!(false),
     }
 
     # Large dataset (>= 1M) → PQ
-    ~ manager3 = QuantizationManager::new(1536);
+    ~ manager3 = QuantizationManager.new(1536);
     strategy = manager3.auto_select(2000000, 1_000_000_000);
     M strategy {
-        QuantizationStrategy::PQ => assert!(true),
+        QuantizationStrategy.PQ => assert!(true),
         _ => assert!(false),
     }
 }
 
 #[test]
 F test_train_none_strategy() {
-    ~ manager = QuantizationManager::new(4);
+    ~ manager = QuantizationManager.new(4);
     manager.auto_select(1000, 100_000_000);  # Should select None
 
     # Training with None strategy should succeed immediately
-    ~ training_vecs = Vec::new();
+    ~ training_vecs = Vec.new();
     ~ result = manager.train(&training_vecs);
     assert!(result.is_ok());
     assert!(manager.is_trained());
@@ -606,10 +606,10 @@ F test_train_none_strategy() {
 
 #[test]
 F test_encode_decode_none() {
-    ~ manager = QuantizationManager::new(4);
+    ~ manager = QuantizationManager.new(4);
     manager.auto_select(1000, 100_000_000);  # None strategy
 
-    ~ training_vecs = Vec::new();
+    ~ training_vecs = Vec.new();
     manager.train(&training_vecs)!;
 
     # Encode and decode
@@ -629,17 +629,17 @@ F test_encode_decode_none() {
 
 #[test]
 F test_serialization() {
-    ~ manager = QuantizationManager::new(4);
+    ~ manager = QuantizationManager.new(4);
     manager.auto_select(1000, 100_000_000);
     manager.train(&vec![])!;
 
     # Serialize
-    ~ buf = ByteBuffer::with_capacity(256);
+    ~ buf = ByteBuffer.with_capacity(256);
     manager.serialize(&buf);
 
     # Deserialize
     buf.set_position(0);
-    ~ manager2 = QuantizationManager::deserialize(&buf)!;
+    ~ manager2 = QuantizationManager.deserialize(&buf)!;
 
     # Verify
     assert_eq!(manager2.dimension(), 4);

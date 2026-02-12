@@ -72,9 +72,9 @@ X ScalarQuantizer {
     F new(dim: u32) -> ScalarQuantizer {
         ScalarQuantizer {
             dim: dim,
-            min_vals: Vec::new(),
-            max_vals: Vec::new(),
-            scales: Vec::new(),
+            min_vals: Vec.new(),
+            max_vals: Vec.new(),
+            scales: Vec.new(),
             trained: false,
         }
     }
@@ -99,9 +99,9 @@ X ScalarQuantizer {
         }
 
         # Initialize min/max arrays with first vector's values
-        self.min_vals = Vec::with_capacity(self.dim as u64);
-        self.max_vals = Vec::with_capacity(self.dim as u64);
-        self.scales = Vec::with_capacity(self.dim as u64);
+        self.min_vals = Vec.with_capacity(self.dim as u64);
+        self.max_vals = Vec.with_capacity(self.dim as u64);
+        self.scales = Vec.with_capacity(self.dim as u64);
 
         ~ d: u64 = 0;
         L {
@@ -162,7 +162,7 @@ X ScalarQuantizer {
     # Quantize an f32 vector to i8 vector
     # Formula: q_d = round((v_d - min_d) / (max_d - min_d) * 255) - 128
     # Maps [min_d, max_d] -> [-128, 127]
-    F quantize(&self, vector: &[f32]) -> Result<Vec<i8>, VaisError> {
+    F quantize(self, vector: &[f32]) -> Result<Vec<i8>, VaisError> {
         I !self.trained {
             R Err(err_not_trained());
         }
@@ -171,7 +171,7 @@ X ScalarQuantizer {
             R Err(err_dimension_mismatch(self.dim, vector.len()));
         }
 
-        ~ quantized = Vec::with_capacity(self.dim as u64);
+        ~ quantized = Vec.with_capacity(self.dim as u64);
 
         ~ d: u64 = 0;
         L {
@@ -210,7 +210,7 @@ X ScalarQuantizer {
 
     # Dequantize an i8 vector back to approximate f32 vector
     # Formula: v_d = (q_d + 128) / 255.0 * (max_d - min_d) + min_d
-    F dequantize(&self, quantized: &[i8]) -> Result<Vec<f32>, VaisError> {
+    F dequantize(self, quantized: &[i8]) -> Result<Vec<f32>, VaisError> {
         I !self.trained {
             R Err(err_not_trained());
         }
@@ -219,7 +219,7 @@ X ScalarQuantizer {
             R Err(err_dimension_mismatch(self.dim, quantized.len()));
         }
 
-        ~ dequantized = Vec::with_capacity(self.dim as u64);
+        ~ dequantized = Vec.with_capacity(self.dim as u64);
 
         ~ d: u64 = 0;
         L {
@@ -242,15 +242,15 @@ X ScalarQuantizer {
     # Compute L2 distance directly on quantized vectors (no dequantization)
     # Uses integer arithmetic for efficiency, then scales result
     # Formula: sqrt(sum((scale_d * (a[d] - b[d]))^2))
-    F quantized_l2_distance(&self, a: &[i8], b: &[i8]) -> f32 {
+    F quantized_l2_distance(self, a: &[i8], b: &[i8]) -> f32 {
         I !self.trained {
             # Return infinity if not trained (error case)
-            R f32::INFINITY;
+            R f32.INFINITY;
         }
 
         I a.len() != self.dim as u64 || b.len() != self.dim as u64 {
             # Return infinity on dimension mismatch (error case)
-            R f32::INFINITY;
+            R f32.INFINITY;
         }
 
         ~ sum_sq: f32 = 0.0;
@@ -281,7 +281,7 @@ X ScalarQuantizer {
     #   [f32; dim]: min_vals
     #   [f32; dim]: max_vals
     #   [f32; dim]: scales
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         # Write dimension
         buf.put_u32_le(self.dim);
 
@@ -324,7 +324,7 @@ X ScalarQuantizer {
         ~ trained = trained_byte == 1;
 
         # Read min_vals
-        ~ min_vals = Vec::with_capacity(dim as u64);
+        ~ min_vals = Vec.with_capacity(dim as u64);
         ~ d: u32 = 0;
         L {
             I d >= dim { B }
@@ -333,7 +333,7 @@ X ScalarQuantizer {
         }
 
         # Read max_vals
-        ~ max_vals = Vec::with_capacity(dim as u64);
+        ~ max_vals = Vec.with_capacity(dim as u64);
         d = 0;
         L {
             I d >= dim { B }
@@ -342,7 +342,7 @@ X ScalarQuantizer {
         }
 
         # Read scales
-        ~ scales = Vec::with_capacity(dim as u64);
+        ~ scales = Vec.with_capacity(dim as u64);
         d = 0;
         L {
             I d >= dim { B }
@@ -366,24 +366,24 @@ X ScalarQuantizer {
 
     # Get memory usage per quantized vector in bytes
     # Returns dim bytes (one i8 per dimension)
-    F memory_per_vector(&self) -> u64 {
+    F memory_per_vector(self) -> u64 {
         self.dim as u64
     }
 
     # Get codebook size in bytes (quantization parameters)
     # Returns 1 + 4 + 3 * dim * 4 bytes
     # (trained flag + dim + 3 f32 arrays of length dim)
-    F codebook_size(&self) -> u64 {
+    F codebook_size(self) -> u64 {
         5 + (3 * self.dim as u64 * 4)
     }
 
     # Check if quantizer is trained
-    F is_trained(&self) -> bool {
+    F is_trained(self) -> bool {
         self.trained
     }
 
     # Get vector dimension
-    F dimension(&self) -> u32 {
+    F dimension(self) -> u32 {
         self.dim
     }
 }
@@ -394,14 +394,14 @@ X ScalarQuantizer {
 
 #[test]
 F test_quantizer_new() {
-    ~ quantizer = ScalarQuantizer::new(128);
+    ~ quantizer = ScalarQuantizer.new(128);
     assert_eq!(quantizer.dim, 128);
     assert!(!quantizer.is_trained());
 }
 
 #[test]
 F test_quantizer_train() {
-    ~ quantizer = ScalarQuantizer::new(4);
+    ~ quantizer = ScalarQuantizer.new(4);
 
     # Create training vectors
     ~ v1 = vec![0.0, 1.0, 2.0, 3.0];
@@ -410,7 +410,7 @@ F test_quantizer_train() {
     ~ v4 = vec![0.5, 1.5, 2.5, 3.5];
 
     # Create 100+ training vectors by replicating
-    ~ training_vecs = Vec::new();
+    ~ training_vecs = Vec.new();
     ~ i: u64 = 0;
     L {
         I i >= 100 { B }
@@ -442,7 +442,7 @@ F test_quantizer_train() {
 
 #[test]
 F test_insufficient_training_data() {
-    ~ quantizer = ScalarQuantizer::new(4);
+    ~ quantizer = ScalarQuantizer.new(4);
     ~ v1 = vec![0.0, 1.0, 2.0, 3.0];
     ~ training_vecs = vec![&v1];  # Only 1 vector
 
@@ -452,10 +452,10 @@ F test_insufficient_training_data() {
 
 #[test]
 F test_quantize_dequantize() {
-    ~ quantizer = ScalarQuantizer::new(4);
+    ~ quantizer = ScalarQuantizer.new(4);
 
     # Create training vectors with known range [0, 10]
-    ~ training_vecs = Vec::new();
+    ~ training_vecs = Vec.new();
     ~ i: u64 = 0;
     L {
         I i >= 100 { B }
@@ -498,10 +498,10 @@ F test_quantize_dequantize() {
 
 #[test]
 F test_quantized_distance() {
-    ~ quantizer = ScalarQuantizer::new(3);
+    ~ quantizer = ScalarQuantizer.new(3);
 
     # Create training vectors
-    ~ training_vecs = Vec::new();
+    ~ training_vecs = Vec.new();
     ~ i: u64 = 0;
     L {
         I i >= 100 { B }
@@ -528,10 +528,10 @@ F test_quantized_distance() {
 
 #[test]
 F test_constant_dimension() {
-    ~ quantizer = ScalarQuantizer::new(3);
+    ~ quantizer = ScalarQuantizer.new(3);
 
     # Create training vectors with constant dimension 1 (all values = 5.0)
-    ~ training_vecs = Vec::new();
+    ~ training_vecs = Vec.new();
     ~ i: u64 = 0;
     L {
         I i >= 100 { B }
@@ -553,10 +553,10 @@ F test_constant_dimension() {
 
 #[test]
 F test_serialization() {
-    ~ quantizer = ScalarQuantizer::new(4);
+    ~ quantizer = ScalarQuantizer.new(4);
 
     # Train
-    ~ training_vecs = Vec::new();
+    ~ training_vecs = Vec.new();
     ~ i: u64 = 0;
     L {
         I i >= 100 { B }
@@ -567,12 +567,12 @@ F test_serialization() {
     quantizer.train(&training_vecs)!;
 
     # Serialize
-    ~ buf = ByteBuffer::with_capacity(256);
+    ~ buf = ByteBuffer.with_capacity(256);
     quantizer.serialize(&buf);
 
     # Deserialize
     buf.set_position(0);  # Reset read position
-    ~ deserialized = ScalarQuantizer::deserialize(&buf)!;
+    ~ deserialized = ScalarQuantizer.deserialize(&buf)!;
 
     # Verify
     assert_eq!(deserialized.dim, quantizer.dim);
@@ -591,19 +591,19 @@ F test_serialization() {
 
 #[test]
 F test_compression_ratio() {
-    ~ ratio = ScalarQuantizer::compression_ratio();
+    ~ ratio = ScalarQuantizer.compression_ratio();
     assert_eq!(ratio, 4.0);
 }
 
 #[test]
 F test_memory_per_vector() {
-    ~ quantizer = ScalarQuantizer::new(128);
+    ~ quantizer = ScalarQuantizer.new(128);
     assert_eq!(quantizer.memory_per_vector(), 128);
 }
 
 #[test]
 F test_codebook_size() {
-    ~ quantizer = ScalarQuantizer::new(128);
+    ~ quantizer = ScalarQuantizer.new(128);
     # 5 bytes (trained flag + dim) + 3 * 128 * 4 bytes (3 f32 arrays)
     ~ expected = 5 + (3 * 128 * 4);
     assert_eq!(quantizer.codebook_size(), expected);
@@ -611,7 +611,7 @@ F test_codebook_size() {
 
 #[test]
 F test_quantize_not_trained() {
-    ~ quantizer = ScalarQuantizer::new(4);
+    ~ quantizer = ScalarQuantizer.new(4);
     ~ test_vec = vec![0.0, 1.0, 2.0, 3.0];
     ~ result = quantizer.quantize(&test_vec);
     assert!(result.is_err());
@@ -619,10 +619,10 @@ F test_quantize_not_trained() {
 
 #[test]
 F test_dimension_mismatch() {
-    ~ quantizer = ScalarQuantizer::new(4);
+    ~ quantizer = ScalarQuantizer.new(4);
 
     # Train with 4D vectors
-    ~ training_vecs = Vec::new();
+    ~ training_vecs = Vec.new();
     ~ i: u64 = 0;
     L {
         I i >= 100 { B }

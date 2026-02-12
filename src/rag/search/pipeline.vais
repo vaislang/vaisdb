@@ -298,12 +298,12 @@ X RagSearchPipeline {
     }
 
     ## Get stage statistics for EXPLAIN ANALYZE
-    F get_stage_stats(&self) -> &Vec<PipelineStageStats> {
+    F get_stage_stats(self) -> &Vec<PipelineStageStats> {
         &self.stage_stats
     }
 
     ## Format pipeline stats as human-readable string
-    F format_stats(&self) -> Str {
+    F format_stats(self) -> Str {
         ~result = "RAG Search Pipeline Stats:\n";
         ~i: u32 = 0;
         W i < self.stage_stats.len() as u32 {

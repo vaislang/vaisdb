@@ -45,7 +45,7 @@ X WalRecordHeader {
     }
 
     # Serialize header to ByteBuffer (little-endian)
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.lsn);
         buf.put_u64_le(self.txn_id);
         buf.put_u64_le(self.prev_lsn);
@@ -91,7 +91,7 @@ X WalRecordHeader {
     }
 
     # Serialize header to byte array (48 bytes)
-    F to_bytes(&self) -> [u8; 48] {
+    F to_bytes(self) -> [u8; 48] {
         ~buf = ByteBuffer.with_capacity(WAL_RECORD_HEADER_SIZE as u64);
         self.serialize(&~buf);
         ~bytes = [0u8; 48];
@@ -106,7 +106,7 @@ X WalRecordHeader {
     }
 
     # Verify header checksum against full record data
-    F verify_checksum(&self, full_record: &[u8]) -> bool {
+    F verify_checksum(self, full_record: &[u8]) -> bool {
         verify_wal_checksum(full_record)
     }
 
@@ -128,3 +128,4 @@ L ENGINE_RELATIONAL: u8 = 0x01;
 L ENGINE_VECTOR: u8 = 0x02;
 L ENGINE_GRAPH: u8 = 0x03;
 L ENGINE_FULLTEXT: u8 = 0x04;
+L ENGINE_RAG: u8 = 0x05;

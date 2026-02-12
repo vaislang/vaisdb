@@ -358,6 +358,38 @@ X GlobalConfig {
         }
     }
 
+    # Get effective buffer pool percent (override or default)
+    F effective_buffer_pool_percent(self) -> u32 {
+        M self.overrides.buffer_pool_percent {
+            Some(v) => v,
+            None => self.defaults.buffer_pool_percent,
+        }
+    }
+
+    # Get effective HNSW cache percent (override or default)
+    F effective_hnsw_cache_percent(self) -> u32 {
+        M self.overrides.hnsw_cache_percent {
+            Some(v) => v,
+            None => self.defaults.hnsw_cache_percent,
+        }
+    }
+
+    # Get effective dictionary cache percent (override or default)
+    F effective_dict_cache_percent(self) -> u32 {
+        M self.overrides.dict_cache_percent {
+            Some(v) => v,
+            None => self.defaults.dict_cache_percent,
+        }
+    }
+
+    # Get effective query memory percent (override or default)
+    F effective_query_memory_percent(self) -> u32 {
+        M self.overrides.query_memory_percent {
+            Some(v) => v,
+            None => self.defaults.query_memory_percent,
+        }
+    }
+
     # Set global override by key-value pair
     F set_global(~self, key: &Str, value: &Str) -> Result<(), VaisError> {
         # Parse and validate based on key
@@ -449,12 +481,29 @@ X GlobalConfig {
             I parsed > 95 {
                 R Err(err_invalid_config_value(key, "Must be <= 95"));
             }
+            # Cross-validate: sum of all memory percents must be <= 95
+            ~bp = parsed;
+            ~hc = self.effective_hnsw_cache_percent();
+            ~dc = self.effective_dict_cache_percent();
+            ~qm = self.effective_query_memory_percent();
+            I bp + hc + dc + qm > 95 {
+                R Err(err_invalid_config_value(key,
+                    "Memory percentages would sum to {bp + hc + dc + qm}%, must be <= 95%"));
+            }
             self.overrides.buffer_pool_percent = Some(parsed);
             Ok(())
         } E I *key == "hnsw_cache_percent" {
             ~parsed = parse_u32(value)?;
             I parsed > 95 {
                 R Err(err_invalid_config_value(key, "Must be <= 95"));
+            }
+            ~bp = self.effective_buffer_pool_percent();
+            ~hc = parsed;
+            ~dc = self.effective_dict_cache_percent();
+            ~qm = self.effective_query_memory_percent();
+            I bp + hc + dc + qm > 95 {
+                R Err(err_invalid_config_value(key,
+                    "Memory percentages would sum to {bp + hc + dc + qm}%, must be <= 95%"));
             }
             self.overrides.hnsw_cache_percent = Some(parsed);
             Ok(())
@@ -463,12 +512,28 @@ X GlobalConfig {
             I parsed > 95 {
                 R Err(err_invalid_config_value(key, "Must be <= 95"));
             }
+            ~bp = self.effective_buffer_pool_percent();
+            ~hc = self.effective_hnsw_cache_percent();
+            ~dc = parsed;
+            ~qm = self.effective_query_memory_percent();
+            I bp + hc + dc + qm > 95 {
+                R Err(err_invalid_config_value(key,
+                    "Memory percentages would sum to {bp + hc + dc + qm}%, must be <= 95%"));
+            }
             self.overrides.dict_cache_percent = Some(parsed);
             Ok(())
         } E I *key == "query_memory_percent" {
             ~parsed = parse_u32(value)?;
             I parsed > 95 {
                 R Err(err_invalid_config_value(key, "Must be <= 95"));
+            }
+            ~bp = self.effective_buffer_pool_percent();
+            ~hc = self.effective_hnsw_cache_percent();
+            ~dc = self.effective_dict_cache_percent();
+            ~qm = parsed;
+            I bp + hc + dc + qm > 95 {
+                R Err(err_invalid_config_value(key,
+                    "Memory percentages would sum to {bp + hc + dc + qm}%, must be <= 95%"));
             }
             self.overrides.query_memory_percent = Some(parsed);
             Ok(())
@@ -598,7 +663,7 @@ F err_invalid_config(key: &Str, reason: &Str) -> VaisError {
 F err_invalid_config_value(key: &Str, reason: &Str) -> VaisError {
     VaisError.new(
         "VAIS-0007001",
-        "Invalid value L '{key}': {reason}"
+        "Invalid value for '{key}': {reason}"
     )
 }
 
@@ -616,21 +681,82 @@ F err_unknown_config_key(key: &Str) -> VaisError {
 
 # Parse u32 from string
 F parse_u32(s: &Str) -> Result<u32, VaisError> {
-    # TODO: Implement actual parsing when std/parse is available
-    # For now, placeholder that returns error
-    Err(VaisError.new("VAIS-0007001", "parse_u32 not yet implemented"))
+    ~result: u64 = 0;
+    ~i: u64 = 0;
+    ~bytes = s.as_bytes();
+    I bytes.len() == 0 {
+        R Err(VaisError.new("VAIS-0007001", "Empty string cannot be parsed as u32"));
+    }
+    W i < bytes.len() {
+        ~ch = bytes[i];
+        I ch < 48 || ch > 57 {  # '0'=48, '9'=57
+            R Err(VaisError.new("VAIS-0007001", "Invalid character in u32: '{s}'"));
+        }
+        result = result * 10 + (ch - 48) as u64;
+        I result > 4294967295 {  # u32 max
+            R Err(VaisError.new("VAIS-0007001", "Value out of u32 range: '{s}'"));
+        }
+        i += 1;
+    }
+    Ok(result as u32)
 }
 
 # Parse u64 from string
 F parse_u64(s: &Str) -> Result<u64, VaisError> {
-    # TODO: Implement actual parsing when std/parse is available
-    Err(VaisError.new("VAIS-0007001", "parse_u64 not yet implemented"))
+    ~result: u64 = 0;
+    ~i: u64 = 0;
+    ~bytes = s.as_bytes();
+    I bytes.len() == 0 {
+        R Err(VaisError.new("VAIS-0007001", "Empty string cannot be parsed as u64"));
+    }
+    ~prev: u64 = 0;
+    W i < bytes.len() {
+        ~ch = bytes[i];
+        I ch < 48 || ch > 57 {
+            R Err(VaisError.new("VAIS-0007001", "Invalid character in u64: '{s}'"));
+        }
+        prev = result;
+        result = result * 10 + (ch - 48) as u64;
+        I result < prev {  # overflow detection
+            R Err(VaisError.new("VAIS-0007001", "Value out of u64 range: '{s}'"));
+        }
+        i += 1;
+    }
+    Ok(result)
 }
 
 # Parse f64 from string
 F parse_f64(s: &Str) -> Result<f64, VaisError> {
-    # TODO: Implement actual parsing when std/parse is available
-    Err(VaisError.new("VAIS-0007001", "parse_f64 not yet implemented"))
+    # Simple decimal parser: [digits][.digits]
+    ~whole: f64 = 0.0;
+    ~frac: f64 = 0.0;
+    ~frac_div: f64 = 1.0;
+    ~in_frac = false;
+    ~i: u64 = 0;
+    ~bytes = s.as_bytes();
+    I bytes.len() == 0 {
+        R Err(VaisError.new("VAIS-0007001", "Empty string cannot be parsed as f64"));
+    }
+    W i < bytes.len() {
+        ~ch = bytes[i];
+        I ch == 46 {  # '.'
+            I in_frac {
+                R Err(VaisError.new("VAIS-0007001", "Multiple decimal points in f64: '{s}'"));
+            }
+            in_frac = true;
+        } E I ch >= 48 && ch <= 57 {
+            I in_frac {
+                frac_div = frac_div * 10.0;
+                frac = frac + (ch - 48) as f64 / frac_div;
+            } E {
+                whole = whole * 10.0 + (ch - 48) as f64;
+            }
+        } E {
+            R Err(VaisError.new("VAIS-0007001", "Invalid character in f64: '{s}'"));
+        }
+        i += 1;
+    }
+    Ok(whole + frac)
 }
 
 # Parse bool from string

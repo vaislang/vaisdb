@@ -80,7 +80,7 @@ X ChunkGraphManager {
     }
 
     ## Get graph node_id for a chunk
-    F get_node_id(&self, chunk_id: u64) -> Option<u64> {
+    F get_node_id(self, chunk_id: u64) -> Option<u64> {
         ~i: u32 = 0;
         W i < self.entries.len() as u32 {
             ~entry = self.entries.get(i as u64);
@@ -95,7 +95,7 @@ X ChunkGraphManager {
     ## Build NEXT_CHUNK edges for a document's chunks (sequential linking)
     ## Chunks must be registered in order before calling this
     ## Returns list of (src_node_id, dst_node_id) pairs for edge creation
-    F build_next_chunk_edges(&self, doc_id: u64) -> Vec<(u64, u64)> {
+    F build_next_chunk_edges(self, doc_id: u64) -> Vec<(u64, u64)> {
         # Collect entries for this document, sorted by position
         ~doc_entries = Vec.new();
         ~i: u32 = 0;
@@ -138,7 +138,7 @@ X ChunkGraphManager {
 
     ## Build SAME_SECTION edges for chunks in the same section
     ## Returns list of (src_node_id, dst_node_id) pairs
-    F build_same_section_edges(&self, doc_id: u64) -> Vec<(u64, u64)> {
+    F build_same_section_edges(self, doc_id: u64) -> Vec<(u64, u64)> {
         ~edges = Vec.new();
 
         # Group chunks by section_index
@@ -178,7 +178,7 @@ X ChunkGraphManager {
 
     ## Build SAME_DOCUMENT edges between all chunks of a document
     ## Uses a star topology: first chunk connects to all others (avoids O(N^2) edges)
-    F build_same_document_edges(&self, doc_id: u64) -> Vec<(u64, u64)> {
+    F build_same_document_edges(self, doc_id: u64) -> Vec<(u64, u64)> {
         ~edges = Vec.new();
         ~doc_nodes = Vec.new();
 
@@ -206,7 +206,7 @@ X ChunkGraphManager {
 
     ## Build all graph edges for a document's chunks
     ## Returns categorized edge lists for the caller to create via GraphEngine
-    F build_all_edges(&self, doc_id: u64) -> ChunkEdgePlan {
+    F build_all_edges(self, doc_id: u64) -> ChunkEdgePlan {
         ChunkEdgePlan {
             next_chunk: self.build_next_chunk_edges(doc_id),
             same_section: self.build_same_section_edges(doc_id),
@@ -215,7 +215,7 @@ X ChunkGraphManager {
     }
 
     ## Get all chunk entries for a document
-    F get_chunks_for_doc(&self, doc_id: u64) -> Vec<&ChunkGraphEntry> {
+    F get_chunks_for_doc(self, doc_id: u64) -> Vec<&ChunkGraphEntry> {
         ~result = Vec.new();
         ~i: u32 = 0;
         W i < self.entries.len() as u32 {
@@ -246,7 +246,7 @@ X ChunkGraphManager {
     }
 
     ## Get total registered chunk entries
-    F entry_count(&self) -> u64 {
+    F entry_count(self) -> u64 {
         self.entries.len() as u64
     }
 }
@@ -263,20 +263,20 @@ S ChunkEdgePlan {
 
 X ChunkEdgePlan {
     ## Total number of edges to create
-    F total_edges(&self) -> u32 {
+    F total_edges(self) -> u32 {
         (self.next_chunk.len() + self.same_section.len() + self.same_document.len()) as u32
     }
 
     ## Get edge type string for each category
-    F next_chunk_type(&self) -> Str {
+    F next_chunk_type(self) -> Str {
         EDGE_TYPE_NEXT_CHUNK
     }
 
-    F same_section_type(&self) -> Str {
+    F same_section_type(self) -> Str {
         EDGE_TYPE_SAME_SECTION
     }
 
-    F same_document_type(&self) -> Str {
+    F same_document_type(self) -> Str {
         EDGE_TYPE_SAME_DOCUMENT
     }
 }

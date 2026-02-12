@@ -896,6 +896,38 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ---
 
+## 리뷰 발견사항 (2026-02-12)
+> 출처: /team-review 전체 src/ (197파일, ~71K줄)
+모드: 자동진행
+
+- [x] 1. [API] graph/mod.vais facade 재작성 — 하위 모듈 API와 동기화 (Critical) ✅ 2026-02-12
+  변경: src/graph/mod.vais (전면 재작성 — 상수명, 메서드 시그니처, 필드명을 하위 모듈과 동기화)
+- [x] 2. [문법] `::` → `.` 전체 변환 ~500건 (Critical) ✅ 2026-02-12
+  변경: 26개 파일 (Vec.new(), ErrorCategory.Vector 등 네임스페이스 구분자 통일)
+- [x] 3. [문법] `&self` → `self` 변환 345건 (Critical) ✅ 2026-02-12
+  변경: 62개 파일 (Vais 표준 self 시그니처로 통일)
+- [x] 4. [문법] `pub mod` → Vais 모듈 선언 — 변환 불필요 확인 (Critical) ✅ 2026-02-12
+  변경: 없음 (pub mod는 Vais 표준 모듈 선언 문법, 67f3202 정규화 커밋에서 유지됨)
+- [x] 5. [문법] `break`/`continue`/`use super::*` 제거 6건 (Critical) ✅ 2026-02-12
+  변경: 5개 파일 (break→B 1건, continue→C 2건, use super::*→U super.* 3건)
+- [x] 6. [품질] BTree 페이지 크기 4096→DEFAULT_PAGE_SIZE 수정 (Critical) ✅ 2026-02-12
+  변경: src/sql/catalog/constraints.vais (BTree.new() 호출 2곳에 DEFAULT_PAGE_SIZE 상수 사용)
+- [x] 7. [품질] server 에러 메시지 `L` 수정 + parse 스텁 구현 (Critical) ✅ 2026-02-12
+  변경: src/server/config.vais (parse_u32/u64/f64 실제 구현), src/server/types.vais (에러 메시지 수정)
+- [x] 8. [API] rag/mod.vais `from_fusion_config` → `from_config` 수정 (Critical) ✅ 2026-02-12
+  변경: src/rag/mod.vais:306 (메서드명 수정)
+- [x] 9. [아키텍처] RAG WAL 중앙 등록 (ENGINE_TYPE, record types) (Warning) ✅ 2026-02-12
+  변경: src/storage/wal/header.vais (ENGINE_RAG 추가), src/storage/wal/record_types.vais (0x50-0x55 추가), src/storage/wal/mod.vais (re-export)
+- [x] 10. [품질] WAL redo/undo 핸들러 구현 (Warning) ✅ 2026-02-12
+  변경: src/graph/wal.vais, src/fulltext/wal.vais, src/rag/wal.vais (BufferPool 기반 물리 페이지 I/O 구현)
+- [x] 11. [품질] set_global() 메모리 퍼센트 cross-validation 추가 (Warning) ✅ 2026-02-12
+  변경: src/server/config.vais (4개 percent setter에 합산 95% 검증 + effective_*_percent() 헬퍼 4개 추가)
+- [x] 12. [품질] FNV-1a 해시 공통 유틸 추출 (Warning) ✅ 2026-02-12
+  변경: src/storage/hash.vais (신규), 8개 파일 import 전환 (fulltext/types, rag/types, planner/cache 등)
+진행률: 12/12 (100%)
+
+---
+
 ## Phase 8: Server & Client
 
 > **Status**: 🔄 In Progress

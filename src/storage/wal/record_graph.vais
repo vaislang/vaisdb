@@ -19,7 +19,7 @@ S GraphNodeInsertPayload {
 }
 
 X GraphNodeInsertPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u32_le(self.page_id);
         buf.put_u64_le(self.node_id);
@@ -70,7 +70,7 @@ S GraphNodeDeletePayload {
 }
 
 X GraphNodeDeletePayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u32_le(self.page_id);
         buf.put_u64_le(self.node_id);
@@ -124,7 +124,7 @@ S GraphEdgeInsertPayload {
 }
 
 X GraphEdgeInsertPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u64_le(self.edge_id);
         buf.put_u64_le(self.src);
@@ -173,7 +173,7 @@ S GraphEdgeDeletePayload {
 }
 
 X GraphEdgeDeletePayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u64_le(self.edge_id);
         buf.put_u64_le(self.src);
@@ -218,7 +218,7 @@ S GraphPropertyUpdatePayload {
 }
 
 X GraphPropertyUpdatePayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u32_le(self.page_id);
         buf.put_u8(self.entity_type);
@@ -260,7 +260,7 @@ S AdjListPageSplitPayload {
 }
 
 X AdjListPageSplitPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u64_le(self.node_id);
         buf.put_u32_le(self.old_page);

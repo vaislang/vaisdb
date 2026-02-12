@@ -10,8 +10,9 @@ U storage/txn/snapshot.{Snapshot};
 U storage/txn/clog.{Clog};
 U fulltext/types.{
     FullTextConfig, FullTextMeta, PostingEntry,
-    DictEntry, fnv1a_hash, err_fulltext_index_not_found
+    DictEntry, err_fulltext_index_not_found
 };
+U storage/hash.{fnv1a_hash};
 U fulltext/tokenizer.{Tokenizer, TermFreqInfo};
 U fulltext/index/dictionary.{DictionaryIndex};
 U fulltext/index/posting.{PostingStore};
@@ -37,7 +38,7 @@ X FullTextMatchResult {
     }
 
     # Clone the result
-    F clone(&self) -> FullTextMatchResult {
+    F clone(self) -> FullTextMatchResult {
         FullTextMatchResult {
             doc_id: self.doc_id,
             score: self.score,
@@ -64,7 +65,7 @@ X FullTextMatchExecutor {
             index_id: index_id,
             query_text: query_text,
             top_k: top_k,
-            results: Vec::new(),
+            results: Vec.new(),
             cursor: 0,
             is_open: false,
         }
@@ -90,18 +91,18 @@ X FullTextMatchExecutor {
         pool: &BufferPool,
     ) -> Result<(), VaisError> {
         # Step 1: Tokenize query
-        ~tokenizer = Tokenizer::new(config.clone());
+        ~tokenizer = Tokenizer.new(config.clone());
         ~query_terms = tokenizer.tokenize_with_freqs(&self.query_text);
 
         I query_terms.is_empty() {
             # No terms to search, return empty results
-            self.results = Vec::new();
+            self.results = Vec.new();
             R Ok(());
         }
 
         # Step 2 & 3: Lookup posting lists and collect candidates
-        ~candidates: Vec<(u64, u32, u32, f64)> = Vec::new(); # (doc_id, table_id, row_tid, raw_score)
-        ~term_doc_freqs: Vec<(Str, u32)> = Vec::new(); # (term, df)
+        ~candidates: Vec<(u64, u32, u32, f64)> = Vec.new(); # (doc_id, table_id, row_tid, raw_score)
+        ~term_doc_freqs: Vec<(Str, u32)> = Vec.new(); # (term, df)
 
         L term_freq_info: query_terms {
             ~term = term_freq_info.term.clone();
@@ -145,7 +146,7 @@ X FullTextMatchExecutor {
         }
 
         # Step 5: Score with BM25
-        ~scorer = BM25Scorer::new(config.clone());
+        ~scorer = BM25Scorer.new(config.clone());
         ~total_docs = meta.total_docs;
         ~avg_doc_length = meta.avg_doc_length;
 
@@ -187,10 +188,10 @@ X FullTextMatchExecutor {
             self.top_k as u64
         };
 
-        self.results = Vec::with_capacity(top_k_count);
+        self.results = Vec.with_capacity(top_k_count);
         L i: 0..top_k_count {
             ~candidate = &candidates[i];
-            self.results.push(FullTextMatchResult::new(
+            self.results.push(FullTextMatchResult.new(
                 candidate.0,
                 candidate.3,
                 candidate.1,
@@ -223,17 +224,17 @@ X FullTextMatchExecutor {
     }
 
     # Get the current cursor position
-    F cursor_position(&self) -> u64 {
+    F cursor_position(self) -> u64 {
         self.cursor
     }
 
     # Get total number of results
-    F result_count(&self) -> u64 {
+    F result_count(self) -> u64 {
         self.results.len()
     }
 
     # Check if iterator is open
-    F is_open(&self) -> bool {
+    F is_open(self) -> bool {
         self.is_open
     }
 }
@@ -260,7 +261,7 @@ X MultiTermScorer {
         term_postings: &Vec<(Str, Vec<PostingEntry>)>,
         meta: &FullTextMeta,
     ) -> f64 {
-        ~scorer = BM25Scorer::new(self.config.clone());
+        ~scorer = BM25Scorer.new(self.config.clone());
         ~total_score = 0.0f64;
         ~total_docs = meta.total_docs;
         ~avg_doc_length = meta.avg_doc_length;

@@ -41,7 +41,7 @@ X LifecycleAction {
     }
 
     ## Get action type as string
-    F action_name(&self) -> Str {
+    F action_name(self) -> Str {
         M self.action_type {
             0 => "EXPIRE",
             1 => "EVICT",
@@ -79,13 +79,13 @@ X LifecycleStats {
     }
 
     ## Get total actions taken
-    F total_actions(&self) -> u32 {
+    F total_actions(self) -> u32 {
         self.expired_count + self.evicted_count +
         self.consolidated_count + self.decayed_count
     }
 
     ## Format stats as human-readable string
-    F format(&self) -> Str {
+    F format(self) -> Str {
         "LifecycleStats {{ scanned: {self.total_scanned}, expired: {self.expired_count}, evicted: {self.evicted_count}, consolidated: {self.consolidated_count}, decayed: {self.decayed_count}, time_us: {self.run_time_us} }}"
     }
 }
@@ -111,7 +111,7 @@ X MemoryLifecycleManager {
     }
 
     ## Check if lifecycle maintenance should run
-    F should_run(&self, current_time: i64) -> bool {
+    F should_run(self, current_time: i64) -> bool {
         (current_time - self.last_run_at) as u64 >= self.run_interval_seconds
     }
 
@@ -175,7 +175,7 @@ X MemoryLifecycleManager {
     }
 
     ## Find TTL-expired memories
-    F find_expired(&self, memories: &Vec<MemoryEntry>,
+    F find_expired(self, memories: &Vec<MemoryEntry>,
                    current_time: i64) -> Vec<LifecycleAction> {
         ~actions = Vec.new();
 
@@ -204,7 +204,7 @@ X MemoryLifecycleManager {
     }
 
     ## Find working memories to evict (oldest/lowest importance beyond limit)
-    F find_eviction_candidates(&self, memories: &Vec<MemoryEntry>,
+    F find_eviction_candidates(self, memories: &Vec<MemoryEntry>,
                                current_time: i64) -> Vec<LifecycleAction> {
         ~actions = Vec.new();
 
@@ -260,7 +260,7 @@ X MemoryLifecycleManager {
     }
 
     ## Find working memories suitable for consolidation to semantic
-    F find_consolidation_candidates(&self, memories: &Vec<MemoryEntry>,
+    F find_consolidation_candidates(self, memories: &Vec<MemoryEntry>,
                                      current_time: i64) -> Vec<LifecycleAction> {
         ~actions = Vec.new();
 
@@ -296,7 +296,7 @@ X MemoryLifecycleManager {
     }
 
     ## Compute decay actions for all memories
-    F compute_decay(&self, memories: &Vec<MemoryEntry>,
+    F compute_decay(self, memories: &Vec<MemoryEntry>,
                     current_time: i64) -> Vec<LifecycleAction> {
         ~actions = Vec.new();
 
@@ -328,12 +328,12 @@ X MemoryLifecycleManager {
     }
 
     ## Get config reference
-    F config(&self) -> &MemoryConfig {
+    F config(self) -> &MemoryConfig {
         &self.config
     }
 
     ## Get last run time
-    F last_run(&self) -> i64 {
+    F last_run(self) -> i64 {
         self.last_run_at
     }
 

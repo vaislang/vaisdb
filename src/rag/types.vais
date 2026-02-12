@@ -13,6 +13,7 @@ U storage/constants.{
     MVCC_TUPLE_META_SIZE
 };
 U storage/error.{VaisError, ErrorSeverity};
+U storage/hash.{fnv1a_hash};
 U storage/page/header.{PageHeader};
 
 # ============================================================================
@@ -223,7 +224,7 @@ X RagConfig {
     }
 
     ## Serialize config (48 bytes)
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.chunk_strategy);
         buf.put_u8(0);  # reserved alignment
         buf.put_u16_le(0);  # reserved alignment
@@ -335,7 +336,7 @@ X RagMeta {
     }
 
     ## Serialize (104 bytes + config 48 bytes = 152 bytes)
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.format_version);
         buf.put_u8(0);   # reserved alignment
         buf.put_u16_le(0);  # reserved alignment
@@ -394,7 +395,7 @@ S ChunkInfo {
 X ChunkInfo {
     ## Serialize chunk metadata (without text, for on-disk storage)
     ## Fixed part: 40 bytes
-    F serialize_meta(&self, buf: &~ByteBuffer) {
+    F serialize_meta(self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.chunk_id);
         buf.put_u64_le(self.parent_doc_id);
         buf.put_u32_le(self.position_in_doc);
@@ -446,7 +447,7 @@ S DocumentInfo {
 
 X DocumentInfo {
     ## Serialize fixed metadata (56 bytes, excluding variable-length strings)
-    F serialize_meta(&self, buf: &~ByteBuffer) {
+    F serialize_meta(self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.doc_id);
         buf.put_u64_le(self.content_hash);
         buf.put_u32_le(self.chunk_count);
@@ -550,7 +551,7 @@ X RagFusionConfig {
     }
 
     ## Validate weights sum to reasonable range
-    F validate(&self) -> Result<(), VaisError> {
+    F validate(self) -> Result<(), VaisError> {
         ~total = self.vector_weight + self.fulltext_weight + self.graph_weight;
         I total < 0.01 {
             R Err(err_rag_invalid_embedding_config("All search weights are zero"));
@@ -601,20 +602,8 @@ L LABEL_CHUNK: Str = "CHUNK";
 L LABEL_MEMORY: Str = "MEMORY";
 L LABEL_SESSION: Str = "SESSION";
 
-# ============================================================================
-# FNV-1a hash helper (consistent with fulltext engine)
-# ============================================================================
-
-F fnv1a_hash(data: &Str) -> u64 {
-    ~hash: u64 = 0xcbf29ce484222325;
-    ~i: u32 = 0;
-    W i < data.len() {
-        hash = hash ^ (data.byte_at(i) as u64);
-        hash = hash * 0x100000001b3;
-        i = i + 1;
-    }
-    hash
-}
+# Re-export fnv1a_hash from storage/hash for backwards compatibility
+# (imported at top: U storage/hash.{fnv1a_hash})
 
 # ============================================================================
 # MVCC Metadata Wrappers — used by visibility filter/GC functions
@@ -641,7 +630,7 @@ X ChunkMeta {
         }
     }
 
-    F clone(&self) -> ChunkMeta {
+    F clone(self) -> ChunkMeta {
         ChunkMeta {
             chunk_id: self.chunk_id,
             txn_id_create: self.txn_id_create,
@@ -672,7 +661,7 @@ X DocumentMeta {
         }
     }
 
-    F clone(&self) -> DocumentMeta {
+    F clone(self) -> DocumentMeta {
         DocumentMeta {
             doc_id: self.doc_id,
             txn_id_create: self.txn_id_create,

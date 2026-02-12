@@ -20,7 +20,7 @@ S HnswInsertNodePayload {
 }
 
 X HnswInsertNodePayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.node_id);
         buf.put_u8(self.layer);
 
@@ -90,7 +90,7 @@ S HnswDeleteNodePayload {
 }
 
 X HnswDeleteNodePayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.node_id);
 
         # Serialize layers_affected
@@ -139,7 +139,7 @@ S HnswUpdateEdgesPayload {
 }
 
 X HnswUpdateEdgesPayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.node_id);
         buf.put_u8(self.layer);
         write_vec_u64(buf, &self.old_neighbors);
@@ -179,7 +179,7 @@ S HnswLayerPromotePayload {
 }
 
 X HnswLayerPromotePayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u64_le(self.node_id);
         buf.put_u8(self.new_max_layer);
         buf.put_u8(self.file_id);
@@ -213,7 +213,7 @@ S VectorDataWritePayload {
 }
 
 X VectorDataWritePayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u8(self.file_id);
         buf.put_u32_le(self.page_id);
         buf.put_u16_le(self.offset);
@@ -245,7 +245,7 @@ S QuantizationUpdatePayload {
 }
 
 X QuantizationUpdatePayload {
-    F serialize(&self, buf: &~ByteBuffer) {
+    F serialize(self, buf: &~ByteBuffer) {
         buf.put_u32_le(self.index_id);
         write_bytes(buf, &self.codebook);
     }

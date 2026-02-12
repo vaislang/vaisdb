@@ -1,5 +1,5 @@
 # Vector Query Planning — HNSW Pre/Post Filter Strategy
-# Builds HybridPlanNode::VectorScan with optimal filter placement based on predicate selectivity
+# Builds HybridPlanNode.VectorScan with optimal filter placement based on predicate selectivity
 #
 # Filter Strategy Decision:
 # - selectivity < 0.01 (very selective) → pre-filter (scan bitmap, then HNSW on matching IDs)
@@ -156,7 +156,7 @@ F adjust_ef_search(
 # - where_clause: Optional WHERE predicate from SQL query
 #
 # Returns:
-# - HybridPlanNode::VectorScan with computed HybridCost and optimal filter placement
+# - HybridPlanNode.VectorScan with computed HybridCost and optimal filter placement
 F build_vector_plan(
     params: VectorScanParams,
     stats: &VectorIndexStats,
@@ -239,7 +239,7 @@ F build_vector_plan(
     # Step 6: Estimate cost
     ~cost = estimate_vector_scan_cost(&final_params, stats);
 
-    # Step 7: Build HybridPlanNode::VectorScan
+    # Step 7: Build HybridPlanNode.VectorScan
     Ok(HybridPlanNode.VectorScan {
         params: final_params,
         alias: None,

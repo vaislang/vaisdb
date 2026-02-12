@@ -121,7 +121,7 @@ X MemoryStore {
     }
 
     ## Get memory by ID (immutable reference)
-    F get_memory(&self, memory_id: u64) -> Option<&MemoryEntry> {
+    F get_memory(self, memory_id: u64) -> Option<&MemoryEntry> {
         E entry in &self.memories {
             I entry.memory_id == memory_id {
                 R Some(entry)
@@ -242,7 +242,7 @@ X MemoryStore {
     }
 
     ## Get all memories of a specific type
-    F get_memories_by_type(&self, memory_type: u8) -> Vec<&MemoryEntry> {
+    F get_memories_by_type(self, memory_type: u8) -> Vec<&MemoryEntry> {
         ~result = Vec.new()
 
         E entry in &self.memories {
@@ -255,7 +255,7 @@ X MemoryStore {
     }
 
     ## Get all memories for a specific session
-    F get_memories_by_session(&self, session_id: u64) -> Vec<&MemoryEntry> {
+    F get_memories_by_session(self, session_id: u64) -> Vec<&MemoryEntry> {
         ~result = Vec.new()
 
         E entry in &self.memories {
@@ -291,12 +291,12 @@ X MemoryStore {
     }
 
     ## Get total memory count
-    F memory_count(&self) -> u64 {
+    F memory_count(self) -> u64 {
         self.memories.len() as u64
     }
 
     ## Get memory count by type
-    F memory_count_by_type(&self, memory_type: u8) -> u32 {
+    F memory_count_by_type(self, memory_type: u8) -> u32 {
         ~count = 0u32
 
         E entry in &self.memories {
@@ -309,7 +309,7 @@ X MemoryStore {
     }
 
     ## Get memories sorted by importance (descending)
-    F get_top_memories(&self, limit: u32, current_time: i64) -> Vec<&MemoryEntry> {
+    F get_top_memories(self, limit: u32, current_time: i64) -> Vec<&MemoryEntry> {
         ~result = Vec.new()
 
         # Collect all memories with decayed importance

@@ -11,8 +11,9 @@ U storage/page/allocator.{PageAllocator};
 U storage/wal/group_commit.{GroupCommitManager};
 U fulltext/types.{
     FullTextConfig, FullTextMeta, PostingEntry,
-    DictEntry, fnv1a_hash, err_fulltext_index_not_found
+    DictEntry, err_fulltext_index_not_found
 };
+U storage/hash.{fnv1a_hash};
 U fulltext/tokenizer.{Tokenizer, TermFreqInfo};
 U fulltext/index/dictionary.{DictionaryIndex};
 U fulltext/index/posting.{PostingStore};
@@ -35,7 +36,7 @@ X BuildResult {
     }
 
     # Clone the build result
-    F clone(&self) -> BuildResult {
+    F clone(self) -> BuildResult {
         BuildResult {
             docs_indexed: self.docs_indexed,
             terms_created: self.terms_created,
@@ -81,7 +82,7 @@ X FullTextDDL {
         M self.allocator.alloc_page(FILE_ID_FULLTEXT, txn_id, cmd_id, gcm) {
             Ok(dict_root_page) => {
                 # Step 2: Create FullTextMeta with default values
-                ~meta = FullTextMeta::new(
+                ~meta = FullTextMeta.new(
                     table_id,
                     column_id,
                     dict_root_page,
@@ -177,9 +178,9 @@ X FullTextDDL {
         cmd_id: u32,
         gcm: &GroupCommitManager,
     ) -> Result<BuildResult, VaisError> {
-        ~tokenizer = Tokenizer::new(meta.config.clone());
-        ~dict_index = DictionaryIndex::new(meta.dict_root_page);
-        ~posting_store = PostingStore::new(self.allocator.clone());
+        ~tokenizer = Tokenizer.new(meta.config.clone());
+        ~dict_index = DictionaryIndex.new(meta.dict_root_page);
+        ~posting_store = PostingStore.new(self.allocator.clone());
 
         ~docs_indexed = 0u32;
         ~terms_created = 0u32;
@@ -214,7 +215,7 @@ X FullTextDDL {
                 M dict_index.lookup_term(term, &self.pool) {
                     Ok(Some(dict_entry)) => {
                         # Term exists, append to posting list
-                        ~posting_entry = PostingEntry::new(
+                        ~posting_entry = PostingEntry.new(
                             doc_id,
                             meta.table_id,
                             0u32, # row_tid (placeholder)
@@ -256,7 +257,7 @@ X FullTextDDL {
                                         terms_created += 1;
 
                                         # Create first posting entry
-                                        ~posting_entry = PostingEntry::new(
+                                        ~posting_entry = PostingEntry.new(
                                             doc_id,
                                             meta.table_id,
                                             0u32, # row_tid (placeholder)
@@ -300,7 +301,7 @@ X FullTextDDL {
             docs_indexed += 1;
         }
 
-        Ok(BuildResult::new(docs_indexed, terms_created, total_tokens))
+        Ok(BuildResult.new(docs_indexed, terms_created, total_tokens))
     }
 }
 
@@ -339,9 +340,9 @@ X IndexEntry {
         cmd_id: u32,
         gcm: &GroupCommitManager,
     ) -> Result<(), VaisError> {
-        ~tokenizer = Tokenizer::new(meta.config.clone());
-        ~dict_index = DictionaryIndex::new(meta.dict_root_page);
-        ~posting_store = PostingStore::new(self.allocator.clone());
+        ~tokenizer = Tokenizer.new(meta.config.clone());
+        ~dict_index = DictionaryIndex.new(meta.dict_root_page);
+        ~posting_store = PostingStore.new(self.allocator.clone());
 
         # Step 1: Tokenize text
         ~term_freqs = tokenizer.tokenize_with_freqs(text);
@@ -364,7 +365,7 @@ X IndexEntry {
             M dict_index.lookup_term(term, &self.pool) {
                 Ok(Some(dict_entry)) => {
                     # Term exists, append to posting list
-                    ~posting_entry = PostingEntry::new(
+                    ~posting_entry = PostingEntry.new(
                         doc_id,
                         table_id,
                         row_tid,
@@ -401,7 +402,7 @@ X IndexEntry {
                                 &self.pool,
                             ) {
                                 Ok(_) => {
-                                    ~posting_entry = PostingEntry::new(
+                                    ~posting_entry = PostingEntry.new(
                                         doc_id,
                                         table_id,
                                         row_tid,
@@ -465,9 +466,9 @@ X IndexEntry {
         cmd_id: u32,
         gcm: &GroupCommitManager,
     ) -> Result<(), VaisError> {
-        ~tokenizer = Tokenizer::new(meta.config.clone());
-        ~dict_index = DictionaryIndex::new(meta.dict_root_page);
-        ~posting_store = PostingStore::new(self.allocator.clone());
+        ~tokenizer = Tokenizer.new(meta.config.clone());
+        ~dict_index = DictionaryIndex.new(meta.dict_root_page);
+        ~posting_store = PostingStore.new(self.allocator.clone());
 
         # Step 1: Tokenize text to find affected terms
         ~term_freqs = tokenizer.tokenize_with_freqs(text);
