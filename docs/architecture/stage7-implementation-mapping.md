@@ -47,18 +47,18 @@ Every VaisDB component maps to one or more Vais standard library modules. This t
 | CRC32C hardware | Checksum computation | C FFI to hardware CRC instruction | `_mm_crc32_u64` (x86) / `__crc32cd` (ARM) |
 | AES-256-CTR | Encryption at rest | C FFI to crypto library | OpenSSL or libsodium |
 
-### Gaps Resolvable in Vais std
+### Vais std Library Support
 
-These gaps are expected to be resolved in Vais Phase 31 standard library enhancements:
+All previously identified gaps have been resolved in Vais v1.0.0+:
 
-| Gap | Expected Module | Status |
-|-----|----------------|--------|
-| `fsync` | `std/file.vais` | Planned (Phase 31) |
-| `flock` | `std/file.vais` | Planned (Phase 31) |
-| String-keyed HashMap | `std/hashmap.vais` | Planned (Phase 31) |
-| Binary serialization | `std/bytes.vais` | Planned (Phase 31) |
-| Directory operations | `std/dir.vais` | Planned (Phase 31) |
-| Allocator state mutation | `std/allocator.vais` | Planned (Phase 31) |
+| Feature | Module | Status |
+|---------|--------|--------|
+| `fsync` | `std/file.vais` | ✅ Available |
+| `flock` | `std/file.vais` | ✅ Available |
+| String-keyed HashMap | `std/hashmap.vais` | ✅ Available |
+| Binary serialization | `std/bytes.vais` | ✅ Available |
+| Directory operations | `std/dir.vais` | ✅ Available |
+| Allocator state mutation | `std/allocator.vais` | ✅ Available |
 
 ---
 
@@ -682,7 +682,7 @@ VaisDB can be fully implemented in Vais with C FFI for the following reasons:
 
 | Risk | Mitigation |
 |------|-----------|
-| Vais Phase 31 delay | Core storage can prototype with C FFI wrappers for missing std functions |
+| Vais runtime changes | Monitor Vais std updates; C FFI wrappers as fallback if needed |
 | SIMD portability | Runtime dispatch with scalar fallback; C FFI isolates platform differences |
 | GC pressure from Vais runtime | Arena/pool allocators minimize GC involvement for hot paths |
 | Missing profiling tools | Use C-level profilers (perf, Instruments) via extern symbols |
@@ -694,7 +694,7 @@ VaisDB can be fully implemented in Vais with C FFI for the following reasons:
 | Item | Status | Notes |
 |------|--------|-------|
 | Component-to-std mapping | Done | All components mapped to Vais std or C FFI |
-| Gap analysis | Done | 7 C FFI gaps, 6 std gaps (Phase 31) |
+| Gap analysis | Done | 7 C FFI gaps, std gaps resolved (Vais v1.0.0+) |
 | Serialization patterns | Done | All on-disk structs: PageHeader, WAL header, MVCC tuple, AdjEntry, PostingEntry, WAL segment header, CLOG, HeapPageSlot, UndoEntry, FreelistBitmap, BTreeInternalEntry, BTreeLeafEntry, MetaPageHeader |
 | Memory management strategy | Done | Cross-referenced with Stage 4 Section 7 |
 | SIMD strategy | Done | Runtime dispatch, C FFI wrappers |

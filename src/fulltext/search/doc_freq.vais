@@ -178,8 +178,7 @@ X DocFreqTracker {
     # Find entry index by term hash (linear search)
     # Returns Some(index) if found, None otherwise
     #
-    # Note: For production use, this should be replaced with a HashMap
-    # when std/hashmap.vais is available (Phase 31)
+    # Note: For production use, this should be replaced with a HashMap (std/hashmap.vais)
     F find_entry_index(self, term_hash: u64) -> Option<u64> {
         ~i: u64 = 0;
         L W i < self.entries.len() {

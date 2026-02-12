@@ -8,7 +8,7 @@ VaisDB is a RAG-native hybrid database written in pure Vais. It combines vector,
 
 - **Implementation**: Pure Vais (.vais files) with C FFI for system calls
 - **Compiler**: [vaislang/vais](https://github.com/vaislang/vais) v1.0.0+
-- **Build**: `vaisc build` (once implemented)
+- **Build**: `vaisc build`
 
 ## Project Structure
 
@@ -35,11 +35,11 @@ src/
 
 ## Dependencies
 
-- Vais standard library (Phase 31 enhancements required):
+- Vais standard library:
   - `std/file.vais` - fsync, mmap, flock
   - `std/net.vais` - TCP server
   - `std/sync.vais` - Mutex, RwLock for concurrency
-  - `std/hashmap.vais` - String-keyed HashMap needed
+  - `std/hashmap.vais` - String-keyed HashMap
 
 ## Coding Conventions
 
@@ -58,4 +58,4 @@ src/
 ## Roadmap Reference
 
 See [ROADMAP.md](ROADMAP.md) for detailed phase breakdown.
-Current phase: Design & Foundation (Phase 1 not started, waiting for Vais Phase 31).
+Current phase: Phases 0-8 complete. Next: Phase 9 (Production Operations).

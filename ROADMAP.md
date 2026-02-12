@@ -1,10 +1,10 @@
 # VaisDB - AI-Native Hybrid Database
 ## Project Roadmap
 
-> **Version**: 0.1.0 (Design Phase)
+> **Version**: 0.1.0 (Implementation Phase)
 > **Goal**: Vector + Graph + Relational + Full-Text search in a single DB, optimized for RAG
 > **Language**: Pure Vais (with C FFI for system calls)
-> **Last Updated**: 2026-02-11
+> **Last Updated**: 2026-02-12
 
 ---
 
@@ -19,7 +19,7 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 - AI-native agent memory (episodic, semantic, procedural memory with hybrid retrieval)
 
 ### Prerequisites
-- Vais standard library enhancements (tracked in [vais ROADMAP Phase 31](https://github.com/vaislang/vais))
+- ✅ Vais standard library — complete ([vais v1.0.0+](https://github.com/vaislang/vais))
   - `fsync`/`mmap`/`flock` for storage durability
   - Allocator state mutation fixes
   - String-keyed HashMap
@@ -214,7 +214,7 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 ## Phase 1: Storage Engine
 
 > **Status**: ✅ Complete
-> **Dependency**: Phase 0 (Architecture Decisions) + Vais Phase 31 (fsync, mmap, flock)
+> **Dependency**: Phase 0 (Architecture Decisions)
 > **Goal**: Unified storage layer shared by all 4 engines, WAL-based ACID
 > **Completed**: 2026-02-08
 

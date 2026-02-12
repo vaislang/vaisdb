@@ -1,6 +1,6 @@
 # VaisDB Native Client
 # Connection management, query execution, prepared statements, transaction control
-# NOTE: TCP networking requires std/net (not yet available) — placeholder methods
+# TODO: implement TCP networking using std/net
 
 U std/vec.Vec;
 U std/string.Str;

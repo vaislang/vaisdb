@@ -195,7 +195,7 @@ S EmbeddedDatabase {
 
 X EmbeddedDatabase {
     # Open or create an embedded database
-    # Placeholder: actual file I/O requires std/file (Phase 31)
+    # TODO: implement actual file I/O using std/file
     F open(config: EmbeddedConfig) -> Result<EmbeddedDatabase, VaisError> {
         # Validate configuration
         config.validate()?;
@@ -280,10 +280,10 @@ X EmbeddedDatabase {
     }
 }
 
-# File locking functions (placeholders for std/file.flock)
+# File locking functions
 
 # Acquire exclusive file lock on data directory
-# Placeholder: actual flock requires std/file (Phase 31)
+# TODO: implement using std/file.flock
 F acquire_file_lock(data_dir: &Str) -> Result<(), VaisError> {
     # TODO: Open .vaisdb.lock file in data_dir
     # TODO: Call flock(fd, LOCK_EX | LOCK_NB)
@@ -294,7 +294,7 @@ F acquire_file_lock(data_dir: &Str) -> Result<(), VaisError> {
 }
 
 # Release file lock on data directory
-# Placeholder: actual flock requires std/file (Phase 31)
+# TODO: implement using std/file.flock
 F release_file_lock(data_dir: &Str) -> Result<(), VaisError> {
     # TODO: Call flock(fd, LOCK_UN)
     # TODO: Close .vaisdb.lock file
