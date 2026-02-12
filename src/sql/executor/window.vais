@@ -25,11 +25,11 @@ S WindowSpec {
     func_expr: Expr,             # The window function (e.g., FunctionCall for SUM, ROW_NUMBER)
     partition_by: Vec<Expr>,     # PARTITION BY expressions
     order_by: Vec<OrderByItem>,  # ORDER BY within partition
-    result_col_idx: usize,       # Index in output schema where this window result goes
+    result_col_idx: u64,       # Index in output schema where this window result goes
 }
 
 X WindowSpec {
-    F new(func_expr: Expr, partition_by: Vec<Expr>, order_by: Vec<OrderByItem>, result_col_idx: usize) -> WindowSpec {
+    F new(func_expr: Expr, partition_by: Vec<Expr>, order_by: Vec<OrderByItem>, result_col_idx: u64) -> WindowSpec {
         WindowSpec {
             func_expr,
             partition_by,
@@ -60,7 +60,7 @@ S WindowExecutor {
     window_specs: Vec<WindowSpec>,  # Multiple window functions can be computed
     eval_ctx: EvalContext,
     materialized: Option<Vec<Row>>,  # Final augmented rows with window function results
-    cursor: usize,
+    cursor: u64,
     stats: ExecStats,
 }
 
@@ -87,19 +87,19 @@ X WindowExecutor {
                     self.stats.add_scanned(1);
                     input_rows.push(exec_row.get_row().clone());
                 },
-                Option.None => { break; },
+                Option.None => { B; },
             }
         }
 
         # Step 2: Process each window function specification
         ~augmented_rows = input_rows.clone();
 
-        for spec in &self.window_specs {
+        L spec: &self.window_specs {
             # Step 2a: Partition rows by partition key
             ~partitions = self.partition_rows(&input_rows, &spec.partition_by)?;
 
             # Step 2b: Sort each partition by ORDER BY
-            for partition in partitions.values_mut() {
+            L partition: partitions.values_mut() {
                 self.sort_partition(&spec.order_by, partition);
             }
 
@@ -123,9 +123,9 @@ X WindowExecutor {
                 Result.Err(VaisError.new("VAIS-E0106001", "WindowExecutor not opened"))
             },
             Option.Some(rows) => {
-                if self.cursor >= rows.len() {
+                I self.cursor >= rows.len() {
                     Result.Ok(Option.None)
-                } else {
+                } E {
                     ~row = &rows[self.cursor];
                     self.cursor += 1;
                     self.stats.add_produced();
@@ -154,26 +154,26 @@ X WindowExecutor {
     ) -> Result<HashMap<u64, Partition>, VaisError> {
         ~partitions: HashMap<u64, Partition> = HashMap.new();
 
-        for row in rows {
+        L row: rows {
             # Evaluate partition key
             ~key_values = Vec.new();
-            for expr in partition_exprs {
+            L expr: partition_exprs {
                 ~val = eval_expr(expr, row, &self.eval_ctx)?;
                 key_values.push(val);
             }
 
             # Hash partition key (if empty, all rows go to same partition)
-            ~hash = if key_values.is_empty() {
+            ~hash = I key_values.is_empty() {
                 0  # No PARTITION BY: single partition
-            } else {
+            } E {
                 group_key_hash(&key_values)
             };
 
             # Get or create partition
-            if !partitions.contains_key(&hash) {
+            I !partitions.contains_key(&hash) {
                 partitions.insert(hash, Partition.new(key_values.clone()));
             }
-            ~partition = partitions.get_mut(&hash).unwrap();
+            ~partition = partitions.get_mut(&hash)!;
 
             # Add row to partition
             partition.rows.push(row.clone());
@@ -184,8 +184,8 @@ X WindowExecutor {
 
     # Sort rows within a partition by ORDER BY clause
     F sort_partition(self, order_items: &Vec<OrderByItem>, partition: ~Partition) {
-        if order_items.is_empty() {
-            return;  # No ORDER BY, keep original order
+        I order_items.is_empty() {
+            R;  # No ORDER BY, keep original order
         }
 
         partition.rows.sort_by(|a, b| self.compare_rows(a, b, order_items));
@@ -193,7 +193,7 @@ X WindowExecutor {
 
     # Compare two rows using multi-key ORDER BY
     F compare_rows(self, a: &Row, b: &Row, order_items: &Vec<OrderByItem>) -> i32 {
-        for item in order_items {
+        L item: order_items {
             # Evaluate sort key for both rows
             ~val_a = M eval_expr(&item.expr, a, &self.eval_ctx) {
                 Result.Ok(v) => v,
@@ -212,8 +212,8 @@ X WindowExecutor {
             };
 
             ~cmp = order_by_compare(&val_a, &val_b, item.asc, Option.Some(nulls_first));
-            if cmp != 0 {
-                return cmp;
+            I cmp != 0 {
+                R cmp;
             }
         }
 
@@ -229,7 +229,7 @@ X WindowExecutor {
     ) -> Result<Vec<SqlValue>, VaisError> {
         ~all_values = Vec.new();
 
-        for (_, partition) in partitions {
+        L (_, partition): partitions {
             ~partition_values = self.compute_partition_window_values(partition, spec)?;
             all_values.extend(partition_values);
         }
@@ -251,7 +251,7 @@ X WindowExecutor {
                 M name.to_uppercase().as_str() {
                     "ROW_NUMBER" => {
                         # ROW_NUMBER: sequential number within partition
-                        for i in 0..partition.rows.len() {
+                        L i: 0..partition.rows.len() {
                             values.push(SqlValue.IntVal { v: (i + 1) as i64 });
                         }
                     },
@@ -284,7 +284,7 @@ X WindowExecutor {
                         values = self.compute_aggregate_window(partition, spec, "MAX", args)?;
                     },
                     _ => {
-                        return Result.Err(VaisError.new(
+                        R Result.Err(VaisError.new(
                             "VAIS-E0106002",
                             "Unknown window function: {name}"
                         ));
@@ -292,7 +292,7 @@ X WindowExecutor {
                 }
             },
             _ => {
-                return Result.Err(VaisError.new(
+                R Result.Err(VaisError.new(
                     "VAIS-E0106003",
                     "Invalid window specification: expected FunctionCall"
                 ));
@@ -314,12 +314,12 @@ X WindowExecutor {
         ~dense_rank = 1i64;
         ~prev_sort_key: Option<Vec<SqlValue>> = Option.None;
 
-        for i in 0..partition.rows.len() {
+        L i: 0..partition.rows.len() {
             ~row = &partition.rows[i];
 
             # Evaluate ORDER BY expressions to get sort key
             ~sort_key = Vec.new();
-            for order_item in &spec.order_by {
+            L order_item: &spec.order_by {
                 ~val = eval_expr(&order_item.expr, row, &self.eval_ctx)?;
                 sort_key.push(val);
             }
@@ -330,12 +330,12 @@ X WindowExecutor {
                 Option.Some(prev_key) => {
                     # Compare all sort key values
                     ~same = true;
-                    for j in 0..sort_key.len() {
+                    L j: 0..sort_key.len() {
                         M sort_key[j].compare(&prev_key[j]) {
                             Result.Ok(0) => {},  # Equal, continue
                             _ => {
                                 same = false;
-                                break;
+                                B;
                             },
                         }
                     }
@@ -343,17 +343,17 @@ X WindowExecutor {
                 },
             };
 
-            if !is_tie && i > 0 {
+            I !is_tie && i > 0 {
                 # Sort key changed, update ranks
-                if dense {
+                I dense {
                     dense_rank += 1;
-                } else {
+                } E {
                     current_rank = (i + 1) as i64;
                 }
             }
 
             # Assign rank
-            ~rank_value = if dense { dense_rank } else { current_rank };
+            ~rank_value = I dense { dense_rank } E { current_rank };
             values.push(SqlValue.IntVal { v: rank_value });
 
             # Remember this sort key for next iteration
@@ -377,12 +377,12 @@ X WindowExecutor {
         # For partition-wide aggregates (no ORDER BY), compute once and reuse
         ~has_order_by = !spec.order_by.is_empty();
 
-        if has_order_by {
+        I has_order_by {
             # Running aggregate: accumulate as we go
             M func_name {
                 "SUM" => {
                     ~acc: Option<SqlValue> = Option.None;
-                    for row in &partition.rows {
+                    L row: &partition.rows {
                         ~arg_val = self.eval_agg_arg(&args, row)?;
                         acc = agg_sum(&acc, &arg_val)?;
                         ~result = M &acc {
@@ -395,7 +395,7 @@ X WindowExecutor {
                 "AVG" => {
                     ~sum: Option<SqlValue> = Option.None;
                     ~count = 0u64;
-                    for row in &partition.rows {
+                    L row: &partition.rows {
                         ~arg_val = self.eval_agg_arg(&args, row)?;
                         ~result_tuple = agg_avg_accumulate(&sum, &count, &arg_val)?;
                         sum = result_tuple.0;
@@ -406,9 +406,9 @@ X WindowExecutor {
                 },
                 "COUNT" => {
                     ~count = 0u64;
-                    for row in &partition.rows {
+                    L row: &partition.rows {
                         ~arg_val = self.eval_agg_arg(&args, row)?;
-                        if agg_count_value(&arg_val) {
+                        I agg_count_value(&arg_val) {
                             count += 1;
                         }
                         values.push(SqlValue.IntVal { v: count as i64 });
@@ -416,7 +416,7 @@ X WindowExecutor {
                 },
                 "MIN" => {
                     ~acc: Option<SqlValue> = Option.None;
-                    for row in &partition.rows {
+                    L row: &partition.rows {
                         ~arg_val = self.eval_agg_arg(&args, row)?;
                         acc = agg_min(&acc, &arg_val)?;
                         ~result = M &acc {
@@ -428,7 +428,7 @@ X WindowExecutor {
                 },
                 "MAX" => {
                     ~acc: Option<SqlValue> = Option.None;
-                    for row in &partition.rows {
+                    L row: &partition.rows {
                         ~arg_val = self.eval_agg_arg(&args, row)?;
                         acc = agg_max(&acc, &arg_val)?;
                         ~result = M &acc {
@@ -439,18 +439,18 @@ X WindowExecutor {
                     }
                 },
                 _ => {
-                    return Result.Err(VaisError.new(
+                    R Result.Err(VaisError.new(
                         "VAIS-E0106002",
                         "Unknown aggregate function: {func_name}"
                     ));
                 },
             }
-        } else {
+        } E {
             # Partition-wide aggregate: compute once, replicate to all rows
             ~final_value = M func_name {
                 "SUM" => {
                     ~acc: Option<SqlValue> = Option.None;
-                    for row in &partition.rows {
+                    L row: &partition.rows {
                         ~arg_val = self.eval_agg_arg(&args, row)?;
                         acc = agg_sum(&acc, &arg_val)?;
                     }
@@ -462,7 +462,7 @@ X WindowExecutor {
                 "AVG" => {
                     ~sum: Option<SqlValue> = Option.None;
                     ~count = 0u64;
-                    for row in &partition.rows {
+                    L row: &partition.rows {
                         ~arg_val = self.eval_agg_arg(&args, row)?;
                         ~result_tuple = agg_avg_accumulate(&sum, &count, &arg_val)?;
                         sum = result_tuple.0;
@@ -472,9 +472,9 @@ X WindowExecutor {
                 },
                 "COUNT" => {
                     ~count = 0u64;
-                    for row in &partition.rows {
+                    L row: &partition.rows {
                         ~arg_val = self.eval_agg_arg(&args, row)?;
-                        if agg_count_value(&arg_val) {
+                        I agg_count_value(&arg_val) {
                             count += 1;
                         }
                     }
@@ -482,7 +482,7 @@ X WindowExecutor {
                 },
                 "MIN" => {
                     ~acc: Option<SqlValue> = Option.None;
-                    for row in &partition.rows {
+                    L row: &partition.rows {
                         ~arg_val = self.eval_agg_arg(&args, row)?;
                         acc = agg_min(&acc, &arg_val)?;
                     }
@@ -493,7 +493,7 @@ X WindowExecutor {
                 },
                 "MAX" => {
                     ~acc: Option<SqlValue> = Option.None;
-                    for row in &partition.rows {
+                    L row: &partition.rows {
                         ~arg_val = self.eval_agg_arg(&args, row)?;
                         acc = agg_max(&acc, &arg_val)?;
                     }
@@ -503,7 +503,7 @@ X WindowExecutor {
                     }
                 },
                 _ => {
-                    return Result.Err(VaisError.new(
+                    R Result.Err(VaisError.new(
                         "VAIS-E0106002",
                         "Unknown aggregate function: {func_name}"
                     ));
@@ -511,7 +511,7 @@ X WindowExecutor {
             };
 
             # Replicate final value to all rows
-            for _ in 0..partition.rows.len() {
+            L _: 0..partition.rows.len() {
                 values.push(final_value.clone());
             }
         }
@@ -521,10 +521,10 @@ X WindowExecutor {
 
     # Evaluate aggregate argument expression (handle COUNT(*) specially)
     F eval_agg_arg(self, args: &Vec<Expr>, row: &Row) -> Result<SqlValue, VaisError> {
-        if args.is_empty() {
+        I args.is_empty() {
             # COUNT(*) case
             Result.Ok(SqlValue.IntVal { v: 1 })
-        } else {
+        } E {
             M &args[0] {
                 Expr.Star => Result.Ok(SqlValue.IntVal { v: 1 }),  # COUNT(*)
                 _ => eval_expr(&args[0], row, &self.eval_ctx),
@@ -540,7 +540,7 @@ X WindowExecutor {
     ) -> Vec<Row> {
         ~augmented = Vec.with_capacity(rows.len());
 
-        for i in 0..rows.len() {
+        L i: 0..rows.len() {
             ~row = &rows[i];
             ~new_values = row.values.clone();
             new_values.push(window_values[i].clone());

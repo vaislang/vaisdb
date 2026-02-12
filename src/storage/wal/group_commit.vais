@@ -105,7 +105,7 @@ X GroupCommitManager {
                 # Just mark as done without waiting
                 self.writer.clear_txn(txn_id);
                 drop(guard);
-                return Ok(());
+                R Ok(());
             },
             _ => {},
         }
@@ -120,10 +120,10 @@ X GroupCommitManager {
         # Check if we should trigger a flush
         ~should_flush = self.pending.len() as u32 >= self.config.max_batch_size;
 
-        if should_flush {
+        I should_flush {
             self.do_flush()?;
             drop(guard);
-            return Ok(());
+            R Ok(());
         }
 
         # Wait for timeout or another txn to trigger flush
@@ -131,9 +131,9 @@ X GroupCommitManager {
         ~waited = self.flush_cv.wait_timeout(guard, self.config.timeout_us as u64);
 
         # After wakeup: check if our LSN has been flushed by another thread
-        if self.flushed_lsn >= commit_lsn {
+        I self.flushed_lsn >= commit_lsn {
             drop(waited);
-            return Ok(());
+            R Ok(());
         }
 
         # Our LSN not yet flushed — we are the flush leader for this batch
@@ -146,7 +146,7 @@ X GroupCommitManager {
     # Periodic flush (called by background timer or batch trigger)
     F periodic_flush(~self) -> Result<(), VaisError> {
         ~guard = self.lock.lock();
-        if !self.pending.is_empty() {
+        I !self.pending.is_empty() {
             self.do_flush()?;
         }
         drop(guard);
@@ -174,7 +174,7 @@ X GroupCommitManager {
     # Close the group commit manager
     F close(~self) -> Result<(), VaisError> {
         ~guard = self.lock.lock();
-        if !self.pending.is_empty() {
+        I !self.pending.is_empty() {
             self.do_flush()?;
         }
         self.writer.close()?;
@@ -186,8 +186,8 @@ X GroupCommitManager {
 
     # Perform the actual flush + fsync
     F do_flush(~self) -> Result<(), VaisError> {
-        if self.pending.is_empty() {
-            return Ok(());
+        I self.pending.is_empty() {
+            R Ok(());
         }
 
         # Flush writer buffer to OS page cache
@@ -209,15 +209,15 @@ X GroupCommitManager {
 
         # Find max LSN in pending commits
         ~max_lsn = self.flushed_lsn;
-        for pending in &self.pending {
-            if pending.lsn > max_lsn {
+        L pending: &self.pending {
+            I pending.lsn > max_lsn {
                 max_lsn = pending.lsn;
             }
         }
         self.flushed_lsn = max_lsn;
 
         # Clear prev_lsn entries for committed transactions
-        for pending in &self.pending {
+        L pending: &self.pending {
             self.writer.clear_txn(pending.txn_id);
         }
 

@@ -82,7 +82,7 @@ F err_invalid_type_tag(tag: u8) -> VaisError {
 F err_incompatible_types(op: Str, left: Str, right: Str) -> VaisError {
     VaisError.new(
         "VAIS-0109006",
-        "Incompatible types for {op}: {left} and {right}"
+        "Incompatible types L {op}: {left} and {right}"
     )
 }
 
@@ -200,8 +200,8 @@ X SqlType {
             SqlType.Date => SqlValue.DateVal { v: 0 },
             SqlType.Timestamp => SqlValue.TimestampVal { v: 0 },
             SqlType.Vector { dim } => {
-                ~v = Vec.with_capacity(dim as usize);
-                for _ in 0..dim {
+                ~v = Vec.with_capacity(dim as u64);
+                L _: 0..dim {
                     v.push(0.0f32);
                 }
                 SqlValue.VectorVal { v }
@@ -275,11 +275,11 @@ X SqlValue {
             SqlValue.Null => "NULL",
             SqlValue.IntVal { v } => "{v}",
             SqlValue.FloatVal { v } => "{v}",
-            SqlValue.BoolVal { v } => if v { "TRUE" } else { "FALSE" },
+            SqlValue.BoolVal { v } => I v { "TRUE" } E { "FALSE" },
             SqlValue.StringVal { v } => "'{v}'",
             SqlValue.BlobVal { v } => {
                 ~hex = "x'";
-                for b in v {
+                L b: v {
                     hex = "{hex}{b:02x}";
                 }
                 "{hex}'"
@@ -288,8 +288,8 @@ X SqlValue {
             SqlValue.TimestampVal { v } => "TIMESTAMP({v})",
             SqlValue.VectorVal { v } => {
                 ~s = "[";
-                for i in 0..v.len() {
-                    if i > 0 {
+                L i: 0..v.len() {
+                    I i > 0 {
                         s = "{s}, ";
                     }
                     s = "{s}{v[i]}";
@@ -303,78 +303,78 @@ X SqlValue {
     # NULL comparison returns an error (NULL propagation for ORDER BY)
     F compare(self, other: &SqlValue) -> Result<i32, VaisError> {
         # NULL propagation: comparing with NULL is undefined
-        if self.is_null() || other.is_null() {
-            return Err(err_null_comparison());
+        I self.is_null() || other.is_null() {
+            R Err(err_null_comparison());
         }
 
         M (self, other) {
             (SqlValue.IntVal { v: a }, SqlValue.IntVal { v: b }) => {
-                if a < *b { Ok(-1) }
-                else if a > *b { Ok(1) }
-                else { Ok(0) }
+                I a < *b { Ok(-1) }
+                E I a > *b { Ok(1) }
+                E { Ok(0) }
             },
             (SqlValue.FloatVal { v: a }, SqlValue.FloatVal { v: b }) => {
-                if a < *b { Ok(-1) }
-                else if a > *b { Ok(1) }
-                else { Ok(0) }
+                I a < *b { Ok(-1) }
+                E I a > *b { Ok(1) }
+                E { Ok(0) }
             },
             # INT vs FLOAT cross-comparison: promote INT to FLOAT
             (SqlValue.IntVal { v: a }, SqlValue.FloatVal { v: b }) => {
                 ~af = a as f64;
-                if af < *b { Ok(-1) }
-                else if af > *b { Ok(1) }
-                else { Ok(0) }
+                I af < *b { Ok(-1) }
+                E I af > *b { Ok(1) }
+                E { Ok(0) }
             },
             (SqlValue.FloatVal { v: a }, SqlValue.IntVal { v: b }) => {
                 ~bf = *b as f64;
-                if *a < bf { Ok(-1) }
-                else if *a > bf { Ok(1) }
-                else { Ok(0) }
+                I *a < bf { Ok(-1) }
+                E I *a > bf { Ok(1) }
+                E { Ok(0) }
             },
             (SqlValue.BoolVal { v: a }, SqlValue.BoolVal { v: b }) => {
-                ~ai = if a { 1 } else { 0 };
-                ~bi = if *b { 1 } else { 0 };
-                if ai < bi { Ok(-1) }
-                else if ai > bi { Ok(1) }
-                else { Ok(0) }
+                ~ai = I a { 1 } E { 0 };
+                ~bi = I *b { 1 } E { 0 };
+                I ai < bi { Ok(-1) }
+                E I ai > bi { Ok(1) }
+                E { Ok(0) }
             },
             (SqlValue.StringVal { v: a }, SqlValue.StringVal { v: b }) => {
-                if a < b { Ok(-1) }
-                else if a > b { Ok(1) }
-                else { Ok(0) }
+                I a < b { Ok(-1) }
+                E I a > b { Ok(1) }
+                E { Ok(0) }
             },
             (SqlValue.DateVal { v: a }, SqlValue.DateVal { v: b }) => {
-                if a < *b { Ok(-1) }
-                else if a > *b { Ok(1) }
-                else { Ok(0) }
+                I a < *b { Ok(-1) }
+                E I a > *b { Ok(1) }
+                E { Ok(0) }
             },
             (SqlValue.TimestampVal { v: a }, SqlValue.TimestampVal { v: b }) => {
-                if a < *b { Ok(-1) }
-                else if a > *b { Ok(1) }
-                else { Ok(0) }
+                I a < *b { Ok(-1) }
+                E I a > *b { Ok(1) }
+                E { Ok(0) }
             },
             # DATE vs TIMESTAMP cross-comparison: promote DATE to TIMESTAMP
             (SqlValue.DateVal { v: a }, SqlValue.TimestampVal { v: b }) => {
                 ~a_us = (a as i64) * 86400_000_000;  # days to microseconds
-                if a_us < *b { Ok(-1) }
-                else if a_us > *b { Ok(1) }
-                else { Ok(0) }
+                I a_us < *b { Ok(-1) }
+                E I a_us > *b { Ok(1) }
+                E { Ok(0) }
             },
             (SqlValue.TimestampVal { v: a }, SqlValue.DateVal { v: b }) => {
                 ~b_us = (*b as i64) * 86400_000_000;
-                if *a < b_us { Ok(-1) }
-                else if *a > b_us { Ok(1) }
-                else { Ok(0) }
+                I *a < b_us { Ok(-1) }
+                E I *a > b_us { Ok(1) }
+                E { Ok(0) }
             },
             (SqlValue.BlobVal { v: a }, SqlValue.BlobVal { v: b }) => {
-                ~min_len = if a.len() < b.len() { a.len() } else { b.len() };
-                for i in 0..min_len {
-                    if a[i] < b[i] { return Ok(-1); }
-                    if a[i] > b[i] { return Ok(1); }
+                ~min_len = I a.len() < b.len() { a.len() } E { b.len() };
+                L i: 0..min_len {
+                    I a[i] < b[i] { R Ok(-1); }
+                    I a[i] > b[i] { R Ok(1); }
                 }
-                if a.len() < b.len() { Ok(-1) }
-                else if a.len() > b.len() { Ok(1) }
-                else { Ok(0) }
+                I a.len() < b.len() { Ok(-1) }
+                E I a.len() > b.len() { Ok(1) }
+                E { Ok(0) }
             },
             _ => {
                 Err(err_incompatible_types(
@@ -402,7 +402,7 @@ X SqlValue {
             },
             SqlValue.BoolVal { v } => {
                 buf.put_u8(TYPE_TAG_BOOL);
-                buf.put_u8(if v { 1 } else { 0 });
+                buf.put_u8(I v { 1 } E { 0 });
             },
             SqlValue.StringVal { v } => {
                 buf.put_u8(TYPE_TAG_TEXT);
@@ -423,7 +423,7 @@ X SqlValue {
             SqlValue.VectorVal { v } => {
                 buf.put_u8(TYPE_TAG_VECTOR);
                 buf.put_u32_le(v.len() as u32);
-                for f in v {
+                L f: v {
                     buf.put_f32_le(f);
                 }
             },
@@ -464,9 +464,9 @@ X SqlValue {
                 Ok(SqlValue.TimestampVal { v })
             },
             9 => {
-                ~dim = buf.get_u32_le()? as usize;
+                ~dim = buf.get_u32_le()? as u64;
                 ~v = Vec.with_capacity(dim);
-                for _ in 0..dim {
+                L _: 0..dim {
                     v.push(buf.get_f32_le()?);
                 }
                 Ok(SqlValue.VectorVal { v })
@@ -480,8 +480,8 @@ X SqlValue {
     # Addition: INT+INT, FLOAT+FLOAT, INT+FLOAT->FLOAT
     F add(self, other: &SqlValue) -> Result<SqlValue, VaisError> {
         # NULL propagation
-        if self.is_null() || other.is_null() {
-            return Ok(SqlValue.Null);
+        I self.is_null() || other.is_null() {
+            R Ok(SqlValue.Null);
         }
 
         M (self, other) {
@@ -505,8 +505,8 @@ X SqlValue {
 
     # Subtraction: INT-INT, FLOAT-FLOAT, INT-FLOAT->FLOAT
     F sub(self, other: &SqlValue) -> Result<SqlValue, VaisError> {
-        if self.is_null() || other.is_null() {
-            return Ok(SqlValue.Null);
+        I self.is_null() || other.is_null() {
+            R Ok(SqlValue.Null);
         }
 
         M (self, other) {
@@ -530,8 +530,8 @@ X SqlValue {
 
     # Multiplication: INT*INT, FLOAT*FLOAT, INT*FLOAT->FLOAT
     F mul(self, other: &SqlValue) -> Result<SqlValue, VaisError> {
-        if self.is_null() || other.is_null() {
-            return Ok(SqlValue.Null);
+        I self.is_null() || other.is_null() {
+            R Ok(SqlValue.Null);
         }
 
         M (self, other) {
@@ -556,14 +556,14 @@ X SqlValue {
     # Division: INT/INT->INT, FLOAT/FLOAT, INT/FLOAT->FLOAT
     # Division by zero returns VAIS-0109003
     F div(self, other: &SqlValue) -> Result<SqlValue, VaisError> {
-        if self.is_null() || other.is_null() {
-            return Ok(SqlValue.Null);
+        I self.is_null() || other.is_null() {
+            R Ok(SqlValue.Null);
         }
 
         # Check for division by zero
         M other {
-            SqlValue.IntVal { v: 0 } => { return Err(err_division_by_zero()); },
-            SqlValue.FloatVal { v: 0.0 } => { return Err(err_division_by_zero()); },
+            SqlValue.IntVal { v: 0 } => { R Err(err_division_by_zero()); },
+            SqlValue.FloatVal { v: 0.0 } => { R Err(err_division_by_zero()); },
             _ => {},
         }
 
@@ -588,8 +588,8 @@ X SqlValue {
 
     # Unary minus (negation)
     F negate(self) -> Result<SqlValue, VaisError> {
-        if self.is_null() {
-            return Ok(SqlValue.Null);
+        I self.is_null() {
+            R Ok(SqlValue.Null);
         }
 
         M self {
@@ -669,8 +669,8 @@ X SqlValue {
 
     # Cast this value to the target type
     F cast_to(self, target: &SqlType) -> Result<SqlValue, VaisError> {
-        if self.is_null() {
-            return Ok(SqlValue.Null);
+        I self.is_null() {
+            R Ok(SqlValue.Null);
         }
 
         ~self_type_name = self.get_type().name();
@@ -698,7 +698,7 @@ X SqlValue {
             },
             # BOOL -> INT
             (SqlValue.BoolVal { v }, SqlType.Int) => {
-                Ok(SqlValue.IntVal { v: if v { 1 } else { 0 } })
+                Ok(SqlValue.IntVal { v: I v { 1 } E { 0 } })
             },
             # INT -> BOOL (0=false, else=true)
             (SqlValue.IntVal { v }, SqlType.Bool) => {
@@ -728,10 +728,10 @@ X SqlValue {
                 Ok(SqlValue.StringVal { v: "{v}" })
             },
             (SqlValue.BoolVal { v }, SqlType.Text) => {
-                Ok(SqlValue.StringVal { v: if v { "true" } else { "false" } })
+                Ok(SqlValue.StringVal { v: I v { "true" } E { "false" } })
             },
             (SqlValue.BoolVal { v }, SqlType.Varchar { .. }) => {
-                Ok(SqlValue.StringVal { v: if v { "true" } else { "false" } })
+                Ok(SqlValue.StringVal { v: I v { "true" } E { "false" } })
             },
 
             # STRING -> INT (parse)
@@ -768,8 +768,8 @@ X SqlValue {
     # SQL equality: NULL = NULL -> NULL (not TRUE)
     # Returns BoolVal(true/false) or Null
     F equals(self, other: &SqlValue) -> SqlValue {
-        if self.is_null() || other.is_null() {
-            return SqlValue.Null;
+        I self.is_null() || other.is_null() {
+            R SqlValue.Null;
         }
 
         M self.compare(other) {
@@ -813,34 +813,34 @@ X SqlValue {
     # Returns Null if any operand is Null
     F between(self, low: &SqlValue, high: &SqlValue) -> SqlValue {
         # NULL propagation
-        if self.is_null() || low.is_null() || high.is_null() {
-            return SqlValue.Null;
+        I self.is_null() || low.is_null() || high.is_null() {
+            R SqlValue.Null;
         }
 
         # val >= low
         ~ge_low = M self.compare(low) {
             Ok(cmp) => cmp >= 0,
-            Err(_) => { return SqlValue.BoolVal { v: false }; },
+            Err(_) => { R SqlValue.BoolVal { v: false }; },
         };
 
         # val <= high
         ~le_high = M self.compare(high) {
             Ok(cmp) => cmp <= 0,
-            Err(_) => { return SqlValue.BoolVal { v: false }; },
+            Err(_) => { R SqlValue.BoolVal { v: false }; },
         };
 
         SqlValue.BoolVal { v: ge_low && le_high }
     }
 
     # IN list check: val IN (v1, v2, ...)
-    # Returns true if matches any, NULL if no match and any comparison was NULL
+    # Returns true if matches any, NULL if no M and any comparison was NULL
     F in_list(self, list: &[SqlValue]) -> SqlValue {
         ~found_null = false;
 
-        for item in list {
+        L item: list {
             M self.equals(item) {
                 SqlValue.BoolVal { v: true } => {
-                    return SqlValue.BoolVal { v: true };
+                    R SqlValue.BoolVal { v: true };
                 },
                 SqlValue.Null => {
                     found_null = true;
@@ -849,10 +849,10 @@ X SqlValue {
             }
         }
 
-        # No match found
-        if found_null {
+        # No M found
+        I found_null {
             SqlValue.Null
-        } else {
+        } E {
             SqlValue.BoolVal { v: false }
         }
     }
@@ -862,8 +862,8 @@ X SqlValue {
     # Only works on StringVal; returns Null if either is Null
     F like_match(self, pattern: &SqlValue) -> SqlValue {
         # NULL propagation
-        if self.is_null() || pattern.is_null() {
-            return SqlValue.Null;
+        I self.is_null() || pattern.is_null() {
+            R SqlValue.Null;
         }
 
         M (self, pattern) {
@@ -887,35 +887,37 @@ F like_match_internal(text: &Str, pattern: &Str) -> bool {
     ~star_idx = -1i32;
     ~match_idx = 0;
 
-    while t_idx < t_chars.len() {
-        if p_idx < p_chars.len() {
-            if p_chars[p_idx] == '%' {
+    L {
+
+        I !(t_idx < t_chars.len()) { B }
+        I p_idx < p_chars.len() {
+            I p_chars[p_idx] == '%' {
                 # Found a %, remember position
                 star_idx = p_idx as i32;
                 match_idx = t_idx;
                 p_idx += 1;
-                continue;
-            } else if p_chars[p_idx] == '_' || p_chars[p_idx] == t_chars[t_idx] {
-                # _ matches any char, or exact match
-                t_idx += 1;
+                C;
+            } E I p_chars[p_idx] == '_' || p_chars[p_idx] == t_chars[t_idx] {
+                # _ matches any char, or exact M t_idx += 1;
                 p_idx += 1;
-                continue;
+                C;
             }
         }
 
-        # No match at current position
-        if star_idx != -1 {
+        # No M at current position
+        I star_idx != -1 {
             # Backtrack to last % and try matching one more char
-            p_idx = (star_idx as usize) + 1;
+            p_idx = (star_idx as u64) + 1;
             match_idx += 1;
             t_idx = match_idx;
-        } else {
-            return false;
+        } E {
+            R false;
         }
     }
 
     # Consume remaining % in pattern
-    while p_idx < p_chars.len() && p_chars[p_idx] == '%' {
+    L {
+        I !(p_idx < p_chars.len() && p_chars[p_idx] == '%') { B }
         p_idx += 1;
     }
 
@@ -934,8 +936,8 @@ F agg_count_value(val: &SqlValue) -> bool {
 # Pass accumulator (Option<SqlValue>) and next value
 F agg_sum(acc: &Option<SqlValue>, val: &SqlValue) -> Result<Option<SqlValue>, VaisError> {
     # Skip NULL values
-    if val.is_null() {
-        return Ok(*acc);
+    I val.is_null() {
+        R Ok(*acc);
     }
 
     M acc {
@@ -957,8 +959,8 @@ F agg_sum(acc: &Option<SqlValue>, val: &SqlValue) -> Result<Option<SqlValue>, Va
 # Track (sum, count) pair
 F agg_avg_accumulate(sum: &Option<SqlValue>, count: &u64, val: &SqlValue) -> Result<(Option<SqlValue>, u64), VaisError> {
     # Skip NULL values
-    if val.is_null() {
-        return Ok((*sum, *count));
+    I val.is_null() {
+        R Ok((*sum, *count));
     }
 
     M sum {
@@ -980,8 +982,8 @@ F agg_avg_finalize(sum: &Option<SqlValue>, count: u64) -> Result<SqlValue, VaisE
     M sum {
         None => Ok(SqlValue.Null),  # No non-NULL values
         Some(s) => {
-            if count == 0 {
-                return Ok(SqlValue.Null);
+            I count == 0 {
+                R Ok(SqlValue.Null);
             }
 
             # Divide sum by count
@@ -994,8 +996,8 @@ F agg_avg_finalize(sum: &Option<SqlValue>, count: u64) -> Result<SqlValue, VaisE
 # MIN/MAX: skip NULLs, return NULL if all values are NULL
 F agg_min(acc: &Option<SqlValue>, val: &SqlValue) -> Result<Option<SqlValue>, VaisError> {
     # Skip NULL values
-    if val.is_null() {
-        return Ok(*acc);
+    I val.is_null() {
+        R Ok(*acc);
     }
 
     M acc {
@@ -1007,9 +1009,9 @@ F agg_min(acc: &Option<SqlValue>, val: &SqlValue) -> Result<Option<SqlValue>, Va
             # Compare and keep smaller
             M min.compare(val) {
                 Ok(cmp) => {
-                    if cmp > 0 {
+                    I cmp > 0 {
                         Ok(Some(val.clone()))
-                    } else {
+                    } E {
                         Ok(Some(min.clone()))
                     }
                 },
@@ -1021,8 +1023,8 @@ F agg_min(acc: &Option<SqlValue>, val: &SqlValue) -> Result<Option<SqlValue>, Va
 
 F agg_max(acc: &Option<SqlValue>, val: &SqlValue) -> Result<Option<SqlValue>, VaisError> {
     # Skip NULL values
-    if val.is_null() {
-        return Ok(*acc);
+    I val.is_null() {
+        R Ok(*acc);
     }
 
     M acc {
@@ -1034,9 +1036,9 @@ F agg_max(acc: &Option<SqlValue>, val: &SqlValue) -> Result<Option<SqlValue>, Va
             # Compare and keep larger
             M max.compare(val) {
                 Ok(cmp) => {
-                    if cmp < 0 {
+                    I cmp < 0 {
                         Ok(Some(val.clone()))
-                    } else {
+                    } E {
                         Ok(Some(max.clone()))
                     }
                 },
@@ -1053,7 +1055,7 @@ F group_key_hash(values: &[SqlValue]) -> u64 {
 
     ~hasher = Hasher.new();
 
-    for val in values {
+    L val: values {
         M val {
             SqlValue.Null => {
                 # All NULLs hash to same value
@@ -1069,7 +1071,7 @@ F group_key_hash(values: &[SqlValue]) -> u64 {
             },
             SqlValue.BoolVal { v } => {
                 hasher.write_u8(TYPE_TAG_BOOL);
-                hasher.write_u8(if *v { 1 } else { 0 });
+                hasher.write_u8(I *v { 1 } E { 0 });
             },
             SqlValue.StringVal { v } => {
                 hasher.write_u8(TYPE_TAG_TEXT);
@@ -1089,7 +1091,7 @@ F group_key_hash(values: &[SqlValue]) -> u64 {
             },
             SqlValue.VectorVal { v } => {
                 hasher.write_u8(TYPE_TAG_VECTOR);
-                for f in v {
+                L f: v {
                     hasher.write_f32(*f);
                 }
             },
@@ -1113,17 +1115,17 @@ F order_by_compare(a: &SqlValue, b: &SqlValue, asc: bool, nulls_first: Option<bo
         (true, true) => 0,  # Both NULL -> equal
         (true, false) => {
             # a is NULL, b is not
-            if null_order { -1 } else { 1 }
+            I null_order { -1 } E { 1 }
         },
         (false, true) => {
             # b is NULL, a is not
-            if null_order { 1 } else { -1 }
+            I null_order { 1 } E { -1 }
         },
         (false, false) => {
             # Neither NULL -> regular comparison
             M a.compare(b) {
                 Ok(cmp) => {
-                    if asc { cmp } else { -cmp }
+                    I asc { cmp } E { -cmp }
                 },
                 Err(_) => 0,  # Incompatible types -> treat as equal
             }
@@ -1138,8 +1140,8 @@ F order_by_compare(a: &SqlValue, b: &SqlValue, asc: bool, nulls_first: Option<bo
 # Returns the coerced pair, or error if incompatible
 F coerce_types(a: &SqlValue, b: &SqlValue) -> Result<(SqlValue, SqlValue), VaisError> {
     # NULL values don't need coercion
-    if a.is_null() || b.is_null() {
-        return Ok((a.clone(), b.clone()));
+    I a.is_null() || b.is_null() {
+        R Ok((a.clone(), b.clone()));
     }
 
     M (a, b) {

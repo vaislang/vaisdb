@@ -81,7 +81,7 @@ X TableInfo {
         buf.put_u32_le(self.table_id);
         write_string(buf, &self.name);
         buf.put_u16_le(self.column_count);
-        buf.put_u8(if self.is_system { 1 } else { 0 });
+        buf.put_u8(I self.is_system { 1 } E { 0 });
         buf.put_u8(self.heap_file_id);
         buf.put_u32_le(self.first_page_id);
         buf.put_u64_le(self.row_count_estimate);
@@ -91,8 +91,8 @@ X TableInfo {
     # Expects the tag byte to have already been read or reads it
     F deserialize(buf: &ByteBuffer) -> Result<TableInfo, VaisError> {
         ~tag = buf.get_u8()?;
-        if tag != CATALOG_TAG_TABLE {
-            return Err(err_internal("Expected TABLE catalog tag 0x01, got 0x{tag:02x}"));
+        I tag != CATALOG_TAG_TABLE {
+            R Err(err_internal("Expected TABLE catalog tag 0x01, got 0x{tag:02x}"));
         }
 
         ~table_id = buf.get_u32_le()?;
@@ -185,7 +185,7 @@ X ColumnInfo {
         buf.put_u16_le(self.column_index);
         write_string(buf, &self.name);
         self.data_type.serialize(buf);
-        buf.put_u8(if self.nullable { 1 } else { 0 });
+        buf.put_u8(I self.nullable { 1 } E { 0 });
         M &self.default_value {
             Some(ref dv) => {
                 buf.put_u8(1);
@@ -195,14 +195,14 @@ X ColumnInfo {
                 buf.put_u8(0);
             },
         }
-        buf.put_u8(if self.is_primary_key { 1 } else { 0 });
+        buf.put_u8(I self.is_primary_key { 1 } E { 0 });
     }
 
     # Deserialize ColumnInfo from ByteBuffer
     F deserialize(buf: &ByteBuffer) -> Result<ColumnInfo, VaisError> {
         ~tag = buf.get_u8()?;
-        if tag != CATALOG_TAG_COLUMN {
-            return Err(err_internal("Expected COLUMN catalog tag 0x02, got 0x{tag:02x}"));
+        I tag != CATALOG_TAG_COLUMN {
+            R Err(err_internal("Expected COLUMN catalog tag 0x02, got 0x{tag:02x}"));
         }
 
         ~table_id = buf.get_u32_le()?;
@@ -211,9 +211,9 @@ X ColumnInfo {
         ~data_type = SqlType.deserialize(buf)?;
         ~nullable_byte = buf.get_u8()?;
         ~has_default = buf.get_u8()?;
-        ~default_value = if has_default != 0 {
+        ~default_value = I has_default != 0 {
             Some(read_string(buf)?)
-        } else {
+        } E {
             None
         };
         ~is_pk_byte = buf.get_u8()?;
@@ -317,27 +317,27 @@ X IndexInfo {
         write_string(buf, &self.name);
         buf.put_u32_le(self.table_id);
         buf.put_u16_le(self.columns.len() as u16);
-        for col in &self.columns {
+        L col: &self.columns {
             write_string(buf, col);
         }
-        buf.put_u8(if self.is_unique { 1 } else { 0 });
-        buf.put_u8(if self.is_primary { 1 } else { 0 });
+        buf.put_u8(I self.is_unique { 1 } E { 0 });
+        buf.put_u8(I self.is_primary { 1 } E { 0 });
         buf.put_u32_le(self.root_page_id);
     }
 
     # Deserialize IndexInfo from ByteBuffer
     F deserialize(buf: &ByteBuffer) -> Result<IndexInfo, VaisError> {
         ~tag = buf.get_u8()?;
-        if tag != CATALOG_TAG_INDEX {
-            return Err(err_internal("Expected INDEX catalog tag 0x03, got 0x{tag:02x}"));
+        I tag != CATALOG_TAG_INDEX {
+            R Err(err_internal("Expected INDEX catalog tag 0x03, got 0x{tag:02x}"));
         }
 
         ~index_id = buf.get_u32_le()?;
         ~name = read_string(buf)?;
         ~table_id = buf.get_u32_le()?;
-        ~col_count = buf.get_u16_le()? as usize;
+        ~col_count = buf.get_u16_le()? as u64;
         ~columns = Vec.with_capacity(col_count);
-        for _ in 0..col_count {
+        L _: 0..col_count {
             columns.push(read_string(buf)?);
         }
         ~is_unique_byte = buf.get_u8()?;
@@ -377,7 +377,7 @@ X IndexInfo {
         # Separator
         key.push(0x3A);  # ':'
         # Index name
-        for b in self.name.as_bytes() {
+        L b: self.name.as_bytes() {
             key.push(b);
         }
         key
@@ -407,7 +407,7 @@ F table_key(name: &Str) -> Vec<u8> {
     ~key = Vec.with_capacity(2 + name.len());
     key.push(0x54);  # 'T'
     key.push(0x3A);  # ':'
-    for b in name.as_bytes() {
+    L b: name.as_bytes() {
         key.push(b);
     }
     key
@@ -449,7 +449,7 @@ F index_key(name: &Str) -> Vec<u8> {
     ~key = Vec.with_capacity(2 + name.len());
     key.push(0x49);  # 'I'
     key.push(0x3A);  # ':'
-    for b in name.as_bytes() {
+    L b: name.as_bytes() {
         key.push(b);
     }
     key

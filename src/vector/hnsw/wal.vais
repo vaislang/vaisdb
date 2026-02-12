@@ -41,14 +41,14 @@ X HnswWalManager {
     ) -> Result<u64, VaisError> {
         # Build neighbor list from node
         L ~neighbors: Vec<(u64, f32)> = Vec::new();
-        L i: usize = 0;
+        L i: u64 = 0;
         L layer_count = node.neighbors.len();
-        loop {
-            if i >= layer_count { break; }
+        L {
+            I i >= layer_count { B }
             L layer_neighbors = &node.neighbors[i];
-            L j: usize = 0;
-            loop {
-                if j >= layer_neighbors.len() { break; }
+            L j: u64 = 0;
+            L {
+                I j >= layer_neighbors.len() { B }
                 L nb = &layer_neighbors[j];
                 neighbors.push((nb.node_id, nb.distance));
                 j = j + 1;
@@ -192,15 +192,15 @@ F redo_hnsw_insert(
     };
 
     # Build neighbor layers
-    L i: usize = 0;
-    loop {
-        if i > payload.layer as usize { break; }
+    L i: u64 = 0;
+    L {
+        I i > payload.layer as u64 { B }
         L ~layer_neighbors: Vec<HnswNeighbor> = Vec::new();
 
         # Filter neighbors for this layer
-        L j: usize = 0;
-        loop {
-            if j >= payload.neighbors.len() { break; }
+        L j: u64 = 0;
+        L {
+            I j >= payload.neighbors.len() { B }
             L (nid, dist) = payload.neighbors[j];
             layer_neighbors.push(HnswNeighbor { node_id: nid, distance: dist });
             j = j + 1;
@@ -234,23 +234,23 @@ F redo_hnsw_update_edges(
     L ~node = store.get_node(payload.node_id)?;
 
     # Update neighbors at layer
-    if payload.layer as usize >= node.neighbors.len() {
+    I payload.layer as u64 >= node.neighbors.len() {
         # Error: invalid layer
-        return Err(VaisError::new(0x020900, "REDO: invalid layer for edge update"));
+        R Err(VaisError::new(0x020900, "REDO: invalid layer for edge update"));
     }
 
     # Build new neighbor list
     L ~new_neighbors: Vec<HnswNeighbor> = Vec::new();
-    L i: usize = 0;
-    loop {
-        if i >= payload.new_neighbors.len() { break; }
+    L i: u64 = 0;
+    L {
+        I i >= payload.new_neighbors.len() { B }
         L nid = payload.new_neighbors[i];
         # Distance not stored in payload, use placeholder (will be recalculated)
         new_neighbors.push(HnswNeighbor { node_id: nid, distance: 0.0 });
         i = i + 1;
     }
 
-    node.neighbors[payload.layer as usize] = new_neighbors;
+    node.neighbors[payload.layer as u64] = new_neighbors;
 
     # Write back
     store.update_node(&node)
@@ -269,8 +269,8 @@ F redo_hnsw_layer_promote(
     node.max_layer = payload.new_max_layer;
 
     # Ensure neighbors vector has enough layers
-    loop {
-        if node.neighbors.len() > payload.new_max_layer as usize { break; }
+    L {
+        I node.neighbors.len() > payload.new_max_layer as u64 { B }
         node.neighbors.push(Vec::new());
     }
 
@@ -289,15 +289,15 @@ F redo_vector_data_write(
 
     # Write data at offset
     L page_data = frame.get_page_data_mut();
-    if payload.offset as usize + payload.vector_data.len() > page_data.len() {
+    I payload.offset as u64 + payload.vector_data.len() > page_data.len() {
         pool.unpin_page(payload.file_id, payload.page_id, false);
-        return Err(VaisError::new(0x020901, "REDO: vector data write out of bounds"));
+        R Err(VaisError::new(0x020901, "REDO: vector data write out of bounds"));
     }
 
-    L i: usize = 0;
-    loop {
-        if i >= payload.vector_data.len() { break; }
-        page_data[payload.offset as usize + i] = payload.vector_data[i];
+    L i: u64 = 0;
+    L {
+        I i >= payload.vector_data.len() { B }
+        page_data[payload.offset as u64 + i] = payload.vector_data[i];
         i = i + 1;
     }
 
@@ -394,21 +394,21 @@ F dispatch_vector_undo(
             # Load node
             L ~node = store.get_node(payload.node_id)?;
 
-            if payload.layer as usize >= node.neighbors.len() {
-                return Err(VaisError::new(0x020904, "UNDO: invalid layer for edge update"));
+            I payload.layer as u64 >= node.neighbors.len() {
+                R Err(VaisError::new(0x020904, "UNDO: invalid layer for edge update"));
             }
 
             # Restore old neighbors
             L ~old_neighbors: Vec<HnswNeighbor> = Vec::new();
-            L i: usize = 0;
-            loop {
-                if i >= payload.old_neighbors.len() { break; }
+            L i: u64 = 0;
+            L {
+                I i >= payload.old_neighbors.len() { B }
                 L nid = payload.old_neighbors[i];
                 old_neighbors.push(HnswNeighbor { node_id: nid, distance: 0.0 });
                 i = i + 1;
             }
 
-            node.neighbors[payload.layer as usize] = old_neighbors;
+            node.neighbors[payload.layer as u64] = old_neighbors;
             store.update_node(&node)
         },
         HNSW_LAYER_PROMOTE => {

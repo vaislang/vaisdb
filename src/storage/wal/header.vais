@@ -55,7 +55,7 @@ X WalRecordHeader {
         buf.put_u8(self.record_type);
         buf.put_u8(self.engine_type);
         # Write reserved bytes
-        for i in 0..6 {
+        L i: 0..6 {
             buf.put_u8(self.reserved[i]);
         }
     }
@@ -73,7 +73,7 @@ X WalRecordHeader {
 
         # Read reserved bytes
         ~reserved = [0u8; 6];
-        for i in 0..6 {
+        L i: 0..6 {
             reserved[i] = buf.get_u8()?;
         }
 
@@ -92,7 +92,7 @@ X WalRecordHeader {
 
     # Serialize header to byte array (48 bytes)
     F to_bytes(&self) -> [u8; 48] {
-        ~buf = ByteBuffer.with_capacity(WAL_RECORD_HEADER_SIZE as usize);
+        ~buf = ByteBuffer.with_capacity(WAL_RECORD_HEADER_SIZE as u64);
         self.serialize(&~buf);
         ~bytes = [0u8; 48];
         buf.as_slice().copy_to(&~bytes, 0);

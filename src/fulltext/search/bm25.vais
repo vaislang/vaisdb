@@ -42,16 +42,16 @@ X BM25Scorer {
     # - df>N → IDF=0 (data corruption, treat as invalid)
     # - N=0 → IDF=0 (no documents in corpus)
     F calculate_idf(df: u32, total_docs: u64) -> f64 {
-        if total_docs == 0 || df == 0 {
-            return 0.0;
+        I total_docs == 0 || df == 0 {
+            R 0.0;
         }
 
         ~n = total_docs as f64;
         ~df_f = df as f64;
 
         # Guard against df > total_docs (data corruption)
-        if df_f > n {
-            return 0.0;
+        I df_f > n {
+            R 0.0;
         }
 
         # IDF = ln((N - df + 0.5) / (df + 0.5) + 1)
@@ -85,13 +85,13 @@ X BM25Scorer {
         total_docs: u64,
     ) -> f64 {
         # Edge case: no term occurrences
-        if tf == 0 {
-            return 0.0;
+        I tf == 0 {
+            R 0.0;
         }
 
         # Edge case: no corpus statistics
-        if total_docs == 0 || avg_doc_length == 0.0 {
-            return 0.0;
+        I total_docs == 0 || avg_doc_length == 0.0 {
+            R 0.0;
         }
 
         # Calculate IDF component
@@ -124,8 +124,8 @@ X BM25Scorer {
     # Returns: total score (sum of individual term scores)
     F batch_score(self, term_scores: &Vec<f64>) -> f64 {
         ~total: f64 = 0.0;
-        ~i: usize = 0;
-        L while i < term_scores.len() {
+        ~i: u64 = 0;
+        L W i < term_scores.len() {
             total += term_scores[i];
             i += 1;
         }
@@ -150,8 +150,8 @@ X BM25Scorer {
         total_docs: u64,
     ) -> f64 {
         ~total: f64 = 0.0;
-        ~i: usize = 0;
-        L while i < term_freqs.len() {
+        ~i: u64 = 0;
+        L W i < term_freqs.len() {
             ~(tf, df) = term_freqs[i];
             ~term_score = self.score(tf, df, doc_length, avg_doc_length, total_docs);
             total += term_score;
@@ -170,21 +170,21 @@ X BM25Scorer {
 # This implementation uses argument reduction and 15 terms for accuracy
 F ln(x: f64) -> f64 {
     # Edge cases
-    if x <= 0.0 {
-        return 0.0;  # Undefined, return 0 for safety
+    I x <= 0.0 {
+        R 0.0;  # Undefined, return 0 for safety
     }
-    if x == 1.0 {
-        return 0.0;
+    I x == 1.0 {
+        R 0.0;
     }
 
     # Argument reduction: bring x into range [0.5, 2)
     ~exp: i32 = 0;
     ~y = x;
-    L while y >= 2.0 {
+    L W y >= 2.0 {
         y = y / 2.0;
         exp += 1;
     }
-    L while y < 0.5 {
+    L W y < 0.5 {
         y = y * 2.0;
         exp -= 1;
     }
@@ -198,7 +198,7 @@ F ln(x: f64) -> f64 {
 
     # Sum 15 terms for good accuracy
     ~n: i32 = 1;
-    L while n < 15 {
+    L W n < 15 {
         term = term * z_sq;
         ~divisor = (2 * n + 1) as f64;
         sum += term / divisor;

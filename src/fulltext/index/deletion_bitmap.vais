@@ -45,12 +45,12 @@ X DeletionBitmap {
 
     # Create bitmap with initial capacity for doc_ids up to max_doc_id
     F with_capacity(max_doc_id: u64) -> DeletionBitmap {
-        let word_count = ((max_doc_id + 63) / 64) as usize;
-        let ~words = Vec::with_capacity(word_count);
+        word_count := ((max_doc_id + 63) / 64) as u64;
+        ~words = Vec::with_capacity(word_count);
 
         # Initialize all words to 0 (no deletions)
-        ~i: usize = 0;
-        L while i < word_count {
+        ~i: u64 = 0;
+        L W i < word_count {
             words.push(0);
             i += 1;
         }
@@ -67,8 +67,8 @@ X DeletionBitmap {
         # Ensure bitmap is large enough
         self.ensure_capacity(doc_id)?;
 
-        let word_index = (doc_id / 64) as usize;
-        let bit_offset = (doc_id % 64) as u32;
+        word_index := (doc_id / 64) as u64;
+        bit_offset := (doc_id % 64) as u32;
 
         # Set bit to 1
         self.words[word_index] |= 1u64 << bit_offset;
@@ -79,15 +79,15 @@ X DeletionBitmap {
     # Check if entry is deleted
     # Fast check: test bit value
     F is_deleted(&self, doc_id: u64) -> bool {
-        if doc_id > self.max_doc_id {
-            return false;  # Beyond bitmap range = not deleted
+        I doc_id > self.max_doc_id {
+            R false;  # Beyond bitmap range = not deleted
         }
 
-        let word_index = (doc_id / 64) as usize;
-        let bit_offset = (doc_id % 64) as u32;
+        word_index := (doc_id / 64) as u64;
+        bit_offset := (doc_id % 64) as u32;
 
-        if word_index >= self.words.len() {
-            return false;
+        I word_index >= self.words.len() {
+            R false;
         }
 
         # Test bit value
@@ -96,15 +96,15 @@ X DeletionBitmap {
 
     # Clear deleted mark (for rollback)
     F clear_deleted(&~self, doc_id: u64) -> Result<(), VaisError> {
-        if doc_id > self.max_doc_id {
-            return Ok(());  # Beyond range, nothing to clear
+        I doc_id > self.max_doc_id {
+            R Ok(());  # Beyond range, nothing to clear
         }
 
-        let word_index = (doc_id / 64) as usize;
-        let bit_offset = (doc_id % 64) as u32;
+        word_index := (doc_id / 64) as u64;
+        bit_offset := (doc_id % 64) as u32;
 
-        if word_index >= self.words.len() {
-            return Ok(());
+        I word_index >= self.words.len() {
+            R Ok(());
         }
 
         # Clear bit to 0
@@ -124,32 +124,32 @@ X DeletionBitmap {
         snapshot: &Snapshot,
         clog: &CommitLog,
     ) -> Result<(), VaisError> {
-        ~i: usize = 0;
-        L while i < entries.len() {
-            let entry = &entries[i];
+        ~i: u64 = 0;
+        L W i < entries.len() {
+            entry := &entries[i];
 
             # Check if entry is marked in bitmap
-            if self.is_deleted(entry.doc_id) {
+            I self.is_deleted(entry.doc_id) {
                 # Verify against MVCC state
-                if entry.txn_id_expire == INVALID_TXN_ID {
+                I entry.txn_id_expire == INVALID_TXN_ID {
                     # Entry is not actually expired, clear bitmap mark
                     self.clear_deleted(entry.doc_id)?;
-                } else {
+                } E {
                     # Check if expiring transaction is committed
-                    if clog.is_aborted(entry.txn_id_expire) {
+                    I clog.is_aborted(entry.txn_id_expire) {
                         # Aborted expiration, clear bitmap mark
                         self.clear_deleted(entry.doc_id)?;
-                    } else if !clog.is_committed(entry.txn_id_expire) {
+                    } E I !clog.is_committed(entry.txn_id_expire) {
                         # Uncommitted expiration, clear bitmap mark
                         self.clear_deleted(entry.doc_id)?;
                     }
                     # Otherwise: committed expiration, keep bitmap mark
                 }
-            } else {
+            } E {
                 # Entry not marked in bitmap, check if it should be
-                if entry.txn_id_expire != INVALID_TXN_ID {
+                I entry.txn_id_expire != INVALID_TXN_ID {
                     # Entry is expired, check if committed
-                    if !clog.is_aborted(entry.txn_id_expire)
+                    I !clog.is_aborted(entry.txn_id_expire)
                         && clog.is_committed(entry.txn_id_expire) {
                         # Committed deletion, mark in bitmap
                         self.set_deleted(entry.doc_id)?;
@@ -175,14 +175,14 @@ X DeletionBitmap {
     ) -> Result<Vec<u64>, VaisError> {
         ~to_remove = Vec::new();
 
-        ~i: usize = 0;
-        L while i < entries.len() {
-            let entry = &entries[i];
+        ~i: u64 = 0;
+        L W i < entries.len() {
+            entry := &entries[i];
 
             # Check if entry is marked as deleted
-            if self.is_deleted(entry.doc_id) {
+            I self.is_deleted(entry.doc_id) {
                 # Check if safe to remove (below low_water_mark)
-                if entry.txn_id_expire != INVALID_TXN_ID
+                I entry.txn_id_expire != INVALID_TXN_ID
                     && entry.txn_id_expire < low_water_mark {
                     # Safe to physically remove
                     to_remove.push(entry.doc_id);
@@ -201,11 +201,11 @@ X DeletionBitmap {
     # Count total deleted entries (marked bits)
     F deleted_count(&self) -> u64 {
         ~count: u64 = 0;
-        ~i: usize = 0;
-        L while i < self.words.len() {
+        ~i: u64 = 0;
+        L W i < self.words.len() {
             # Count set bits in word using Brian Kernighan's algorithm
             ~word = self.words[i];
-            L while word != 0 {
+            L W word != 0 {
                 word &= word - 1;  # Clear lowest set bit
                 count += 1;
             }
@@ -215,14 +215,14 @@ X DeletionBitmap {
     }
 
     # Get bitmap memory usage in bytes
-    F memory_usage(&self) -> usize {
+    F memory_usage(&self) -> u64 {
         self.words.len() * 8  # 8 bytes per u64
     }
 
     # Clear all deletion marks
     F clear_all(&~self) {
-        ~i: usize = 0;
-        L while i < self.words.len() {
+        ~i: u64 = 0;
+        L W i < self.words.len() {
             self.words[i] = 0;
             i += 1;
         }
@@ -231,18 +231,18 @@ X DeletionBitmap {
     # Ensure bitmap has capacity for doc_id
     # Expands bitmap if needed
     F ensure_capacity(&~self, doc_id: u64) -> Result<(), VaisError> {
-        if doc_id <= self.max_doc_id {
-            return Ok(());  # Already have capacity
+        I doc_id <= self.max_doc_id {
+            R Ok(());  # Already have capacity
         }
 
         # Calculate new capacity (round up to next 64-doc boundary)
-        let new_max = ((doc_id + 63) / 64) * 64;
-        let new_word_count = (new_max / 64) as usize;
-        let old_word_count = self.words.len();
+        new_max := ((doc_id + 63) / 64) * 64;
+        new_word_count := (new_max / 64) as u64;
+        old_word_count := self.words.len();
 
         # Expand words vector
         ~i = old_word_count;
-        L while i < new_word_count {
+        L W i < new_word_count {
             self.words.push(0);
             i += 1;
         }
@@ -254,7 +254,7 @@ X DeletionBitmap {
     # Serialize bitmap to byte vector
     # Format: max_doc_id(8) + word_count(4) + words(8 each)
     F to_bytes(&self) -> Vec<u8> {
-        let size = 8 + 4 + (self.words.len() * 8);
+        size := 8 + 4 + (self.words.len() * 8);
         ~buf = Vec::with_capacity(size);
 
         # Serialize max_doc_id (8 bytes)
@@ -264,8 +264,8 @@ X DeletionBitmap {
         buf.extend_from_slice(&(self.words.len() as u32).to_le_bytes());
 
         # Serialize words (8 bytes each)
-        ~i: usize = 0;
-        L while i < self.words.len() {
+        ~i: u64 = 0;
+        L W i < self.words.len() {
             buf.extend_from_slice(&self.words[i].to_le_bytes());
             i += 1;
         }
@@ -275,8 +275,8 @@ X DeletionBitmap {
 
     # Deserialize bitmap from byte vector
     F from_bytes(data: &[u8]) -> Result<DeletionBitmap, VaisError> {
-        if data.len() < 12 {
-            return Err(VaisError {
+        I data.len() < 12 {
+            R Err(VaisError {
                 code: error_code(4, 8, 2),  # 04-08-002: invalid bitmap data
                 message: "Deletion bitmap data too short".to_string(),
                 category: ErrorCategory::Corruption,
@@ -286,17 +286,17 @@ X DeletionBitmap {
         # Deserialize max_doc_id (8 bytes)
         ~max_doc_id_bytes: [u8; 8] = [0; 8];
         max_doc_id_bytes.copy_from_slice(&data[0..8]);
-        let max_doc_id = u64::from_le_bytes(max_doc_id_bytes);
+        max_doc_id := u64::from_le_bytes(max_doc_id_bytes);
 
         # Deserialize word count (4 bytes)
         ~word_count_bytes: [u8; 4] = [0; 4];
         word_count_bytes.copy_from_slice(&data[8..12]);
-        let word_count = u32::from_le_bytes(word_count_bytes) as usize;
+        word_count := u32::from_le_bytes(word_count_bytes) as u64;
 
         # Verify data length
-        let expected_len = 12 + (word_count * 8);
-        if data.len() < expected_len {
-            return Err(VaisError {
+        expected_len := 12 + (word_count * 8);
+        I data.len() < expected_len {
+            R Err(VaisError {
                 code: error_code(4, 8, 2),
                 message: "Deletion bitmap data truncated".to_string(),
                 category: ErrorCategory::Corruption,
@@ -305,9 +305,9 @@ X DeletionBitmap {
 
         # Deserialize words
         ~words = Vec::with_capacity(word_count);
-        ~i: usize = 0;
-        L while i < word_count {
-            let offset = 12 + (i * 8);
+        ~i: u64 = 0;
+        L W i < word_count {
+            offset := 12 + (i * 8);
             ~word_bytes: [u8; 8] = [0; 8];
             word_bytes.copy_from_slice(&data[offset..offset+8]);
             words.push(u64::from_le_bytes(word_bytes));
@@ -322,10 +322,10 @@ X DeletionBitmap {
 
     # Check if bitmap is empty (no deletions)
     F is_empty(&self) -> bool {
-        ~i: usize = 0;
-        L while i < self.words.len() {
-            if self.words[i] != 0 {
-                return false;
+        ~i: u64 = 0;
+        L W i < self.words.len() {
+            I self.words[i] != 0 {
+                R false;
             }
             i += 1;
         }
@@ -336,16 +336,16 @@ X DeletionBitmap {
     F get_deleted_doc_ids(&self) -> Vec<u64> {
         ~result = Vec::new();
 
-        ~word_idx: usize = 0;
-        L while word_idx < self.words.len() {
-            let word = self.words[word_idx];
-            if word != 0 {
+        ~word_idx: u64 = 0;
+        L W word_idx < self.words.len() {
+            word := self.words[word_idx];
+            I word != 0 {
                 # Check each bit in this word
                 ~bit_idx: u32 = 0;
-                L while bit_idx < 64 {
-                    if (word & (1u64 << bit_idx)) != 0 {
-                        let doc_id = (word_idx as u64 * 64) + (bit_idx as u64);
-                        if doc_id <= self.max_doc_id {
+                L W bit_idx < 64 {
+                    I (word & (1u64 << bit_idx)) != 0 {
+                        doc_id := (word_idx as u64 * 64) + (bit_idx as u64);
+                        I doc_id <= self.max_doc_id {
                             result.push(doc_id);
                         }
                     }
@@ -376,18 +376,18 @@ F filter_visible_entries(
 ) -> Vec<PostingEntry> {
     ~result = Vec::with_capacity(entries.len());
 
-    ~i: usize = 0;
-    L while i < entries.len() {
-        let entry = &entries[i];
+    ~i: u64 = 0;
+    L W i < entries.len() {
+        entry := &entries[i];
 
         # Fast skip if marked in deletion bitmap
-        if bitmap.is_deleted(entry.doc_id) {
+        I bitmap.is_deleted(entry.doc_id) {
             i += 1;
-            continue;
+            C;
         }
 
         # Full MVCC visibility check
-        if is_entry_visible(entry, snapshot, clog) {
+        I is_entry_visible(entry, snapshot, clog) {
             result.push(entry.clone());
         }
 
@@ -405,48 +405,48 @@ F is_entry_visible(
     clog: &CommitLog,
 ) -> bool {
     # Fast-path: check if creating transaction was aborted
-    if clog.is_aborted(entry.txn_id_create) {
-        return false;
+    I clog.is_aborted(entry.txn_id_create) {
+        R false;
     }
 
-    let created_by = entry.txn_id_create;
-    let expired_by = entry.txn_id_expire;
+    created_by := entry.txn_id_create;
+    expired_by := entry.txn_id_expire;
 
     # If expiring txn was aborted, treat as not expired
-    let expired_by_effective = if expired_by != INVALID_TXN_ID && !clog.is_aborted(expired_by) {
+    expired_by_effective := I expired_by != INVALID_TXN_ID && !clog.is_aborted(expired_by) {
         expired_by
-    } else {
+    } E {
         INVALID_TXN_ID
     };
 
     # Case 1: Created by current transaction — use cmd_id for same-txn visibility
-    if created_by == snapshot.current_txn {
-        if entry.cmd_id >= snapshot.current_cmd_id {
-            return false;  # Created by later command in same txn
+    I created_by == snapshot.current_txn {
+        I entry.cmd_id >= snapshot.current_cmd_id {
+            R false;  # Created by later command in same txn
         }
-        if expired_by_effective == INVALID_TXN_ID {
-            return true;
+        I expired_by_effective == INVALID_TXN_ID {
+            R true;
         }
-        if expired_by_effective == snapshot.current_txn {
-            return entry.expire_cmd_id >= snapshot.current_cmd_id;
+        I expired_by_effective == snapshot.current_txn {
+            R entry.expire_cmd_id >= snapshot.current_cmd_id;
         }
-        return true;
+        R true;
     }
 
     # Case 2: Created by committed transaction visible to this snapshot
-    if !is_committed_before(created_by, snapshot, clog) {
-        return false;  # Creator not yet committed
+    I !is_committed_before(created_by, snapshot, clog) {
+        R false;  # Creator not yet committed
     }
 
     # Case 3: Check expiration
-    if expired_by_effective == INVALID_TXN_ID {
-        return true;  # Not expired
+    I expired_by_effective == INVALID_TXN_ID {
+        R true;  # Not expired
     }
-    if expired_by_effective == snapshot.current_txn {
-        return entry.expire_cmd_id >= snapshot.current_cmd_id;
+    I expired_by_effective == snapshot.current_txn {
+        R entry.expire_cmd_id >= snapshot.current_cmd_id;
     }
-    if !is_committed_before(expired_by_effective, snapshot, clog) {
-        return true;  # Expirer not yet committed = still visible
+    I !is_committed_before(expired_by_effective, snapshot, clog) {
+        R true;  # Expirer not yet committed = still visible
     }
 
     false  # Expired by committed transaction
@@ -454,12 +454,12 @@ F is_entry_visible(
 
 # Check if transaction committed before snapshot
 F is_committed_before(txn_id: u64, snapshot: &Snapshot, clog: &CommitLog) -> bool {
-    if txn_id > snapshot.txn_id {
-        return false;  # Started after snapshot
+    I txn_id > snapshot.txn_id {
+        R false;  # Started after snapshot
     }
 
-    if snapshot.active_txns.contains(&txn_id) {
-        return false;  # Was active when snapshot taken
+    I snapshot.active_txns.contains(&txn_id) {
+        R false;  # Was active when snapshot taken
     }
 
     # Must be committed (aborted case handled by caller)
@@ -479,9 +479,9 @@ mod tests {
         ~bitmap = DeletionBitmap::new();
 
         # Mark some entries as deleted
-        bitmap.set_deleted(10).unwrap();
-        bitmap.set_deleted(50).unwrap();
-        bitmap.set_deleted(100).unwrap();
+        bitmap.set_deleted(10)!;
+        bitmap.set_deleted(50)!;
+        bitmap.set_deleted(100)!;
 
         # Check deleted status
         assert!(bitmap.is_deleted(10));
@@ -498,11 +498,11 @@ mod tests {
     F test_deletion_bitmap_clear() {
         ~bitmap = DeletionBitmap::new();
 
-        bitmap.set_deleted(10).unwrap();
-        bitmap.set_deleted(50).unwrap();
+        bitmap.set_deleted(10)!;
+        bitmap.set_deleted(50)!;
 
         # Clear one deletion
-        bitmap.clear_deleted(10).unwrap();
+        bitmap.clear_deleted(10)!;
 
         assert!(!bitmap.is_deleted(10));
         assert!(bitmap.is_deleted(50));
@@ -513,14 +513,14 @@ mod tests {
     F test_deletion_bitmap_serialization() {
         ~bitmap = DeletionBitmap::with_capacity(200);
 
-        bitmap.set_deleted(10).unwrap();
-        bitmap.set_deleted(150).unwrap();
+        bitmap.set_deleted(10)!;
+        bitmap.set_deleted(150)!;
 
         # Serialize
-        let bytes = bitmap.to_bytes();
+        bytes := bitmap.to_bytes();
 
         # Deserialize
-        let restored = DeletionBitmap::from_bytes(&bytes).unwrap();
+        restored := DeletionBitmap::from_bytes(&bytes)!;
 
         assert!(restored.is_deleted(10));
         assert!(restored.is_deleted(150));
@@ -533,8 +533,8 @@ mod tests {
         ~bitmap = DeletionBitmap::new();
 
         # Mark entries beyond initial capacity
-        bitmap.set_deleted(1000).unwrap();
-        bitmap.set_deleted(5000).unwrap();
+        bitmap.set_deleted(1000)!;
+        bitmap.set_deleted(5000)!;
 
         assert!(bitmap.is_deleted(1000));
         assert!(bitmap.is_deleted(5000));
@@ -545,11 +545,11 @@ mod tests {
     F test_deletion_bitmap_get_deleted_ids() {
         ~bitmap = DeletionBitmap::new();
 
-        bitmap.set_deleted(5).unwrap();
-        bitmap.set_deleted(10).unwrap();
-        bitmap.set_deleted(15).unwrap();
+        bitmap.set_deleted(5)!;
+        bitmap.set_deleted(10)!;
+        bitmap.set_deleted(15)!;
 
-        let deleted_ids = bitmap.get_deleted_doc_ids();
+        deleted_ids := bitmap.get_deleted_doc_ids();
 
         assert_eq!(deleted_ids.len(), 3);
         assert!(deleted_ids.contains(&5));

@@ -45,7 +45,7 @@ X VectorPageHeader {
         buf.put_u32_le(self.dim);
         buf.put_u16_le(self.next_free_offset);
         buf.put_u16_le(self.flags);
-        for i in 0..6 {
+        L i: 0..6 {
             buf.put_u8(self.reserved[i]);
         }
     }
@@ -57,7 +57,7 @@ X VectorPageHeader {
         ~next_free_offset = buf.get_u16_le()?;
         ~flags = buf.get_u16_le()?;
         ~reserved = [0u8; 6];
-        for i in 0..6 {
+        L i: 0..6 {
             reserved[i] = buf.get_u8()?;
         }
         Ok(VectorPageHeader {
@@ -107,8 +107,8 @@ X VectorSlot {
 # Layout: [MvccTupleMeta 32B] + [f32 * dim] or [overflow pointer 8B]
 S VectorData {
     mvcc: MvccTupleMeta,
-    data: Vec<f32>,          # Actual vector data (if inline)
-    overflow_ptr: Option<OverflowPointer>,  # Pointer to overflow chain (if too large)
+    data: Vec<f32>,          # Actual vector data (I inline)
+    overflow_ptr: Option<OverflowPointer>,  # Pointer to overflow chain (I too large)
 }
 
 X VectorData {
@@ -129,7 +129,7 @@ X VectorData {
     # Serialize vector data inline
     F serialize_inline(self, buf: &~ByteBuffer) {
         self.mvcc.serialize(buf);
-        for i in 0..self.data.len() {
+        L i: 0..self.data.len() {
             buf.put_f32_le(self.data[i]);
         }
     }
@@ -143,8 +143,8 @@ X VectorData {
     # Deserialize vector data inline
     F deserialize_inline(buf: &ByteBuffer, dim: u32) -> Result<VectorData, VaisError> {
         ~mvcc = MvccTupleMeta.deserialize(buf)?;
-        ~data = Vec.with_capacity(dim as usize);
-        for i in 0..dim {
+        ~data = Vec.with_capacity(dim as u64);
+        L i: 0..dim {
             data.push(buf.get_f32_le()?);
         }
         Ok(VectorData {
@@ -177,7 +177,7 @@ X VectorPage {
             page_id,
             header: VectorPageHeader.new(dim),
             slots: Vec.new(),
-            page_data: vec![0u8; page_size as usize],
+            page_data: vec![0u8; page_size as u64],
         }
     }
 
@@ -187,17 +187,17 @@ X VectorPage {
         ~page_header = PageHeader.read_from_page(page_data)?;
 
         # Verify page type
-        if page_header.page_type != PAGE_TYPE_VECTOR_DATA {
-            return Err(err_internal("Expected VECTOR_DATA page type"));
+        I page_header.page_type != PAGE_TYPE_VECTOR_DATA {
+            R Err(err_internal("Expected VECTOR_DATA page type"));
         }
 
         # Read vector page header
-        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as usize..]);
+        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as u64..]);
         ~header = VectorPageHeader.deserialize(&buf)?;
 
         # Read slot directory
-        ~slots = Vec.with_capacity(header.vector_count as usize);
-        for i in 0..header.vector_count {
+        ~slots = Vec.with_capacity(header.vector_count as u64);
+        L i: 0..header.vector_count {
             slots.push(VectorSlot.deserialize(&buf)?);
         }
 
@@ -223,18 +223,18 @@ X VectorPage {
 
         # Write vector page header
         ~buf = ByteBuffer.wrap(&page_data);
-        buf.set_position(PAGE_HEADER_SIZE as usize);
+        buf.set_position(PAGE_HEADER_SIZE as u64);
         self.header.serialize(&buf);
 
         # Write slot directory
-        for slot in &self.slots {
+        L slot: &self.slots {
             slot.serialize(&buf);
         }
 
         # Copy vector data from internal buffer
         ~slot_dir_end = PAGE_HEADER_SIZE + 16 + (self.slots.len() * 4) as u32;
-        for i in slot_dir_end..self.page_data.len() as u32 {
-            page_data[i as usize] = self.page_data[i as usize];
+        L i: slot_dir_end..self.page_data.len() as u32 {
+            page_data[i as u64] = self.page_data[i as u64];
         }
 
         # Update checksum
@@ -262,8 +262,8 @@ X VectorPage {
         ~slot_size = 4u32;
 
         # Check if there's enough space
-        if self.available_space() < vector_size + slot_size {
-            return Err(err_page_full(self.page_id, vector_size + slot_size));
+        I self.available_space() < vector_size + slot_size {
+            R Err(err_page_full(self.page_id, vector_size + slot_size));
         }
 
         # Create vector data
@@ -272,7 +272,7 @@ X VectorPage {
         # Write vector data at next_free_offset
         ~offset = self.header.next_free_offset;
         ~buf = ByteBuffer.wrap(&self.page_data);
-        buf.set_position(offset as usize);
+        buf.set_position(offset as u64);
         vdata.serialize_inline(&buf);
 
         # Add slot
@@ -292,12 +292,12 @@ X VectorPage {
 
     # Read vector from slot
     F read_vector(self, slot_index: u16) -> Result<Vec<f32>, VaisError> {
-        if slot_index >= self.slots.len() as u16 {
-            return Err(err_internal("Slot index out of bounds"));
+        I slot_index >= self.slots.len() as u16 {
+            R Err(err_internal("Slot index out of bounds"));
         }
 
-        ~slot = &self.slots[slot_index as usize];
-        ~buf = ByteBuffer.wrap_readonly(&self.page_data[slot.offset as usize..]);
+        ~slot = &self.slots[slot_index as u64];
+        ~buf = ByteBuffer.wrap_readonly(&self.page_data[slot.offset as u64..]);
         ~vdata = VectorData.deserialize_inline(&buf, self.header.dim)?;
 
         Ok(vdata.data)
@@ -305,12 +305,12 @@ X VectorPage {
 
     # Get MVCC metadata for a vector
     F get_mvcc(self, slot_index: u16) -> Result<MvccTupleMeta, VaisError> {
-        if slot_index >= self.slots.len() as u16 {
-            return Err(err_internal("Slot index out of bounds"));
+        I slot_index >= self.slots.len() as u16 {
+            R Err(err_internal("Slot index out of bounds"));
         }
 
-        ~slot = &self.slots[slot_index as usize];
-        ~buf = ByteBuffer.wrap_readonly(&self.page_data[slot.offset as usize..]);
+        ~slot = &self.slots[slot_index as u64];
+        ~buf = ByteBuffer.wrap_readonly(&self.page_data[slot.offset as u64..]);
         MvccTupleMeta.deserialize(&buf)
     }
 }
@@ -362,13 +362,13 @@ X VectorStore {
         cmd_id: u32
     ) -> Result<(u32, u16), VaisError> {
         # Verify dimension
-        if vector.len() != self.dim as usize {
-            return Err(err_vector_dim_mismatch(vector.len() as u32, self.dim));
+        I vector.len() != self.dim as u64 {
+            R Err(err_vector_dim_mismatch(vector.len() as u32, self.dim));
         }
 
         # Check if overflow is needed
-        if self.needs_overflow() {
-            return self.write_vector_overflow(vector, txn_id, cmd_id);
+        I self.needs_overflow() {
+            R self.write_vector_overflow(vector, txn_id, cmd_id);
         }
 
         # Try to find existing page with space
@@ -387,7 +387,7 @@ X VectorStore {
         ~frame_id = self.pool.fetch_page(FILE_ID_VECTORS, page_id)?;
         ~frame_data = self.pool.get_page_mut(frame_id);
 
-        for i in 0..page_buffer.len() {
+        L i: 0..page_buffer.len() {
             frame_data[i] = page_buffer[i];
         }
 
@@ -404,7 +404,7 @@ X VectorStore {
         cmd_id: u32
     ) -> Result<(u32, u16), VaisError> {
         # Serialize vector data to buffer
-        ~buf = ByteBuffer.new(self.vector_byte_size() as usize);
+        ~buf = ByteBuffer.new(self.vector_byte_size() as u64);
         ~vdata = VectorData.new(vector, txn_id, cmd_id);
         vdata.serialize_inline(&buf);
         ~serialized = buf.to_vec();
@@ -433,7 +433,7 @@ X VectorStore {
         # Write overflow pointer to page
         ~offset = vpage.header.next_free_offset;
         ~buf2 = ByteBuffer.wrap(&vpage.page_data);
-        buf2.set_position(offset as usize);
+        buf2.set_position(offset as u64);
 
         ~mvcc = MvccTupleMeta.new_insert(txn_id, cmd_id);
         mvcc.serialize(&buf2);
@@ -453,7 +453,7 @@ X VectorStore {
         ~frame_id = self.pool.fetch_page(FILE_ID_VECTORS, page_id)?;
         ~frame_data = self.pool.get_page_mut(frame_id);
 
-        for i in 0..page_buffer.len() {
+        L i: 0..page_buffer.len() {
             frame_data[i] = page_buffer[i];
         }
 
@@ -498,16 +498,16 @@ X VectorStore {
         ~mvcc = vpage.get_mvcc(offset)?;
 
         # Update expiration
-        ~slot = &vpage.slots[offset as usize];
+        ~slot = &vpage.slots[offset as u64];
         ~buf = ByteBuffer.wrap(&vpage.page_data);
-        buf.set_position(slot.offset as usize);
+        buf.set_position(slot.offset as u64);
 
         ~updated_mvcc = mvcc;
         updated_mvcc.set_expired(txn_id, cmd_id);
         updated_mvcc.serialize(&buf);
 
         # Write updated page back
-        for i in 0..vpage.page_data.len() {
+        L i: 0..vpage.page_data.len() {
             page_data[i] = vpage.page_data[i];
         }
 

@@ -122,7 +122,7 @@ L PlanNode =
     NestedLoopJoin { left: Box<PlanNode>, right: Box<PlanNode>, join_type: JoinType, condition: Option<Expr> } |
 
     # Hash join: build hash table from left, probe with right
-    HashJoin { build: Box<PlanNode>, probe: Box<PlanNode>, join_type: JoinType, left_keys: Vec<usize>, right_keys: Vec<usize> } |
+    HashJoin { build: Box<PlanNode>, probe: Box<PlanNode>, join_type: JoinType, left_keys: Vec<u64>, right_keys: Vec<u64> } |
 
     # Sort: order rows by given columns
     Sort { input: Box<PlanNode>, order_by: Vec<OrderByItem> } |
@@ -209,7 +209,7 @@ X TableStats {
     F from_table_info(info: &TableInfo) -> TableStats {
         # Use row_count_estimate from TableInfo
         ~row_count = info.row_count_estimate;
-        ~page_count = if row_count == 0 { 1 } else { (row_count / 50) as u32 };  # Assume ~50 rows per page
+        ~page_count = I row_count == 0 { 1 } E { (row_count / 50) as u32 };  # Assume ~50 rows per page
         ~avg_row_size = 200;  # Default estimate: 200 bytes per row
 
         TableStats {
@@ -261,18 +261,18 @@ F estimate_selectivity(expr: &Expr) -> f64 {
 
         # IS NULL / IS NOT NULL
         Expr.IsNull { expr, negated } => {
-            if *negated {
+            I *negated {
                 1.0 - SELECTIVITY_IS_NULL
-            } else {
+            } E {
                 SELECTIVITY_IS_NULL
             }
         },
 
         # BETWEEN
         Expr.Between { negated, .. } => {
-            if *negated {
+            I *negated {
                 1.0 - SELECTIVITY_RANGE
-            } else {
+            } E {
                 SELECTIVITY_RANGE
             }
         },
@@ -280,15 +280,15 @@ F estimate_selectivity(expr: &Expr) -> f64 {
         # IN list
         Expr.InList { list, negated, .. } => {
             ~sel = SELECTIVITY_EQUALITY * (list.len() as f64);
-            ~sel = if sel > 1.0 { 1.0 } else { sel };
-            if *negated { 1.0 - sel } else { sel }
+            ~sel = I sel > 1.0 { 1.0 } E { sel };
+            I *negated { 1.0 - sel } E { sel }
         },
 
         # LIKE
         Expr.Like { negated, .. } => {
-            if *negated {
+            I *negated {
                 1.0 - SELECTIVITY_LIKE
-            } else {
+            } E {
                 SELECTIVITY_LIKE
             }
         },
@@ -326,23 +326,23 @@ F build_plan(query: &SelectQuery, catalog: &CatalogManager) -> Result<PlanNode, 
     };
 
     # Step 3: Apply GROUP BY and aggregates
-    ~grouped_plan = if query.group_by.len() > 0 || has_aggregates(&query.select_list) {
+    ~grouped_plan = I query.group_by.len() > 0 || has_aggregates(&query.select_list) {
         plan_aggregation(filtered_plan, &query.group_by, &query.select_list, &query.having, catalog)?
-    } else {
+    } E {
         filtered_plan
     };
 
     # Step 4: Apply DISTINCT
-    ~distinct_plan = if query.distinct {
+    ~distinct_plan = I query.distinct {
         PlanNode.Distinct { input: Box.new(grouped_plan) }
-    } else {
+    } E {
         grouped_plan
     };
 
     # Step 5: Apply ORDER BY
-    ~sorted_plan = if query.order_by.len() > 0 {
+    ~sorted_plan = I query.order_by.len() > 0 {
         plan_order_by(distinct_plan, &query.order_by)?
-    } else {
+    } E {
         distinct_plan
     };
 
@@ -370,15 +370,15 @@ F build_plan(query: &SelectQuery, catalog: &CatalogManager) -> Result<PlanNode, 
 
 # Plan the FROM clause: table references and joins
 F plan_from_clause(table_refs: &[TableRef], catalog: &CatalogManager) -> Result<PlanNode, VaisError> {
-    if table_refs.len() == 0 {
-        return Ok(PlanNode.Empty);
+    I table_refs.len() == 0 {
+        R Ok(PlanNode.Empty);
     }
 
     # Start with the first table
     ~plan = plan_table_ref(&table_refs[0], catalog)?;
 
     # Process remaining tables as implicit cross joins or explicit joins
-    for i in 1..table_refs.len() {
+    L i: 1..table_refs.len() {
         ~right_plan = plan_table_ref(&table_refs[i], catalog)?;
 
         # Implicit cross join (comma-separated tables in FROM clause)
@@ -449,12 +449,12 @@ F plan_join(join: &JoinClause, catalog: &CatalogManager) -> Result<PlanNode, Vai
         JoinCondition.Using { columns } => {
             # Convert USING into explicit ON condition
             # USING (a, b) → ON left.a = right.a AND left.b = right.b
-            if columns.len() == 0 {
+            I columns.len() == 0 {
                 None
-            } else {
+            } E {
                 # Build conjunction of equality conditions
                 ~on_expr: Option<Expr> = None;
-                for col in columns {
+                L col: columns {
                     ~eq = Expr.BinaryOp {
                         left: Box.new(Expr.ColumnRef { table: None, column: col.clone() }),
                         op: BinOp.Eq,
@@ -495,7 +495,7 @@ F plan_join(join: &JoinClause, catalog: &CatalogManager) -> Result<PlanNode, Vai
     M &condition {
         Some(ref expr) => {
             ~(found_equi, lk, rk) = extract_equi_join_keys(expr);
-            if found_equi {
+            I found_equi {
                 use_hash_join = true;
                 left_keys = lk;
                 right_keys = rk;
@@ -504,9 +504,9 @@ F plan_join(join: &JoinClause, catalog: &CatalogManager) -> Result<PlanNode, Vai
         None => {},
     }
 
-    if use_hash_join {
+    I use_hash_join {
         # Hash join: use smaller side as build input
-        if left_cost.row_estimate < right_cost.row_estimate {
+        I left_cost.row_estimate < right_cost.row_estimate {
             Ok(PlanNode.HashJoin {
                 build: Box.new(left_plan),
                 probe: Box.new(right_plan),
@@ -514,7 +514,7 @@ F plan_join(join: &JoinClause, catalog: &CatalogManager) -> Result<PlanNode, Vai
                 left_keys,
                 right_keys,
             })
-        } else {
+        } E {
             # Swap sides
             Ok(PlanNode.HashJoin {
                 build: Box.new(right_plan),
@@ -524,7 +524,7 @@ F plan_join(join: &JoinClause, catalog: &CatalogManager) -> Result<PlanNode, Vai
                 right_keys: left_keys,
             })
         }
-    } else {
+    } E {
         # Nested loop join
         Ok(PlanNode.NestedLoopJoin {
             left: Box.new(left_plan),
@@ -538,7 +538,7 @@ F plan_join(join: &JoinClause, catalog: &CatalogManager) -> Result<PlanNode, Vai
 # Extract equi-join keys from a join condition
 # Returns (found_equi, left_keys, right_keys)
 # For example: a.x = b.y AND a.z = b.w → ([0, 1], [0, 1])
-F extract_equi_join_keys(expr: &Expr) -> (bool, Vec<usize>, Vec<usize>) {
+F extract_equi_join_keys(expr: &Expr) -> (bool, Vec<u64>, Vec<u64>) {
     ~left_keys = Vec.new();
     ~right_keys = Vec.new();
 
@@ -549,18 +549,18 @@ F extract_equi_join_keys(expr: &Expr) -> (bool, Vec<usize>, Vec<usize>) {
                     # Check if both sides are column references
                     # Simplified: assume column indices are known (in real impl, would resolve from schema)
                     # For now, return found=true with empty keys
-                    return (true, left_keys, right_keys);
+                    R (true, left_keys, right_keys);
                 },
                 BinOp.And => {
                     # Recursively extract from both sides
                     ~(l_found, l_lk, l_rk) = extract_equi_join_keys(left);
                     ~(r_found, r_lk, r_rk) = extract_equi_join_keys(right);
-                    if l_found || r_found {
+                    I l_found || r_found {
                         left_keys.extend(l_lk);
                         left_keys.extend(r_lk);
                         right_keys.extend(l_rk);
                         right_keys.extend(r_rk);
-                        return (true, left_keys, right_keys);
+                        R (true, left_keys, right_keys);
                     }
                 },
                 _ => {},
@@ -629,11 +629,11 @@ F plan_where(input: PlanNode, predicate: &Expr, catalog: &CatalogManager) -> Res
 # residual_filter is the part of the predicate that cannot be satisfied by the index
 F select_index(table: &Str, indexes: &[&IndexInfo], predicate: &Expr) -> Option<(Str, KeyRange, Option<Expr>)> {
     # For each index, check if the predicate can use it
-    for idx in indexes {
+    L idx: indexes {
         # Check if predicate references the indexed columns
         M check_index_usable(idx, predicate) {
             Some((key_range, residual)) => {
-                return Some((idx.name.clone(), key_range, residual));
+                R Some((idx.name.clone(), key_range, residual));
             },
             None => {},
         }
@@ -653,11 +653,11 @@ F check_index_usable(index: &IndexInfo, predicate: &Expr) -> Option<(KeyRange, O
                     # Check if left is a column reference matching the first index column
                     M left {
                         Expr.ColumnRef { table, column } => {
-                            if index.columns.len() > 0 && column == &index.columns[0] {
+                            I index.columns.len() > 0 && column == &index.columns[0] {
                                 # This is an equality predicate on the index column
                                 # Build a point key range
                                 ~key_range = KeyRange.point(Vec.new());  # Simplified: empty key
-                                return Some((key_range, None));
+                                R Some((key_range, None));
                             }
                         },
                         _ => {},
@@ -667,10 +667,10 @@ F check_index_usable(index: &IndexInfo, predicate: &Expr) -> Option<(KeyRange, O
                     # Range predicate
                     M left {
                         Expr.ColumnRef { table, column } => {
-                            if index.columns.len() > 0 && column == &index.columns[0] {
+                            I index.columns.len() > 0 && column == &index.columns[0] {
                                 # Build a range key range
                                 ~key_range = KeyRange.all();  # Simplified
-                                return Some((key_range, None));
+                                R Some((key_range, None));
                             }
                         },
                         _ => {},
@@ -699,7 +699,7 @@ F plan_aggregation(
 ) -> Result<PlanNode, VaisError> {
     # Extract aggregate specs from SELECT list
     ~aggregates = Vec.new();
-    for item in select_list {
+    L item: select_list {
         M item {
             SelectItem.Expr { expr, alias } => {
                 M extract_aggregate(expr) {
@@ -727,9 +727,9 @@ F extract_aggregate(expr: &Expr) -> Option<AggregateSpec> {
     M expr {
         Expr.FunctionCall { name, args, distinct } => {
             ~upper = name.to_uppercase();
-            if upper == "COUNT" || upper == "SUM" || upper == "AVG" || upper == "MIN" || upper == "MAX" {
-                if args.len() > 0 {
-                    return Some(AggregateSpec {
+            I upper == "COUNT" || upper == "SUM" || upper == "AVG" || upper == "MIN" || upper == "MAX" {
+                I args.len() > 0 {
+                    R Some(AggregateSpec {
                         func_name: upper,
                         arg_expr: args[0].clone(),
                         is_distinct: *distinct,
@@ -744,11 +744,11 @@ F extract_aggregate(expr: &Expr) -> Option<AggregateSpec> {
 
 # Check if SELECT list has any aggregate functions
 F has_aggregates(select_list: &[SelectItem]) -> bool {
-    for item in select_list {
+    L item: select_list {
         M item {
             SelectItem.Expr { expr, .. } => {
                 M extract_aggregate(expr) {
-                    Some(_) => return true,
+                    Some(_) => R true,
                     None => {},
                 }
             },
@@ -797,13 +797,13 @@ F plan_limit(input: PlanNode, limit: &Option<Expr>, offset: &Option<Expr>) -> Re
         None => None,
     };
 
-    if limit_val.is_some() || offset_val.is_some() {
+    I limit_val.is_some() || offset_val.is_some() {
         Ok(PlanNode.Limit {
             input: Box.new(input),
             limit: limit_val,
             offset: offset_val,
         })
-    } else {
+    } E {
         Ok(input)
     }
 }
@@ -829,18 +829,18 @@ F extract_constant_int(expr: &Expr) -> Option<i64> {
 F plan_projection(input: PlanNode, select_list: &[SelectItem]) -> Result<PlanNode, VaisError> {
     # Convert SELECT items to ProjectColumn specs
     ~columns = Vec.new();
-    for item in select_list {
+    L item: select_list {
         M item {
             SelectItem.AllColumns => {
                 # SELECT * — pass through all columns
                 # In a real implementation, would expand to all table columns
                 # For now, treat as no-op projection
-                return Ok(input);
+                R Ok(input);
             },
             SelectItem.AllColumnsFrom { table } => {
                 # SELECT t.* — pass through all columns from table t
                 # Simplified: treat as no-op
-                return Ok(input);
+                R Ok(input);
             },
             SelectItem.Expr { expr, alias } => {
                 columns.push(ProjectColumn {
@@ -854,12 +854,12 @@ F plan_projection(input: PlanNode, select_list: &[SelectItem]) -> Result<PlanNod
         }
     }
 
-    if columns.len() > 0 {
+    I columns.len() > 0 {
         Ok(PlanNode.Project {
             input: Box.new(input),
             columns,
         })
-    } else {
+    } E {
         Ok(input)
     }
 }
@@ -1011,10 +1011,10 @@ F estimate_cost(node: &PlanNode, catalog: &CatalogManager) -> Result<CostEstimat
             ~cpu_cost = input_cost.cpu_cost + (input_cost.row_estimate as f64);
 
             # Output rows: estimate number of groups
-            ~row_estimate = if group_by.len() > 0 {
+            ~row_estimate = I group_by.len() > 0 {
                 # Estimate distinct groups as sqrt(N) (heuristic)
                 ((input_cost.row_estimate as f64).sqrt()) as u64
-            } else {
+            } E {
                 # No GROUP BY → single aggregate row
                 1
             };
@@ -1029,9 +1029,9 @@ F estimate_cost(node: &PlanNode, catalog: &CatalogManager) -> Result<CostEstimat
             ~row_estimate = input_cost.row_estimate;
             M offset {
                 Some(off) => {
-                    if row_estimate > *off {
+                    I row_estimate > *off {
                         row_estimate = row_estimate - *off;
-                    } else {
+                    } E {
                         row_estimate = 0;
                     }
                 },
@@ -1039,7 +1039,7 @@ F estimate_cost(node: &PlanNode, catalog: &CatalogManager) -> Result<CostEstimat
             }
             M limit {
                 Some(lim) => {
-                    if row_estimate > *lim {
+                    I row_estimate > *lim {
                         row_estimate = *lim;
                     }
                 },
@@ -1087,7 +1087,7 @@ F estimate_cost(node: &PlanNode, catalog: &CatalogManager) -> Result<CostEstimat
 # ============================================================================
 
 # Format a plan node as a human-readable string for EXPLAIN output
-F format_plan(node: &PlanNode, indent: usize) -> Str {
+F format_plan(node: &PlanNode, indent: u64) -> Str {
     ~prefix = "  ".repeat(indent);
 
     M node {

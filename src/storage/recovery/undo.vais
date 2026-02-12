@@ -51,7 +51,7 @@ F recovery_undo(
     # Process in reverse LSN order to maximize efficiency
     ~active_txns: Vec<(u64, u64)> = Vec.new();  # (txn_id, last_lsn)
 
-    for (txn_id, entry) in &analysis.txn_table {
+    L (txn_id, entry): &analysis.txn_table {
         M entry.state {
             RecoveryTxnState.Active => {
                 active_txns.push((*txn_id, entry.last_lsn));
@@ -60,8 +60,8 @@ F recovery_undo(
         }
     }
 
-    if active_txns.is_empty() {
-        return Ok(UndoResult { txns_undone: 0, records_undone: 0 });
+    I active_txns.is_empty() {
+        R Ok(UndoResult { txns_undone: 0, records_undone: 0 });
     }
 
     # Sort by last_lsn descending (process most recent first)
@@ -71,13 +71,13 @@ F recovery_undo(
     # In practice, we'd re-read from WAL segments, but we track undo progress per txn
     ~undo_progress: HashMap<u64, u64> = HashMap.new();  # txn_id -> next_lsn_to_undo
 
-    for &(txn_id, last_lsn) in &active_txns {
+    L &(txn_id, last_lsn): &active_txns {
         # Check if there's a CLR-based undo_next_lsn
         ~start_lsn = M analysis.txn_table.get(&txn_id) {
             Some(entry) => {
-                if entry.undo_next_lsn != NULL_LSN {
+                I entry.undo_next_lsn != NULL_LSN {
                     entry.undo_next_lsn
-                } else {
+                } E {
                     entry.last_lsn
                 }
             },
@@ -87,10 +87,10 @@ F recovery_undo(
     }
 
     # Process each active transaction
-    for &(txn_id, _) in &active_txns {
+    L &(txn_id, _): &active_txns {
         ~current_lsn = M undo_progress.get(&txn_id) {
             Some(&lsn) => lsn,
-            None => continue,
+            None => C,
         };
 
         ~count = undo_single_transaction(
@@ -124,16 +124,16 @@ F undo_single_transaction(
     ~records_undone: u64 = 0;
     ~current_lsn = start_lsn;
 
-    while current_lsn != NULL_LSN {
+    L while current_lsn != NULL_LSN {
         # Read the WAL record at current_lsn
         ~(header, payload) = read_record_at_lsn(wal_dir, current_lsn)?;
 
         # Skip CLR records (follow their undo_next_lsn instead)
-        if header.record_type == CLR {
+        I header.record_type == CLR {
             ~buf = ByteBuffer.wrap_readonly(&payload);
             ~clr = ClrPayload.deserialize(&buf)?;
             current_lsn = clr.undo_next_lsn;
-            continue;
+            C;
         }
 
         # Determine the next LSN to undo (prev_lsn of current record)
@@ -144,7 +144,7 @@ F undo_single_transaction(
             &header, &payload, txn_id, next_undo_lsn, writer, pool
         )?;
 
-        if undone {
+        I undone {
             records_undone += 1;
         }
 
@@ -162,9 +162,9 @@ F read_record_at_lsn(
     ~iter = WalRecordIterator.from_lsn(wal_dir.to_string(), lsn)?;
     M iter.next()? {
         Some((header, payload)) => {
-            if header.lsn == lsn {
+            I header.lsn == lsn {
                 Ok((header, payload))
-            } else {
+            } E {
                 Err(err_internal("WAL record at expected LSN not found"))
             }
         },
@@ -224,7 +224,7 @@ F undo_single_record(
         },
         _ => {
             # Record type doesn't need undo (CLR, TXN_BEGIN, etc.)
-            return Ok(false);
+            R Ok(false);
         },
     }
 
@@ -244,13 +244,13 @@ F undo_single_record(
 
 # Extract file_id and page_id from a WAL record payload
 F extract_page_info(payload: &[u8]) -> (u8, u32) {
-    if payload.len() >= 5 {
+    I payload.len() >= 5 {
         ~buf = ByteBuffer.wrap_readonly(payload);
         M (buf.get_u8(), buf.get_u32_le()) {
             (Ok(fid), Ok(pid)) => (fid, pid),
             _ => (0, 0),
         }
-    } else {
+    } E {
         (0, 0)
     }
 }

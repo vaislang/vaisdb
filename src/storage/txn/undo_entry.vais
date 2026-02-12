@@ -130,7 +130,7 @@ X UndoEntry {
         buf.put_u32_le(self.data_len);         # 24-27
 
         # Variable data
-        if self.data_len > 0 {
+        I self.data_len > 0 {
             buf.put_bytes(&self.old_data);
         }
     }
@@ -147,14 +147,14 @@ X UndoEntry {
         ~data_len = buf.get_u32_le()?;
 
         # Validate entry type
-        if entry_type != UNDO_INSERT && entry_type != UNDO_DELETE && entry_type != UNDO_UPDATE {
-            return Err(err_internal("Invalid undo entry type: {entry_type}"));
+        I entry_type != UNDO_INSERT && entry_type != UNDO_DELETE && entry_type != UNDO_UPDATE {
+            R Err(err_internal("Invalid undo entry type: {entry_type}"));
         }
 
         # Read variable data
-        ~old_data = if data_len > 0 {
-            buf.get_bytes(data_len as usize)?
-        } else {
+        ~old_data = I data_len > 0 {
+            buf.get_bytes(data_len as u64)?
+        } E {
             Vec.new()
         };
 

@@ -77,8 +77,8 @@ F explain_plan_text(
     output.push_str("  ");
     output.push_str(&cost_range);
 
-    # Add actual stats if analyze mode
-    if options.analyze {
+    # Add actual stats I analyze mode
+    I options.analyze {
         # Placeholder: would need HybridExecStats from execution
         # output.push_str(&format_actual_stats(stats));
         output.push_str(" (actual stats: not yet executed)");
@@ -87,7 +87,7 @@ F explain_plan_text(
     output.push('\n');
 
     # Verbose mode: show per-engine cost breakdown
-    if options.verbose {
+    I options.verbose {
         output.push_str(&format_verbose_info(plan, indent_level + 1));
     }
 
@@ -135,10 +135,10 @@ F explain_plan_text(
 
 F create_indent(level: u32) -> Str {
     L ~indent = Str.new();
-    for _ in 0..level {
+    L _: 0..level {
         indent.push_str("  ");
     }
-    if level > 0 {
+    I level > 0 {
         indent.push_str("-> ");
     }
     indent
@@ -151,25 +151,25 @@ F format_node_description(plan: &HybridPlanNode) -> Str {
         },
         HybridPlanNode.VectorScan { params, alias, cost: _ } => {
             L ~desc = Str.from("VectorScan");
-            if alias.is_some() {
+            I alias.is_some() {
                 desc.push_str(" on ");
-                desc.push_str(alias.as_ref().unwrap());
+                desc.push_str(alias.as_ref()!);
             }
             desc
         },
         HybridPlanNode.GraphTraverse { params, alias, cost: _ } => {
             L ~desc = Str.from("GraphTraverse");
-            if alias.is_some() {
+            I alias.is_some() {
                 desc.push_str(" on ");
-                desc.push_str(alias.as_ref().unwrap());
+                desc.push_str(alias.as_ref()!);
             }
             desc
         },
         HybridPlanNode.FullTextScan { params, alias, cost: _ } => {
             L ~desc = Str.from("FullTextScan");
-            if alias.is_some() {
+            I alias.is_some() {
                 desc.push_str(" on ");
-                desc.push_str(alias.as_ref().unwrap());
+                desc.push_str(alias.as_ref()!);
             }
             desc
         },
@@ -210,7 +210,7 @@ F format_node_description(plan: &HybridPlanNode) -> Str {
             }
             M offset {
                 Some(o) => {
-                    if *o > 0 {
+                    I *o > 0 {
                         desc.push_str(" offset ");
                         desc.push_str(&format_u64(*o));
                     }
@@ -294,9 +294,9 @@ F format_verbose_info(plan: &HybridPlanNode, indent_level: u32) -> Str {
     output.push_str(&format_u64(cost.total_memory_bytes));
     output.push('\n');
 
-    # Engine-specific breakdown if verbose
+    # Engine-specific breakdown I verbose
     L engine_breakdown = format_engine_breakdown(cost);
-    if engine_breakdown.len() > 0 {
+    I engine_breakdown.len() > 0 {
         output.push_str(&indent);
         output.push_str(&engine_breakdown);
         output.push('\n');
@@ -308,7 +308,7 @@ F format_verbose_info(plan: &HybridPlanNode, indent_level: u32) -> Str {
             output.push_str(&indent);
             output.push_str("top_k: ");
             output.push_str(&format_u32(params.top_k));
-            if params.filter.is_some() {
+            I params.filter.is_some() {
                 output.push_str(" | Filter: yes");
             }
             output.push('\n');
@@ -341,7 +341,7 @@ F format_verbose_info(plan: &HybridPlanNode, indent_level: u32) -> Str {
 
 F create_verbose_indent(level: u32) -> Str {
     L ~indent = Str.new();
-    for _ in 0..level {
+    L _: 0..level {
         indent.push_str("  ");
     }
     indent.push_str("     ");
@@ -362,7 +362,7 @@ F format_engine_breakdown(cost: &HybridCost) -> Str {
     L ~s = Str.new();
     L ~parts = Vec.new();
 
-    if cost.vector_io_cost > 0.0 || cost.vector_cpu_cost > 0.0 {
+    I cost.vector_io_cost > 0.0 || cost.vector_cpu_cost > 0.0 {
         L ~part = Str.from("Vector(IO:");
         part.push_str(&format_f64(cost.vector_io_cost, 2));
         part.push_str(" CPU:");
@@ -371,7 +371,7 @@ F format_engine_breakdown(cost: &HybridCost) -> Str {
         parts.push(part);
     }
 
-    if cost.graph_io_cost > 0.0 || cost.graph_cpu_cost > 0.0 {
+    I cost.graph_io_cost > 0.0 || cost.graph_cpu_cost > 0.0 {
         L ~part = Str.from("Graph(IO:");
         part.push_str(&format_f64(cost.graph_io_cost, 2));
         part.push_str(" CPU:");
@@ -380,7 +380,7 @@ F format_engine_breakdown(cost: &HybridCost) -> Str {
         parts.push(part);
     }
 
-    if cost.fulltext_io_cost > 0.0 || cost.fulltext_cpu_cost > 0.0 {
+    I cost.fulltext_io_cost > 0.0 || cost.fulltext_cpu_cost > 0.0 {
         L ~part = Str.from("FullText(IO:");
         part.push_str(&format_f64(cost.fulltext_io_cost, 2));
         part.push_str(" CPU:");
@@ -389,7 +389,7 @@ F format_engine_breakdown(cost: &HybridCost) -> Str {
         parts.push(part);
     }
 
-    if cost.sql_io_cost > 0.0 || cost.sql_cpu_cost > 0.0 {
+    I cost.sql_io_cost > 0.0 || cost.sql_cpu_cost > 0.0 {
         L ~part = Str.from("SQL(IO:");
         part.push_str(&format_f64(cost.sql_io_cost, 2));
         part.push_str(" CPU:");
@@ -398,10 +398,10 @@ F format_engine_breakdown(cost: &HybridCost) -> Str {
         parts.push(part);
     }
 
-    if parts.len() > 0 {
+    I parts.len() > 0 {
         s.push_str("Breakdown: ");
-        for (i, part) in parts.iter().enumerate() {
-            if i > 0 {
+        L (i, part): parts.iter().enumerate() {
+            I i > 0 {
                 s.push_str(", ");
             }
             s.push_str(part);
@@ -479,15 +479,15 @@ F format_plan_node_json(
     json.push_str("\"row_estimate\": ");
     json.push_str(&format_u64(plan.row_estimate()));
 
-    # Add children if present
+    # Add children I present
     L children = get_plan_children(plan);
-    if children.len() > 0 {
+    I children.len() > 0 {
         json.push_str(",\n");
         json.push_str(&indent);
         json.push_str("\"children\": [\n");
 
-        for (i, child) in children.iter().enumerate() {
-            if i > 0 {
+        L (i, child): children.iter().enumerate() {
+            I i > 0 {
                 json.push_str(",\n");
             }
             json.push_str(&create_json_indent(indent_level + 1));
@@ -507,7 +507,7 @@ F format_plan_node_json(
 
 F create_json_indent(level: u32) -> Str {
     L ~indent = Str.new();
-    for _ in 0..level {
+    L _: 0..level {
         indent.push_str("  ");
     }
     indent
@@ -637,19 +637,19 @@ F get_plan_children(plan: &HybridPlanNode) -> Vec<&HybridPlanNode> {
 
 F format_u32(n: u32) -> Str {
     L ~s = Str.new();
-    if n == 0 {
+    I n == 0 {
         s.push('0');
-        return s;
+        R s;
     }
 
     L ~digits = Vec.new();
     L ~num = n;
-    while num > 0 {
+    L {  # W: num > 0
         digits.push((num % 10) as u8 + b'0');
         num /= 10;
     }
 
-    for i in (0..digits.len()).rev() {
+    L i: (0..digits.len()).rev() {
         s.push(digits[i] as char);
     }
     s
@@ -657,19 +657,19 @@ F format_u32(n: u32) -> Str {
 
 F format_u64(n: u64) -> Str {
     L ~s = Str.new();
-    if n == 0 {
+    I n == 0 {
         s.push('0');
-        return s;
+        R s;
     }
 
     L ~digits = Vec.new();
     L ~num = n;
-    while num > 0 {
+    L {  # W: num > 0
         digits.push((num % 10) as u8 + b'0');
         num /= 10;
     }
 
-    for i in (0..digits.len()).rev() {
+    L i: (0..digits.len()).rev() {
         s.push(digits[i] as char);
     }
     s
@@ -679,10 +679,10 @@ F format_f64(f: f64, precision: u32) -> Str {
     # Simplified float formatting
     # In practice, would use a proper float-to-string algorithm
 
-    if f < 0.0 {
+    I f < 0.0 {
         L ~s = Str.from("-");
         s.push_str(&format_f64(-f, precision));
-        return s;
+        R s;
     }
 
     L integer_part = f.floor() as u64;
@@ -690,10 +690,10 @@ F format_f64(f: f64, precision: u32) -> Str {
 
     L ~s = format_u64(integer_part);
 
-    if precision > 0 {
+    I precision > 0 {
         s.push('.');
         L ~frac = fractional_part;
-        for _ in 0..precision {
+        L _: 0..precision {
             frac *= 10.0;
             L digit = (frac.floor() as u32) % 10;
             s.push((digit as u8 + b'0') as char);

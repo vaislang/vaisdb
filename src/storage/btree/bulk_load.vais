@@ -32,7 +32,7 @@ F bulk_load(
     fill_factor: f64,    # 0.0-1.0, typically 0.9 for bulk load
     pool: &~BufferPool,
 ) -> Result<BTree, VaisError> {
-    if entries.is_empty() {
+    I entries.is_empty() {
         # Create empty tree with single leaf root
         ~root_page = pool.allocate_page(file_id)?;
         ~root_frame = pool.fetch_page(file_id, root_page)?;
@@ -40,24 +40,24 @@ F bulk_load(
         ~flushed = leaf.flush();
         pool.write_page(root_frame, flushed)?;
         pool.unpin_page(root_frame, true);
-        return Ok(BTree.new(root_page, file_id, page_size));
+        R Ok(BTree.new(root_page, file_id, page_size));
     }
 
     # Phase 1: Build leaf level (bottom-up)
     ~leaf_pages = build_leaf_level(entries, file_id, page_size, fill_factor, pool)?;
 
-    if leaf_pages.len() == 1 {
+    I leaf_pages.len() == 1 {
         # Only one leaf page needed — it's the root
         ~tree = BTree.new(leaf_pages[0].page_id, file_id, page_size);
         tree.entry_count = entries.len() as u64;
-        return Ok(tree);
+        R Ok(tree);
     }
 
     # Phase 2: Build internal levels from leaf separators
     ~current_level = leaf_pages;
     ~height: u32 = 1;
 
-    while current_level.len() > 1 {
+    L while current_level.len() > 1 {
         current_level = build_internal_level(&current_level, file_id, page_size, fill_factor, pool)?;
         height += 1;
     }
@@ -95,14 +95,14 @@ F build_leaf_level(
     ~body_size = page_size - PAGE_HEADER_SIZE;
     ~target_fill = (body_size as f64 * fill_factor) as u32;
 
-    for entry in entries {
+    L entry: entries {
         ~entry_size = 8 + entry.key.len() as u32;  # 8B dir + key data
 
         # Check if this entry would exceed fill factor
         ~used = leaf.entry_count() as u32 * 8;  # approximate
-        if used + entry_size > target_fill && leaf.entry_count() > 0 {
+        I used + entry_size > target_fill && leaf.entry_count() > 0 {
             # Finalize current leaf
-            if prev_page_id != NULL_PAGE {
+            I prev_page_id != NULL_PAGE {
                 leaf.set_prev_leaf(prev_page_id);
             }
 
@@ -137,7 +137,7 @@ F build_leaf_level(
     }
 
     # Finalize last leaf
-    if prev_page_id != NULL_PAGE {
+    I prev_page_id != NULL_PAGE {
         leaf.set_prev_leaf(prev_page_id);
     }
     ~flushed = leaf.flush();
@@ -172,11 +172,11 @@ F build_internal_level(
     ~body_size = page_size - PAGE_HEADER_SIZE - 4;  # -4 for leftmost_child
     ~target_fill = (body_size as f64 * fill_factor) as u32;
 
-    for i in 1..children.len() {
+    L i: 1..children.len() {
         ~entry_size = 8 + children[i].first_key.len() as u32;
 
         ~used = internal.entry_count() as u32 * 8;
-        if used + entry_size > target_fill && internal.entry_count() > 0 {
+        I used + entry_size > target_fill && internal.entry_count() > 0 {
             # Finalize current internal node
             ~flushed = internal.flush();
             pool.write_page(current_frame, flushed)?;
@@ -193,7 +193,7 @@ F build_internal_level(
             internal = BTreeInternalNode.new(current_page, page_size, false);
             internal.set_leftmost_child(children[i].page_id);
             first_key = children[i].first_key.clone();
-            continue;
+            C;
         }
 
         internal.insert_entry(&children[i].first_key, children[i].page_id)?;

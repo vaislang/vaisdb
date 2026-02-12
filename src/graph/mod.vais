@@ -156,26 +156,26 @@ X GraphEngine {
         gcm: &GroupCommitManager,
     ) -> Result<GraphEngine, VaisError> {
         # Validate configuration
-        if config.max_node_properties == 0 {
-            return Err(VaisError.new(
+        I config.max_node_properties == 0 {
+            R Err(VaisError.new(
                 "VAIS-0310100",
                 "max_node_properties must be > 0"
             ));
         }
 
         # Initialize metadata (empty graph)
-        let meta = GraphMeta.new();
+        meta := GraphMeta.new();
 
         # Initialize components
-        let edge_type_table = EdgeTypeTable.new();
-        let node_store = NodeStore.new(pool, allocator, bitmap)?;
-        let adj_mgr = AdjacencyManager.new(pool, allocator, bitmap)?;
-        let prop_store = PropertyStore.new(pool, allocator, bitmap)?;
-        let label_index = LabelIndex.new(pool, allocator, bitmap)?;
-        let prop_index = PropertyIndex.new(pool, allocator, bitmap)?;
-        let wal_mgr = GraphWalManager.new(gcm)?;
-        let lock_mgr = GraphLockManager.new();
-        let stats = GraphStats.new();
+        edge_type_table := EdgeTypeTable.new();
+        node_store := NodeStore.new(pool, allocator, bitmap)?;
+        adj_mgr := AdjacencyManager.new(pool, allocator, bitmap)?;
+        prop_store := PropertyStore.new(pool, allocator, bitmap)?;
+        label_index := LabelIndex.new(pool, allocator, bitmap)?;
+        prop_index := PropertyIndex.new(pool, allocator, bitmap)?;
+        wal_mgr := GraphWalManager.new(gcm)?;
+        lock_mgr := GraphLockManager.new();
+        stats := GraphStats.new();
 
         Ok(GraphEngine {
             config,
@@ -203,16 +203,16 @@ X GraphEngine {
 
     # Open engine: load meta page, edge type table, indexes
     F open(~self) -> Result<(), VaisError> {
-        if self.is_open {
-            return Ok(());
+        I self.is_open {
+            R Ok(());
         }
 
         # Load metadata from page 0 of FILE_ID_GRAPH
-        let meta_data = self.pool.read_page(FILE_ID_GRAPH, 0)?;
+        meta_data := self.pool.read_page(FILE_ID_GRAPH, 0)?;
         self.meta = GraphMeta.deserialize(&meta_data)?;
 
         # Load edge type table
-        let edge_type_data = self.pool.read_page(FILE_ID_GRAPH, 1)?;
+        edge_type_data := self.pool.read_page(FILE_ID_GRAPH, 1)?;
         self.edge_type_table = EdgeTypeTable.deserialize(&edge_type_data)?;
 
         # Open indexes
@@ -225,17 +225,17 @@ X GraphEngine {
 
     # Close engine: flush dirty pages, release resources
     F close(~self) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Ok(());
+        I !self.is_open {
+            R Ok(());
         }
 
         # Flush metadata page
-        let ~meta_buf = ByteBuffer.new();
+        ~meta_buf = ByteBuffer.new();
         self.meta.serialize(&~meta_buf)?;
         self.pool.write_page(FILE_ID_GRAPH, 0, &meta_buf.to_vec())?;
 
         # Flush edge type table
-        let ~edge_type_buf = ByteBuffer.new();
+        ~edge_type_buf = ByteBuffer.new();
         self.edge_type_table.serialize(&~edge_type_buf)?;
         self.pool.write_page(FILE_ID_GRAPH, 1, &edge_type_buf.to_vec())?;
 
@@ -264,12 +264,12 @@ X GraphEngine {
         snapshot: &Snapshot,
         clog: &Clog,
     ) -> Result<u64, VaisError> {
-        if !self.is_open {
-            return Err(err_graph_engine_closed());
+        I !self.is_open {
+            R Err(err_graph_engine_closed());
         }
 
         # 1. WAL-log node creation (WAL-first)
-        let node_id = self.meta.next_node_id;
+        node_id := self.meta.next_node_id;
         self.wal_mgr.log_node_insert(
             node_id,
             txn_id,
@@ -279,22 +279,22 @@ X GraphEngine {
         )?;
 
         # 2. Write node to storage
-        let node = GraphNode.new(
+        node := GraphNode.new(
             node_id,
             txn_id,
             0,
             labels.clone(),
             properties.clone(),
         );
-        let (page_id, slot_index) = self.node_store.write_node(&node)?;
+        (page_id, slot_index) := self.node_store.write_node(&node)?;
 
         # 3. Update label indexes
-        for label in labels {
+        L label: labels {
             self.label_index.insert_label(label, node_id, txn_id)?;
         }
 
         # 4. Update property indexes
-        for (key, value) in properties {
+        L (key, value): properties {
             self.prop_index.insert_property(key, value, node_id, true, txn_id)?;
         }
 
@@ -317,15 +317,15 @@ X GraphEngine {
         snapshot: &Snapshot,
         clog: &Clog,
     ) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Err(err_graph_engine_closed());
+        I !self.is_open {
+            R Err(err_graph_engine_closed());
         }
 
         # Acquire node lock
-        let ~lock_guard = self.lock_mgr.lock_node(node_id, txn_id)?;
+        ~lock_guard = self.lock_mgr.lock_node(node_id, txn_id)?;
 
         # 1. Get node to fetch labels and properties
-        let node = self.node_store.read_node(node_id)?;
+        node := self.node_store.read_node(node_id)?;
 
         # 2. WAL-log node deletion
         self.wal_mgr.log_node_delete(node_id, txn_id, cmd_id)?;
@@ -334,36 +334,36 @@ X GraphEngine {
         self.node_store.delete_node(node_id, txn_id, cmd_id)?;
 
         # 4. Remove from label indexes
-        for label in &node.labels {
+        L label: &node.labels {
             self.label_index.remove_label(label, node_id, txn_id)?;
         }
 
         # 5. Remove from property indexes
-        for (key, _) in &node.properties {
+        L (key, _): &node.properties {
             self.prop_index.remove_property(key, node_id, true, txn_id)?;
         }
 
         # 6. Expire all outgoing edges
-        let out_edges = self.get_neighbors(
+        out_edges := self.get_neighbors(
             node_id,
             node.out_adj_page,
             EDGE_DIRECTION_OUT,
             snapshot,
             clog,
         )?;
-        for entry in out_edges {
+        L entry: out_edges {
             self.delete_edge(txn_id, entry.edge_id, node_id, entry.dst, cmd_id, snapshot, clog)?;
         }
 
         # 7. Expire all incoming edges
-        let in_edges = self.get_neighbors(
+        in_edges := self.get_neighbors(
             node_id,
             node.in_adj_page,
             EDGE_DIRECTION_IN,
             snapshot,
             clog,
         )?;
-        for entry in in_edges {
+        L entry: in_edges {
             self.delete_edge(txn_id, entry.edge_id, entry.src, node_id, cmd_id, snapshot, clog)?;
         }
 
@@ -383,8 +383,8 @@ X GraphEngine {
         page_id: u32,
         slot_index: u16,
     ) -> Result<GraphNode, VaisError> {
-        if !self.is_open {
-            return Err(err_graph_engine_closed());
+        I !self.is_open {
+            R Err(err_graph_engine_closed());
         }
 
         self.node_store.read_node_at(page_id, slot_index)
@@ -406,35 +406,35 @@ X GraphEngine {
         snapshot: &Snapshot,
         clog: &Clog,
     ) -> Result<u64, VaisError> {
-        if !self.is_open {
-            return Err(err_graph_engine_closed());
+        I !self.is_open {
+            R Err(err_graph_engine_closed());
         }
 
         # Validate nodes exist and are visible
-        let src_node = self.node_store.read_node(src)?;
-        if !is_node_visible(&src_node, snapshot, clog) {
-            return Err(err_node_not_found(src));
+        src_node := self.node_store.read_node(src)?;
+        I !is_node_visible(&src_node, snapshot, clog) {
+            R Err(err_node_not_found(src));
         }
 
-        let dst_node = self.node_store.read_node(dst)?;
-        if !is_node_visible(&dst_node, snapshot, clog) {
-            return Err(err_node_not_found(dst));
+        dst_node := self.node_store.read_node(dst)?;
+        I !is_node_visible(&dst_node, snapshot, clog) {
+            R Err(err_node_not_found(dst));
         }
 
         # Acquire locks (src < dst to avoid deadlock)
-        let (node1, node2) = if src < dst {
+        (node1, node2) := I src < dst {
             (src, dst)
-        } else {
+        } E {
             (dst, src)
         };
-        let ~lock1 = self.lock_mgr.lock_node(node1, txn_id)?;
-        let ~lock2 = self.lock_mgr.lock_node(node2, txn_id)?;
+        ~lock1 = self.lock_mgr.lock_node(node1, txn_id)?;
+        ~lock2 = self.lock_mgr.lock_node(node2, txn_id)?;
 
         # 1. Get or create edge type ID
-        let edge_type_id = self.edge_type_table.get_or_create(edge_type)?;
+        edge_type_id := self.edge_type_table.get_or_create(edge_type)?;
 
         # 2. Generate edge ID
-        let edge_id = self.meta.next_edge_id;
+        edge_id := self.meta.next_edge_id;
         self.meta.next_edge_id += 1;
 
         # 3. WAL-log edge creation
@@ -449,7 +449,7 @@ X GraphEngine {
         )?;
 
         # 4. Write edge properties
-        let prop_page_id = self.prop_store.write_properties(edge_id, properties)?;
+        prop_page_id := self.prop_store.write_properties(edge_id, properties)?;
 
         # 5. Add to src's outgoing adjacency list
         self.adj_mgr.add_edge(
@@ -478,7 +478,7 @@ X GraphEngine {
         )?;
 
         # 7. Update property indexes (edge properties)
-        for (key, value) in properties {
+        L (key, value): properties {
             self.prop_index.insert_property(key, value, edge_id, false, txn_id)?;
         }
 
@@ -502,25 +502,25 @@ X GraphEngine {
         snapshot: &Snapshot,
         clog: &Clog,
     ) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Err(err_graph_engine_closed());
+        I !self.is_open {
+            R Err(err_graph_engine_closed());
         }
 
         # Acquire locks
-        let (node1, node2) = if src < dst {
+        (node1, node2) := I src < dst {
             (src, dst)
-        } else {
+        } E {
             (dst, src)
         };
-        let ~lock1 = self.lock_mgr.lock_node(node1, txn_id)?;
-        let ~lock2 = self.lock_mgr.lock_node(node2, txn_id)?;
+        ~lock1 = self.lock_mgr.lock_node(node1, txn_id)?;
+        ~lock2 = self.lock_mgr.lock_node(node2, txn_id)?;
 
         # 1. WAL-log edge deletion
         self.wal_mgr.log_edge_delete(edge_id, src, dst, txn_id, cmd_id)?;
 
         # 2. Get nodes
-        let src_node = self.node_store.read_node(src)?;
-        let dst_node = self.node_store.read_node(dst)?;
+        src_node := self.node_store.read_node(src)?;
+        dst_node := self.node_store.read_node(dst)?;
 
         # 3. Expire in src's outgoing adjacency list
         self.adj_mgr.expire_edge(
@@ -559,20 +559,20 @@ X GraphEngine {
         snapshot: &Snapshot,
         clog: &Clog,
     ) -> Result<Vec<AdjEntry>, VaisError> {
-        if !self.is_open {
-            return Err(err_graph_engine_closed());
+        I !self.is_open {
+            R Err(err_graph_engine_closed());
         }
 
         # If no adjacency page, return empty
-        if adj_page == NULL_PAGE {
-            return Ok(Vec.new());
+        I adj_page == NULL_PAGE {
+            R Ok(Vec.new());
         }
 
         # Read all entries from adjacency page(s)
-        let all_entries = self.adj_mgr.read_all_entries(adj_page)?;
+        all_entries := self.adj_mgr.read_all_entries(adj_page)?;
 
         # Filter visible entries
-        let visible = filter_visible_entries(&all_entries, snapshot, clog);
+        visible := filter_visible_entries(&all_entries, snapshot, clog);
 
         Ok(visible)
     }
@@ -589,21 +589,21 @@ X GraphEngine {
         snapshot: &Snapshot,
         clog: &Clog,
     ) -> Result<TraversalResult, VaisError> {
-        if !self.is_open {
-            return Err(err_graph_engine_closed());
+        I !self.is_open {
+            R Err(err_graph_engine_closed());
         }
 
         # Validate start node exists
-        let start_node = self.node_store.read_node(start)?;
-        if !is_node_visible(&start_node, snapshot, clog) {
-            return Err(err_node_not_found(start));
+        start_node := self.node_store.read_node(start)?;
+        I !is_node_visible(&start_node, snapshot, clog) {
+            R Err(err_node_not_found(start));
         }
 
         # Create BFS traversal
-        let ~traversal = BfsTraversal.new(self, config.clone());
+        ~traversal = BfsTraversal.new(self, config.clone());
 
         # Execute traversal
-        let result = traversal.execute(start, snapshot, clog)?;
+        result := traversal.execute(start, snapshot, clog)?;
 
         # Update stats
         self.stats.record_traversal(result.visited_count, result.edge_count);
@@ -620,29 +620,29 @@ X GraphEngine {
         snapshot: &Snapshot,
         clog: &Clog,
     ) -> Result<Option<PathResult>, VaisError> {
-        if !self.is_open {
-            return Err(err_graph_engine_closed());
+        I !self.is_open {
+            R Err(err_graph_engine_closed());
         }
 
         # Validate nodes exist
-        let start_node = self.node_store.read_node(start)?;
-        if !is_node_visible(&start_node, snapshot, clog) {
-            return Err(err_node_not_found(start));
+        start_node := self.node_store.read_node(start)?;
+        I !is_node_visible(&start_node, snapshot, clog) {
+            R Err(err_node_not_found(start));
         }
 
-        let end_node = self.node_store.read_node(end)?;
-        if !is_node_visible(&end_node, snapshot, clog) {
-            return Err(err_node_not_found(end));
+        end_node := self.node_store.read_node(end)?;
+        I !is_node_visible(&end_node, snapshot, clog) {
+            R Err(err_node_not_found(end));
         }
 
         # Create shortest path finder
-        let ~finder = ShortestPathFinder.new(self, config.clone());
+        ~finder = ShortestPathFinder.new(self, config.clone());
 
         # Execute search
-        let result = finder.find(start, end, snapshot, clog)?;
+        result := finder.find(start, end, snapshot, clog)?;
 
         # Update stats
-        if result.is_some() {
+        I result.is_some() {
             self.stats.record_path_found();
         }
 
@@ -660,18 +660,18 @@ X GraphEngine {
         snapshot: &Snapshot,
         clog: &Clog,
     ) -> Result<Vec<u64>, VaisError> {
-        if !self.is_open {
-            return Err(err_graph_engine_closed());
+        I !self.is_open {
+            R Err(err_graph_engine_closed());
         }
 
         # Scan label index
-        let node_ids = self.label_index.scan_by_label(label)?;
+        node_ids := self.label_index.scan_by_label(label)?;
 
         # Filter visible nodes
-        let ~visible = Vec.new();
-        for node_id in node_ids {
-            let node = self.node_store.read_node(node_id)?;
-            if is_node_visible(&node, snapshot, clog) {
+        ~visible = Vec.new();
+        L node_id: node_ids {
+            node := self.node_store.read_node(node_id)?;
+            I is_node_visible(&node, snapshot, clog) {
                 visible.push(node_id);
             }
         }
@@ -687,18 +687,18 @@ X GraphEngine {
         snapshot: &Snapshot,
         clog: &Clog,
     ) -> Result<Vec<u64>, VaisError> {
-        if !self.is_open {
-            return Err(err_graph_engine_closed());
+        I !self.is_open {
+            R Err(err_graph_engine_closed());
         }
 
         # Lookup property index
-        let node_ids = self.prop_index.lookup_by_property(key, value, true)?;
+        node_ids := self.prop_index.lookup_by_property(key, value, true)?;
 
         # Filter visible nodes
-        let ~visible = Vec.new();
-        for node_id in node_ids {
-            let node = self.node_store.read_node(node_id)?;
-            if is_node_visible(&node, snapshot, clog) {
+        ~visible = Vec.new();
+        L node_id: node_ids {
+            node := self.node_store.read_node(node_id)?;
+            I is_node_visible(&node, snapshot, clog) {
                 visible.push(node_id);
             }
         }

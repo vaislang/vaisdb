@@ -82,14 +82,14 @@ X SubqueryExecutor {
 
         L {
             M self.child.next()? {
-                Option.None => { break; },
+                Option.None => { B; },
                 Option.Some(exec_row) => {
                     row_count += 1;
                     self.stats.add_scanned(1);
 
-                    if row_count > 1 {
+                    I row_count > 1 {
                         self.child.close()?;
-                        return Result.Err(VaisError.new(
+                        R Result.Err(VaisError.new(
                             "VAIS-E0107002",
                             "Scalar subquery returned more than one row"
                         ));
@@ -97,7 +97,7 @@ X SubqueryExecutor {
 
                     # Get first column value
                     ~row = exec_row.get_row();
-                    if row.column_count() > 0 {
+                    I row.column_count() > 0 {
                         result_val = row.get(0).clone();
                     }
                 },
@@ -131,19 +131,19 @@ F eval_in_subquery(
 
     L {
         M child.next()? {
-            Option.None => { break; },
+            Option.None => { B; },
             Option.Some(exec_row) => {
                 stats.add_scanned(1);
                 ~row = exec_row.get_row();
 
-                if row.column_count() > 0 {
+                I row.column_count() > 0 {
                     ~val = row.get(0);
 
                     # Compare using SQL equals (NULL propagation)
                     M expr_val.equals(val) {
                         SqlValue.BoolVal { v: true } => {
                             found = true;
-                            break;
+                            B;
                         },
                         SqlValue.Null => {
                             found_null = true;
@@ -160,11 +160,11 @@ F eval_in_subquery(
     # Result logic:
     # IN: found -> TRUE, not found but NULL seen -> NULL, not found -> FALSE
     # NOT IN: found -> FALSE, not found but NULL seen -> NULL, not found -> TRUE
-    ~result = if found {
+    ~result = I found {
         SqlValue.BoolVal { v: !negated }
-    } else if found_null {
+    } E I found_null {
         SqlValue.Null
-    } else {
+    } E {
         SqlValue.BoolVal { v: negated }
     };
 
@@ -195,9 +195,9 @@ F eval_exists(
 
     child.close()?;
 
-    ~result = if negated {
+    ~result = I negated {
         SqlValue.BoolVal { v: !exists }
-    } else {
+    } E {
         SqlValue.BoolVal { v: exists }
     };
 
@@ -212,7 +212,7 @@ S CteRefExecutor {
     cte_name: Str,
     cte_ctx: &CteContext,
     materialized: Option<Vec<Row>>,
-    cursor: usize,
+    cursor: u64,
     stats: ExecStats,
 }
 
@@ -250,9 +250,9 @@ X CteRefExecutor {
                 Result.Err(VaisError.new("VAIS-E0107001", "CteRefExecutor not opened"))
             },
             Option.Some(rows) => {
-                if self.cursor >= rows.len() {
+                I self.cursor >= rows.len() {
                     Result.Ok(Option.None)
-                } else {
+                } E {
                     ~row = &rows[self.cursor];
                     self.cursor += 1;
                     self.stats.add_produced();
@@ -284,7 +284,7 @@ S SetOperationExecutor {
     op_kind: SetOpKind,
     all: bool,
     materialized: Option<Vec<Row>>,
-    cursor: usize,
+    cursor: u64,
     stats: ExecStats,
 }
 
@@ -309,9 +309,9 @@ X SetOperationExecutor {
     F open(~self) -> Result<(), VaisError> {
         M self.op_kind {
             SetOpKind.Union => {
-                if self.all {
+                I self.all {
                     self.open_union_all()?;
-                } else {
+                } E {
                     self.open_union()?;
                 }
             },
@@ -332,9 +332,9 @@ X SetOperationExecutor {
                 Result.Err(VaisError.new("VAIS-E0107001", "SetOperationExecutor not opened"))
             },
             Option.Some(rows) => {
-                if self.cursor >= rows.len() {
+                I self.cursor >= rows.len() {
                     Result.Ok(Option.None)
-                } else {
+                } E {
                     ~row = &rows[self.cursor];
                     self.cursor += 1;
                     self.stats.add_produced();
@@ -366,7 +366,7 @@ X SetOperationExecutor {
         # Materialize left side
         L {
             M self.left.next()? {
-                Option.None => { break; },
+                Option.None => { B; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     result.push(exec_row.get_row().clone());
@@ -377,7 +377,7 @@ X SetOperationExecutor {
         # Materialize right side
         L {
             M self.right.next()? {
-                Option.None => { break; },
+                Option.None => { B; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     result.push(exec_row.get_row().clone());
@@ -402,19 +402,19 @@ X SetOperationExecutor {
         # Materialize left side with dedup
         L {
             M self.left.next()? {
-                Option.None => { break; },
+                Option.None => { B; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
 
                     # Hash all row values
                     ~values: Vec<SqlValue> = Vec.new();
-                    for i in 0..row.column_count() {
+                    L i: 0..row.column_count() {
                         values.push(row.get(i).clone());
                     }
                     ~hash = group_key_hash(&values);
 
-                    if !seen.contains(&hash) {
+                    I !seen.contains(&hash) {
                         seen.insert(hash);
                         result.push(row.clone());
                     }
@@ -425,19 +425,19 @@ X SetOperationExecutor {
         # Materialize right side with dedup
         L {
             M self.right.next()? {
-                Option.None => { break; },
+                Option.None => { B; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
 
                     # Hash all row values
                     ~values: Vec<SqlValue> = Vec.new();
-                    for i in 0..row.column_count() {
+                    L i: 0..row.column_count() {
                         values.push(row.get(i).clone());
                     }
                     ~hash = group_key_hash(&values);
 
-                    if !seen.contains(&hash) {
+                    I !seen.contains(&hash) {
                         seen.insert(hash);
                         result.push(row.clone());
                     }
@@ -461,13 +461,13 @@ X SetOperationExecutor {
 
         L {
             M self.right.next()? {
-                Option.None => { break; },
+                Option.None => { B; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
 
                     ~values: Vec<SqlValue> = Vec.new();
-                    for i in 0..row.column_count() {
+                    L i: 0..row.column_count() {
                         values.push(row.get(i).clone());
                     }
                     ~hash = group_key_hash(&values);
@@ -482,19 +482,19 @@ X SetOperationExecutor {
 
         L {
             M self.left.next()? {
-                Option.None => { break; },
+                Option.None => { B; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
 
                     ~values: Vec<SqlValue> = Vec.new();
-                    for i in 0..row.column_count() {
+                    L i: 0..row.column_count() {
                         values.push(row.get(i).clone());
                     }
                     ~hash = group_key_hash(&values);
 
                     # Only emit if in right side and not already seen (dedup)
-                    if right_hashes.contains(&hash) && !seen.contains(&hash) {
+                    I right_hashes.contains(&hash) && !seen.contains(&hash) {
                         seen.insert(hash);
                         result.push(row.clone());
                     }
@@ -518,13 +518,13 @@ X SetOperationExecutor {
 
         L {
             M self.right.next()? {
-                Option.None => { break; },
+                Option.None => { B; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
 
                     ~values: Vec<SqlValue> = Vec.new();
-                    for i in 0..row.column_count() {
+                    L i: 0..row.column_count() {
                         values.push(row.get(i).clone());
                     }
                     ~hash = group_key_hash(&values);
@@ -539,19 +539,19 @@ X SetOperationExecutor {
 
         L {
             M self.left.next()? {
-                Option.None => { break; },
+                Option.None => { B; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
 
                     ~values: Vec<SqlValue> = Vec.new();
-                    for i in 0..row.column_count() {
+                    L i: 0..row.column_count() {
                         values.push(row.get(i).clone());
                     }
                     ~hash = group_key_hash(&values);
 
                     # Only emit if NOT in right side and not already seen (dedup)
-                    if !right_hashes.contains(&hash) && !seen.contains(&hash) {
+                    I !right_hashes.contains(&hash) && !seen.contains(&hash) {
                         seen.insert(hash);
                         result.push(row.clone());
                     }

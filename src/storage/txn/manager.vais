@@ -77,9 +77,9 @@ X TransactionManager {
         ~guard = self.lock.lock();
 
         # Verify transaction is active
-        if !self.att.is_active(txn_id) {
+        I !self.att.is_active(txn_id) {
             drop(guard);
-            return Err(err_internal("Cannot commit: transaction {txn_id} is not active"));
+            R Err(err_internal("Cannot commit: transaction {txn_id} is not active"));
         }
 
         # Set state to COMMITTING
@@ -119,7 +119,7 @@ X TransactionManager {
             Some(e) => e,
             None => {
                 drop(guard);
-                return Err(err_internal("Cannot abort: transaction {txn_id} not found"));
+                R Err(err_internal("Cannot abort: transaction {txn_id} not found"));
             }
         };
 
@@ -130,7 +130,7 @@ X TransactionManager {
         ~last_undo_ptr = entry.get_last_undo_ptr();
 
         # Rollback via undo chain (eager undo)
-        if last_undo_ptr != NULL_UNDO_PTR {
+        I last_undo_ptr != NULL_UNDO_PTR {
             # Perform rollback using the undo log
             ~_count = self.perform_rollback(
                 txn_id,
@@ -228,7 +228,7 @@ X TransactionManager {
     }
 
     # Get number of active transactions
-    F count_active_transactions(self) -> usize {
+    F count_active_transactions(self) -> u64 {
         self.att.count_active()
     }
 
@@ -250,7 +250,7 @@ X TransactionManager {
         ~timed_out = self.att.find_timed_out_transactions(self.txn_timeout_sec);
         ~aborted_txns = Vec.new();
 
-        for (txn_id, elapsed_sec) in timed_out {
+        L (txn_id, elapsed_sec): timed_out {
             # Abort the timed-out transaction
             M self.abort(txn_id, pool) {
                 Ok(_) => {
@@ -318,8 +318,8 @@ X TransactionManager {
         undo_ptr: u64,
         pool: &~BufferPool,
     ) -> Result<u32, VaisError> {
-        if undo_ptr == NULL_UNDO_PTR {
-            return Ok(0);
+        I undo_ptr == NULL_UNDO_PTR {
+            R Ok(0);
         }
 
         # Read the entire undo chain
@@ -329,9 +329,9 @@ X TransactionManager {
         # Process each undo entry in reverse chronological order (newest first)
         # The actual rollback operations are handled by RollbackExecutor
         # For this design phase, we just validate and count
-        for entry in entries {
-            if entry.txn_id != txn_id {
-                return Err(err_internal(
+        L entry: entries {
+            I entry.txn_id != txn_id {
+                R Err(err_internal(
                     "Undo entry txn_id mismatch: expected {txn_id}, got {entry.txn_id}"
                 ));
             }
@@ -349,10 +349,10 @@ X TransactionManager {
 
 # Statistics for monitoring
 S TxnManagerStats {
-    active_txns: usize,
+    active_txns: u64,
     next_txn_id: u64,
-    total_locks: usize,
-    deadlock_edges: usize,
+    total_locks: u64,
+    deadlock_edges: u64,
     low_water_mark: u64,
 }
 

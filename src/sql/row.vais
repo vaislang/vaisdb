@@ -21,31 +21,31 @@ X Row {
     }
 
     # Create an empty row with given column count, all NULLs
-    F null_row(col_count: usize) -> Row {
+    F null_row(col_count: u64) -> Row {
         ~values = Vec.with_capacity(col_count);
-        for _ in 0..col_count {
+        L _: 0..col_count {
             values.push(SqlValue.Null);
         }
         Row { values }
     }
 
     # Get value at column index
-    F get(self, idx: usize) -> &SqlValue {
+    F get(self, idx: u64) -> &SqlValue {
         &self.values[idx]
     }
 
     # Set value at column index
-    F set(~self, idx: usize, val: SqlValue) {
+    F set(~self, idx: u64, val: SqlValue) {
         self.values[idx] = val;
     }
 
     # Get number of columns
-    F column_count(self) -> usize {
+    F column_count(self) -> u64 {
         self.values.len()
     }
 
     # Calculate the null bitmap size in bytes
-    F null_bitmap_size(col_count: usize) -> usize {
+    F null_bitmap_size(col_count: u64) -> u64 {
         (col_count + 7) / 8
     }
 
@@ -58,28 +58,28 @@ X Row {
         ~bitmap_size = Row.null_bitmap_size(col_count);
 
         # Pre-calculate total size for buffer allocation
-        ~total_size = self.encoded_size(schema) as usize;
+        ~total_size = self.encoded_size(schema) as u64;
         ~buf = ByteBuffer.with_capacity(total_size);
 
         # Write null bitmap
         ~bitmap = Vec.with_capacity(bitmap_size);
         bitmap.resize(bitmap_size, 0u8);
 
-        for i in 0..col_count {
-            if self.values[i].is_null() {
+        L i: 0..col_count {
+            I self.values[i].is_null() {
                 ~byte_idx = i / 8;
                 ~bit_idx = i % 8;
                 bitmap[byte_idx] = bitmap[byte_idx] | (1u8 << bit_idx);
             }
         }
 
-        for b in &bitmap {
+        L b: &bitmap {
             buf.put_u8(*b);
         }
 
         # Write non-null value data (no type tags, schema-aware)
-        for i in 0..col_count {
-            if !self.values[i].is_null() {
+        L i: 0..col_count {
+            I !self.values[i].is_null() {
                 encode_value(&~buf, &self.values[i], &schema[i]);
             }
         }
@@ -95,20 +95,20 @@ X Row {
 
         # Read null bitmap
         ~bitmap = Vec.with_capacity(bitmap_size);
-        for _ in 0..bitmap_size {
+        L _: 0..bitmap_size {
             bitmap.push(buf.get_u8()?);
         }
 
         # Read values
         ~values = Vec.with_capacity(col_count);
-        for i in 0..col_count {
+        L i: 0..col_count {
             ~byte_idx = i / 8;
             ~bit_idx = i % 8;
             ~is_null = (bitmap[byte_idx] & (1u8 << bit_idx)) != 0;
 
-            if is_null {
+            I is_null {
                 values.push(SqlValue.Null);
-            } else {
+            } E {
                 ~val = decode_value(&buf, &schema[i])?;
                 values.push(val);
             }
@@ -122,8 +122,8 @@ X Row {
         ~col_count = self.values.len();
         ~size: u32 = Row.null_bitmap_size(col_count) as u32;
 
-        for i in 0..col_count {
-            if !self.values[i].is_null() {
+        L i: 0..col_count {
+            I !self.values[i].is_null() {
                 size += value_encoded_size(&self.values[i], &schema[i]);
             }
         }
@@ -153,7 +153,7 @@ F encode_value(buf: &~ByteBuffer, val: &SqlValue, sql_type: &SqlType) {
             buf.put_f64_le(*v);
         },
         (SqlValue.BoolVal { v }, SqlType.Bool) => {
-            buf.put_u8(if *v { 1 } else { 0 });
+            buf.put_u8(I *v { 1 } E { 0 });
         },
         (SqlValue.StringVal { v }, SqlType.Varchar { .. }) => {
             write_string(buf, v);
@@ -172,7 +172,7 @@ F encode_value(buf: &~ByteBuffer, val: &SqlValue, sql_type: &SqlType) {
         },
         (SqlValue.VectorVal { v }, SqlType.Vector { .. }) => {
             buf.put_u32_le(v.len() as u32);
-            for f in v {
+            L f: v {
                 buf.put_f32_le(*f);
             }
         },
@@ -219,9 +219,9 @@ F decode_value(buf: &ByteBuffer, sql_type: &SqlType) -> Result<SqlValue, VaisErr
             Ok(SqlValue.TimestampVal { v })
         },
         SqlType.Vector { .. } => {
-            ~dim = buf.get_u32_le()? as usize;
+            ~dim = buf.get_u32_le()? as u64;
             ~v = Vec.with_capacity(dim);
-            for _ in 0..dim {
+            L _: 0..dim {
                 v.push(buf.get_f32_le()?);
             }
             Ok(SqlValue.VectorVal { v })

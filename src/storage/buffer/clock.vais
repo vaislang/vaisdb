@@ -25,18 +25,18 @@ X ClockReplacer {
         ~scanned: u32 = 0;
         ~max_scans = self.capacity * 2;  # At most 2 full rotations
 
-        while scanned < max_scans {
-            ~frame = &frames[self.hand as usize];
+        L while scanned < max_scans {
+            ~frame = &frames[self.hand as u64];
 
-            if frame.is_evictable() {
-                if !frame.clock_ref {
+            I frame.is_evictable() {
+                I !frame.clock_ref {
                     # Found victim: evictable and reference bit cleared
                     ~victim = self.hand;
                     self.advance();
-                    return Some(victim);
-                } else {
+                    R Some(victim);
+                } E {
                     # Clear reference bit (second chance)
-                    frames[self.hand as usize].clock_ref = false;
+                    frames[self.hand as u64].clock_ref = false;
                 }
             }
 
@@ -60,12 +60,12 @@ X ClockReplacer {
 
     # Pin a frame (inform replacer it shouldn't be evicted)
     F pin(frames: &~Vec<BufferFrame>, frame_id: u32) {
-        frames[frame_id as usize].pin();
+        frames[frame_id as u64].pin();
     }
 
     # Unpin a frame (it becomes eviction candidate)
     F unpin(frames: &~Vec<BufferFrame>, frame_id: u32) {
-        frames[frame_id as usize].unpin();
+        frames[frame_id as u64].unpin();
     }
 
     # Get current hand position

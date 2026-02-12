@@ -105,9 +105,9 @@ X CheckpointManager {
     ) -> Result<CheckpointResult, VaisError> {
         ~guard = self.lock.lock();
 
-        if self.state.in_progress {
+        I self.state.in_progress {
             drop(guard);
-            return Err(err_internal("Checkpoint already in progress"));
+            R Err(err_internal("Checkpoint already in progress"));
         }
         self.state.in_progress = true;
         drop(guard);
@@ -169,15 +169,15 @@ X CheckpointManager {
     # Check if a checkpoint is needed based on configuration
     F needs_checkpoint(self, current_wal_size: u64) -> bool {
         # Check WAL size trigger
-        if current_wal_size >= self.config.wal_size_trigger {
-            return true;
+        I current_wal_size >= self.config.wal_size_trigger {
+            R true;
         }
 
         # Check time-based trigger
         ~now = std/time.unix_timestamp_us();
         ~elapsed_sec = (now - self.state.last_checkpoint_time) / 1_000_000;
-        if elapsed_sec >= self.config.interval_sec as u64 {
-            return true;
+        I elapsed_sec >= self.config.interval_sec as u64 {
+            R true;
         }
 
         false
@@ -242,10 +242,10 @@ X FpiTracker {
     # Check if FPI has been written for this page since last checkpoint
     F has_fpi(self, file_id: u8, page_id: u32) -> bool {
         ~guard = self.lock.lock();
-        for &(fid, pid) in &self.pages_with_fpi {
-            if fid == file_id && pid == page_id {
+        L &(fid, pid): &self.pages_with_fpi {
+            I fid == file_id && pid == page_id {
                 drop(guard);
-                return true;
+                R true;
             }
         }
         drop(guard);

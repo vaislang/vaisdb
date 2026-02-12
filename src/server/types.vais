@@ -247,11 +247,11 @@ X RowDescription {
         RowDescription { columns }
     }
 
-    F column_count(self) -> usize {
+    F column_count(self) -> u64 {
         self.columns.len()
     }
 
-    F get_column(self, index: usize) -> Option<&ColumnDesc> {
+    F get_column(self, index: u64) -> Option<&ColumnDesc> {
         I index < self.columns.len() {
             Some(&self.columns[index])
         } E {
@@ -402,7 +402,7 @@ X PreparedStmtInfo {
         self
     }
 
-    F param_count(self) -> usize {
+    F param_count(self) -> u64 {
         self.param_types.len()
     }
 
@@ -427,7 +427,7 @@ X BindParams {
         }
     }
 
-    F param_count(self) -> usize {
+    F param_count(self) -> u64 {
         self.param_values.len()
     }
 }
@@ -641,7 +641,7 @@ F err_tls_error(detail: Str) -> VaisError {
 F err_auth_failed(user: Str) -> VaisError {
     VaisError.new(
         "VAIS-0006001",
-        "Authentication failed for user '{user}'"
+        "Authentication failed L user '{user}'"
     )
 }
 
@@ -678,7 +678,7 @@ F err_portal_not_found(name: Str) -> VaisError {
 }
 
 # Parameter count mismatch
-F err_param_count_mismatch(expected: usize, actual: usize) -> VaisError {
+F err_param_count_mismatch(expected: u64, actual: u64) -> VaisError {
     VaisError.new(
         "VAIS-0602001",
         "Parameter count mismatch: expected {expected}, got {actual}"

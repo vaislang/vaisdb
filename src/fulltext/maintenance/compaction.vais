@@ -132,9 +132,9 @@ X PostingListCompactor {
         L ~live_entries = Vec::new();
         L ~removed_count: u64 = 0;
 
-        L ~i: usize = 0;
+        L ~i: u64 = 0;
         L n = entries.len();
-        W i < n {
+        L W i < n {
             L entry = &entries[i];
 
             # Check if entry is garbage
@@ -194,10 +194,10 @@ X PostingListCompactor {
     ) -> Result<CompactionStats, VaisError> {
         L ~stats = CompactionStats::new();
 
-        L ~i: usize = 0;
+        L ~i: u64 = 0;
         L n = dict_entries.len();
 
-        W i < n {
+        L W i < n {
             L entry = &dict_entries[i];
             L term_hash = entry.0;
             L head_page_id = entry.1;
@@ -247,10 +247,10 @@ X PostingListCompactor {
 
         # Append all live entries
         # PostingStore will handle page chaining automatically if entries don't fit
-        L ~i: usize = 0;
+        L ~i: u64 = 0;
         L n = live_entries.len();
 
-        W i < n {
+        L W i < n {
             L entry = &live_entries[i];
 
             # Append entry (posting_store handles overflow pages)

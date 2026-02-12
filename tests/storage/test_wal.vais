@@ -36,7 +36,7 @@ describe("WAL Record Header") {
         );
 
         ~bytes = header.to_bytes();
-        ~restored = WalRecordHeader.from_bytes(&bytes).unwrap();
+        ~restored = WalRecordHeader.from_bytes(&bytes)!;
 
         assert_eq(restored.lsn, 100);
         assert_eq(restored.txn_id, 1);
@@ -82,7 +82,7 @@ describe("WAL Segment Header") {
     it("should serialize/deserialize round-trip") {
         ~original = WalSegmentHeader.new(42, 1000);
         ~bytes = original.to_bytes();
-        ~restored = WalSegmentHeader.from_bytes(&bytes).unwrap();
+        ~restored = WalSegmentHeader.from_bytes(&bytes)!;
 
         assert_eq(restored.segment_number, 42);
         assert_eq(restored.first_lsn, 1000);
@@ -133,18 +133,18 @@ describe("WAL Buffer") {
         ~data1 = [1u8; 48];
         ~data2 = [2u8; 48];
 
-        buf.append(&data1).unwrap();
+        buf.append(&data1)!;
         assert_eq(buf.record_count(), 1);
 
-        buf.append(&data2).unwrap();
+        buf.append(&data2)!;
         assert_eq(buf.record_count(), 2);
         assert_false(buf.is_empty());
     }
 
     it("should clear properly") {
         ~buf = WalBuffer.new();
-        buf.append(&[1u8; 100]).unwrap();
-        buf.append(&[2u8; 100]).unwrap();
+        buf.append(&[1u8; 100])!;
+        buf.append(&[2u8; 100])!;
 
         buf.clear();
         assert_true(buf.is_empty());
@@ -159,7 +159,7 @@ describe("WAL Record Type Payloads") {
         original.serialize(&buf);
 
         ~read_buf = ByteBuffer.wrap_readonly(buf.as_bytes());
-        ~restored = TxnBeginPayload.deserialize(&read_buf).unwrap();
+        ~restored = TxnBeginPayload.deserialize(&read_buf)!;
         assert_eq(restored.isolation_level, ISOLATION_SERIALIZABLE);
     }
 
@@ -171,7 +171,7 @@ describe("WAL Record Type Payloads") {
         original.serialize(&buf);
 
         ~read_buf = ByteBuffer.wrap_readonly(buf.as_bytes());
-        ~restored = CheckpointBeginPayload.deserialize(&read_buf).unwrap();
+        ~restored = CheckpointBeginPayload.deserialize(&read_buf)!;
         assert_eq(restored.active_txns.len(), 3);
         assert_eq(restored.active_txns[0], 100);
         assert_eq(restored.active_txns[1], 200);
@@ -189,7 +189,7 @@ describe("WAL Record Type Payloads") {
         original.serialize(&buf);
 
         ~read_buf = ByteBuffer.wrap_readonly(buf.as_bytes());
-        ~restored = ClrPayload.deserialize(&read_buf).unwrap();
+        ~restored = ClrPayload.deserialize(&read_buf)!;
         assert_eq(restored.original_record_type, TUPLE_INSERT);
         assert_eq(restored.undo_next_lsn, 500);
         assert_eq(restored.file_id, 1);

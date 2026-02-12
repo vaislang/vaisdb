@@ -40,7 +40,7 @@ F fuse_results(
     results_a: &Vec<ScoredDoc>,
     results_b: &Vec<ScoredDoc>,
 ) -> Vec<ScoredDoc> {
-    match method {
+    M method {
         ScoreFusionMethod::WeightedSum { weight_a, weight_b } => {
             fuse_weighted_sum(results_a, results_b, *weight_a, *weight_b)
         },
@@ -69,16 +69,16 @@ F fuse_weighted_sum(
     ~combined: Vec<ScoredDoc> = Vec::new();
 
     # Process all docs from result set A
-    L i in 0..norm_a.len() {
+    L i: 0..norm_a.len() {
         ~doc_id = norm_a[i].doc_id;
         ~score_a = norm_a[i].score;
 
         # Find matching doc in result set B
         ~score_b = 0.0;
-        L j in 0..norm_b.len() {
-            if norm_b[j].doc_id == doc_id {
+        L j: 0..norm_b.len() {
+            I norm_b[j].doc_id == doc_id {
                 score_b = norm_b[j].score;
-                break;
+                B;
             }
         }
 
@@ -87,18 +87,18 @@ F fuse_weighted_sum(
     }
 
     # Add docs only in result set B
-    L i in 0..norm_b.len() {
+    L i: 0..norm_b.len() {
         ~doc_id = norm_b[i].doc_id;
         ~found = false;
 
-        L j in 0..norm_a.len() {
-            if norm_a[j].doc_id == doc_id {
+        L j: 0..norm_a.len() {
+            I norm_a[j].doc_id == doc_id {
                 found = true;
-                break;
+                B;
             }
         }
 
-        if !found {
+        I !found {
             ~fused_score = weight_b * norm_b[i].score;
             combined.push(ScoredDoc::new(doc_id, fused_score));
         }
@@ -128,43 +128,43 @@ F fuse_rrf(
     ~k_f64 = k as f64;
 
     # Process result set A
-    L i in 0..results_a.len() {
+    L i: 0..results_a.len() {
         ~doc_id = results_a[i].doc_id;
         ~rank = (i + 1) as f64;  # 1-indexed rank
         ~rrf_contribution = 1.0 / (k_f64 + rank);
 
         # Check if already in combined
         ~found = false;
-        L j in 0..combined.len() {
-            if combined[j].doc_id == doc_id {
+        L j: 0..combined.len() {
+            I combined[j].doc_id == doc_id {
                 combined[j].score += rrf_contribution;
                 found = true;
-                break;
+                B;
             }
         }
 
-        if !found {
+        I !found {
             combined.push(ScoredDoc::new(doc_id, rrf_contribution));
         }
     }
 
     # Process result set B
-    L i in 0..results_b.len() {
+    L i: 0..results_b.len() {
         ~doc_id = results_b[i].doc_id;
         ~rank = (i + 1) as f64;  # 1-indexed rank
         ~rrf_contribution = 1.0 / (k_f64 + rank);
 
         # Check if already in combined
         ~found = false;
-        L j in 0..combined.len() {
-            if combined[j].doc_id == doc_id {
+        L j: 0..combined.len() {
+            I combined[j].doc_id == doc_id {
                 combined[j].score += rrf_contribution;
                 found = true;
-                break;
+                B;
             }
         }
 
-        if !found {
+        I !found {
             combined.push(ScoredDoc::new(doc_id, rrf_contribution));
         }
     }
@@ -178,20 +178,20 @@ F fuse_rrf(
 # Formula: norm_score = (score - min) / (max - min)
 # Edge case: if max == min, all scores become 1.0
 F normalize_scores(results: &Vec<ScoredDoc>) -> Vec<ScoredDoc> {
-    if results.len() == 0 {
-        return Vec::new();
+    I results.len() == 0 {
+        R Vec::new();
     }
 
     # Find min and max scores
     ~min_score = results[0].score;
     ~max_score = results[0].score;
 
-    L i in 1..results.len() {
+    L i: 1..results.len() {
         ~score = results[i].score;
-        if score < min_score {
+        I score < min_score {
             min_score = score;
         }
-        if score > max_score {
+        I score > max_score {
             max_score = score;
         }
     }
@@ -200,13 +200,13 @@ F normalize_scores(results: &Vec<ScoredDoc>) -> Vec<ScoredDoc> {
     ~normalized: Vec<ScoredDoc> = Vec::new();
     ~range = max_score - min_score;
 
-    if range < 0.000001 {
+    I range < 0.000001 {
         # All scores are essentially equal
-        L i in 0..results.len() {
+        L i: 0..results.len() {
             normalized.push(ScoredDoc::new(results[i].doc_id, 1.0));
         }
-    } else {
-        L i in 0..results.len() {
+    } E {
+        L i: 0..results.len() {
             ~norm_score = (results[i].score - min_score) / range;
             normalized.push(ScoredDoc::new(results[i].doc_id, norm_score));
         }
@@ -219,18 +219,18 @@ F normalize_scores(results: &Vec<ScoredDoc>) -> Vec<ScoredDoc> {
 F sort_by_score_desc(results: &~Vec<ScoredDoc>) {
     ~n = results.len();
 
-    L i in 0..n {
+    L i: 0..n {
         ~max_idx = i;
 
         # Find max score in remaining elements
-        L j in (i + 1)..n {
-            if results[j].score > results[max_idx].score {
+        L j: (i + 1)..n {
+            I results[j].score > results[max_idx].score {
                 max_idx = j;
             }
         }
 
         # Swap if needed
-        if max_idx != i {
+        I max_idx != i {
             ~temp = results[i];
             results[i] = results[max_idx];
             results[max_idx] = temp;

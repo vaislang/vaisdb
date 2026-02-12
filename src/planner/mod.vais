@@ -53,7 +53,7 @@ F err_planner_init_failed(reason: Str) -> VaisError {
 # 3. Build initial plan from query profile
 # 4. Optimize plan (predicate pushdown, fusion selection, join reorder)
 # 5. Cache the optimized plan
-# 6. Execute and return results
+# 6. Execute and R results
 S HybridPlanner {
     cache: PlanCache,
     stats: HybridStats,
@@ -109,7 +109,7 @@ X HybridPlanner {
         # Step 1: Analyze query
         L profile = analyze_query(query)?;
 
-        if profile.engine_count() > 1 {
+        I profile.engine_count() > 1 {
             self.hybrid_queries += 1;
         }
 
@@ -137,7 +137,7 @@ X HybridPlanner {
 
         M self.cache.get(&cache_key) {
             Some(cached_plan) => {
-                return Ok(cached_plan.clone());
+                R Ok(cached_plan.clone());
             },
             None => {},
         }
@@ -257,7 +257,7 @@ S PlannerStats {
     cache_hits: u64,
     cache_misses: u64,
     cache_evictions: u64,
-    cache_entries: usize,
+    cache_entries: u64,
     cache_hit_rate: f64,
 }
 

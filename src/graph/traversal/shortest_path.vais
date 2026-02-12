@@ -55,7 +55,7 @@ S PathResult {
 
 X PathResult {
     F new(path: Vec<u64>, edges: Vec<u64>) -> PathResult {
-        ~distance = if path.len() > 0 { (path.len() - 1) as u32 } else { 0 };
+        ~distance = I path.len() > 0 { (path.len() - 1) as u32 } E { 0 };
         PathResult {
             path,
             edges,
@@ -106,39 +106,39 @@ X ShortestPathFinder {
         config: &TraversalConfig
     ) -> Result<Option<PathResult>, VaisError> {
         # Validate input
-        if start == INVALID_NODE_ID {
-            return Err(err_path_invalid_node(start));
+        I start == INVALID_NODE_ID {
+            R Err(err_path_invalid_node(start));
         }
-        if end == INVALID_NODE_ID {
-            return Err(err_path_invalid_node(end));
+        I end == INVALID_NODE_ID {
+            R Err(err_path_invalid_node(end));
         }
 
         # Validate direction
-        if config.direction != DIRECTION_OUTGOING &&
+        I config.direction != DIRECTION_OUTGOING &&
            config.direction != DIRECTION_INCOMING &&
            config.direction != DIRECTION_BOTH {
-            return Err(err_path_invalid_direction(config.direction));
+            R Err(err_path_invalid_direction(config.direction));
         }
 
         # Special case: start == end
-        if start == end {
+        I start == end {
             ~path = Vec.new();
             path.push(start);
-            return Ok(Some(PathResult.new(path, Vec.new())));
+            R Ok(Some(PathResult.new(path, Vec.new())));
         }
 
         # BFS queue: (current_node, parent_index, edge_id_to_reach)
         # parent_index points to entry in visited vector for path reconstruction
         ~queue = Vec.new();
-        queue.push((start, 0usize, INVALID_EDGE_ID));
+        queue.push((start, 0u64, INVALID_EDGE_ID));
 
         # Visited: (node_id, parent_index, edge_id)
         # parent_index 0 means no parent (start node)
         ~visited = Vec.new();
-        visited.push((start, 0usize, INVALID_EDGE_ID));
+        visited.push((start, 0u64, INVALID_EDGE_ID));
 
         # Track index of end node when found
-        ~end_index: Option<usize> = None;
+        ~end_index: Option<u64> = None;
 
         # BFS loop
         L while queue.len() > 0 {
@@ -148,11 +148,10 @@ X ShortestPathFinder {
             ~current_index = ShortestPathFinder.find_visited_index(&visited, current_node);
 
             # Check depth limit (if enabled)
-            if config.max_depth > 0 {
+            I config.max_depth > 0 {
                 ~depth = ShortestPathFinder.compute_depth(&visited, current_index);
-                if depth >= config.max_depth {
-                    continue;
-                }
+                I depth >= config.max_depth {
+                    C                }
             }
 
             # Read adjacency entries based on direction
@@ -161,22 +160,21 @@ X ShortestPathFinder {
             # This is a simplified implementation
 
             # Process outgoing edges
-            if config.direction == DIRECTION_OUTGOING || config.direction == DIRECTION_BOTH {
+            I config.direction == DIRECTION_OUTGOING || config.direction == DIRECTION_BOTH {
                 # In production: lookup node -> get out_adj_page -> read entries
                 # For now, this is a placeholder showing the interface
             }
 
             # Process incoming edges
-            if config.direction == DIRECTION_INCOMING || config.direction == DIRECTION_BOTH {
+            I config.direction == DIRECTION_INCOMING || config.direction == DIRECTION_BOTH {
                 # In production: lookup node -> get in_adj_page -> read entries
                 # For now, this is a placeholder showing the interface
             }
 
             # Check if we reached the end
-            if current_node == end {
+            I current_node == end {
                 end_index = Some(current_index);
-                break;
-            }
+                B            }
         }
 
         # Reconstruct path if end was reached
@@ -190,11 +188,11 @@ X ShortestPathFinder {
     }
 
     # Helper: find index of node in visited list
-    F find_visited_index(visited: &Vec<(u64, usize, u64)>, node_id: u64) -> usize {
-        ~i: usize = 0;
+    F find_visited_index(visited: &Vec<(u64, u64, u64)>, node_id: u64) -> u64 {
+        ~i: u64 = 0;
         L while i < visited.len() {
-            if visited[i].0 == node_id {
-                return i;
+            I visited[i].0 == node_id {
+                R i;
             }
             i += 1;
         }
@@ -202,7 +200,7 @@ X ShortestPathFinder {
     }
 
     # Helper: compute depth of a node by walking back to root
-    F compute_depth(visited: &Vec<(u64, usize, u64)>, index: usize) -> u32 {
+    F compute_depth(visited: &Vec<(u64, u64, u64)>, index: u64) -> u32 {
         ~depth: u32 = 0;
         ~current = index;
         L while current != 0 && visited[current].1 != 0 {
@@ -213,11 +211,11 @@ X ShortestPathFinder {
     }
 
     # Helper: check if node is already visited
-    F is_visited(visited: &Vec<(u64, usize, u64)>, node_id: u64) -> bool {
-        ~i: usize = 0;
+    F is_visited(visited: &Vec<(u64, u64, u64)>, node_id: u64) -> bool {
+        ~i: u64 = 0;
         L while i < visited.len() {
-            if visited[i].0 == node_id {
-                return true;
+            I visited[i].0 == node_id {
+                R true;
             }
             i += 1;
         }
@@ -225,7 +223,7 @@ X ShortestPathFinder {
     }
 
     # Helper: reconstruct path from visited list
-    F reconstruct_path(visited: &Vec<(u64, usize, u64)>, end_index: usize) -> PathResult {
+    F reconstruct_path(visited: &Vec<(u64, u64, u64)>, end_index: u64) -> PathResult {
         ~path = Vec.new();
         ~edges = Vec.new();
 
@@ -233,13 +231,12 @@ X ShortestPathFinder {
         ~current = end_index;
         L {
             path.push(visited[current].0);
-            if visited[current].2 != INVALID_EDGE_ID {
+            I visited[current].2 != INVALID_EDGE_ID {
                 edges.push(visited[current].2);
             }
 
-            if visited[current].1 == 0 || current == 0 {
-                break;
-            }
+            I visited[current].1 == 0 || current == 0 {
+                B            }
 
             current = visited[current].1;
         }
@@ -253,9 +250,9 @@ X ShortestPathFinder {
 
     # Helper: reverse a vector in place
     F reverse_vec<T>(vec: &~Vec<T>) {
-        ~i: usize = 0;
+        ~i: u64 = 0;
         ~j = vec.len();
-        if j == 0 {
+        I j == 0 {
             return;
         }
         j -= 1;
@@ -263,9 +260,8 @@ X ShortestPathFinder {
         L while i < j {
             vec.swap(i, j);
             i += 1;
-            if j == 0 {
-                break;
-            }
+            I j == 0 {
+                B            }
             j -= 1;
         }
     }
@@ -275,33 +271,30 @@ X ShortestPathFinder {
         self,
         entries: &Vec<AdjEntry>,
         current_node: u64,
-        current_index: usize,
+        current_index: u64,
         config: &TraversalConfig,
-        ~queue: &~Vec<(u64, usize, u64)>,
-        ~visited: &~Vec<(u64, usize, u64)>
+        ~queue: &~Vec<(u64, u64, u64)>,
+        ~visited: &~Vec<(u64, u64, u64)>
     ) {
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < entries.len() {
             ~entry = &entries[i];
 
             # Check MVCC visibility
-            if !is_adj_entry_visible(entry, &self.snapshot, self.clog) {
+            I !is_adj_entry_visible(entry, &self.snapshot, self.clog) {
                 i += 1;
-                continue;
-            }
+                C            }
 
             # Check edge type filter
-            if !config.is_edge_type_allowed(entry.edge_type) {
+            I !config.is_edge_type_allowed(entry.edge_type) {
                 i += 1;
-                continue;
-            }
+                C            }
 
             # Check if target already visited
             ~target = entry.target_node;
-            if ShortestPathFinder.is_visited(visited, target) {
+            I ShortestPathFinder.is_visited(visited, target) {
                 i += 1;
-                continue;
-            }
+                C            }
 
             # Add to visited
             ~new_index = visited.len();

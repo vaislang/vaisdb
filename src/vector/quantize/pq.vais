@@ -38,7 +38,7 @@ F err_dimension_mismatch(dim: u32, num_subspaces: u32) -> VaisError {
 
 # Error: Not enough training vectors
 # Code: VAIS-0206005
-F err_insufficient_training_data(num_vectors: usize, required: u32) -> VaisError {
+F err_insufficient_training_data(num_vectors: u64, required: u32) -> VaisError {
     VaisError.new(
         "VAIS-0206005",
         "Insufficient training data: {num_vectors} vectors provided, need at least {required}"
@@ -56,7 +56,7 @@ F err_not_trained() -> VaisError {
 
 # Error: Invalid vector dimension
 # Code: VAIS-0206007
-F err_invalid_vector_dim(expected: u32, got: usize) -> VaisError {
+F err_invalid_vector_dim(expected: u32, got: u64) -> VaisError {
     VaisError.new(
         "VAIS-0206007",
         "Invalid vector dimension: expected {expected}, got {got}"
@@ -65,7 +65,7 @@ F err_invalid_vector_dim(expected: u32, got: usize) -> VaisError {
 
 # Error: Invalid code length
 # Code: VAIS-0206008
-F err_invalid_code_length(expected: u32, got: usize) -> VaisError {
+F err_invalid_code_length(expected: u32, got: u64) -> VaisError {
     VaisError.new(
         "VAIS-0206008",
         "Invalid code length: expected {expected} bytes, got {got}"
@@ -93,8 +93,8 @@ X ProductQuantizer {
     # num_subspaces: Number of subspaces (M)
     # Returns error if dim is not divisible by num_subspaces
     F new(dim: u32, num_subspaces: u32) -> Result<ProductQuantizer, VaisError> {
-        if dim % num_subspaces != 0 {
-            return Err(err_dimension_mismatch(dim, num_subspaces));
+        I dim % num_subspaces != 0 {
+            R Err(err_dimension_mismatch(dim, num_subspaces));
         }
 
         ~ sub_dim = dim / num_subspaces;
@@ -104,7 +104,7 @@ X ProductQuantizer {
         ~ codebooks = Vec::new();
         ~ m: u32 = 0;
         L {
-            if m >= num_subspaces { break; }
+            I m >= num_subspaces { B }
             codebooks.push(Vec::new());
             m = m + 1;
         }
@@ -131,16 +131,16 @@ X ProductQuantizer {
         ~ num_vectors = vectors.len();
 
         # Need at least num_centroids training vectors
-        if num_vectors < (self.num_centroids as usize) {
-            return Err(err_insufficient_training_data(num_vectors, self.num_centroids));
+        I num_vectors < (self.num_centroids as u64) {
+            R Err(err_insufficient_training_data(num_vectors, self.num_centroids));
         }
 
         # Validate all vectors have correct dimension
-        ~ i: usize = 0;
+        ~ i: u64 = 0;
         L {
-            if i >= vectors.len() { break; }
-            if vectors[i].len() != (self.dim as usize) {
-                return Err(err_invalid_vector_dim(self.dim, vectors[i].len()));
+            I i >= vectors.len() { B }
+            I vectors[i].len() != (self.dim as u64) {
+                R Err(err_invalid_vector_dim(self.dim, vectors[i].len()));
             }
             i = i + 1;
         }
@@ -148,21 +148,21 @@ X ProductQuantizer {
         # Train each subspace independently
         ~ m: u32 = 0;
         L {
-            if m >= self.num_subspaces { break; }
+            I m >= self.num_subspaces { B }
 
             # Extract subvectors for this subspace
             ~ subvectors = Vec::new();
-            ~ v: usize = 0;
+            ~ v: u64 = 0;
             L {
-                if v >= vectors.len() { break; }
+                I v >= vectors.len() { B }
 
                 ~ subvec = Vec::new();
-                ~ start_idx = (m * self.sub_dim) as usize;
-                ~ end_idx = ((m + 1) * self.sub_dim) as usize;
+                ~ start_idx = (m * self.sub_dim) as u64;
+                ~ end_idx = ((m + 1) * self.sub_dim) as u64;
 
-                ~ j: usize = start_idx;
+                ~ j: u64 = start_idx;
                 L {
-                    if j >= end_idx { break; }
+                    I j >= end_idx { B }
                     subvec.push(vectors[v][j]);
                     j = j + 1;
                 }
@@ -180,7 +180,7 @@ X ProductQuantizer {
             );
 
             # Store centroids in codebook
-            self.codebooks[m as usize] = centroids;
+            self.codebooks[m as u64] = centroids;
 
             m = m + 1;
         }
@@ -192,12 +192,12 @@ X ProductQuantizer {
     # Encode a vector into M bytes (one centroid index per subspace)
     # Returns error if quantizer not trained or vector dimension mismatch
     F encode(&self, vector: &[f32]) -> Result<Vec<u8>, VaisError> {
-        if !self.trained {
-            return Err(err_not_trained());
+        I !self.trained {
+            R Err(err_not_trained());
         }
 
-        if vector.len() != (self.dim as usize) {
-            return Err(err_invalid_vector_dim(self.dim, vector.len()));
+        I vector.len() != (self.dim as u64) {
+            R Err(err_invalid_vector_dim(self.dim, vector.len()));
         }
 
         ~ code = Vec::new();
@@ -205,16 +205,16 @@ X ProductQuantizer {
         # Encode each subspace
         ~ m: u32 = 0;
         L {
-            if m >= self.num_subspaces { break; }
+            I m >= self.num_subspaces { B }
 
             # Extract subvector
-            ~ start_idx = (m * self.sub_dim) as usize;
-            ~ end_idx = ((m + 1) * self.sub_dim) as usize;
+            ~ start_idx = (m * self.sub_dim) as u64;
+            ~ end_idx = ((m + 1) * self.sub_dim) as u64;
 
             ~ subvec = Vec::new();
-            ~ j: usize = start_idx;
+            ~ j: u64 = start_idx;
             L {
-                if j >= end_idx { break; }
+                I j >= end_idx { B }
                 subvec.push(vector[j]);
                 j = j + 1;
             }
@@ -225,12 +225,12 @@ X ProductQuantizer {
 
             ~ k: u32 = 0;
             L {
-                if k >= self.num_centroids { break; }
+                I k >= self.num_centroids { B }
 
-                ~ centroid = &self.codebooks[m as usize][k as usize];
+                ~ centroid = &self.codebooks[m as u64][k as u64];
                 ~ dist = l2_distance_scalar(&subvec, centroid);
 
-                if dist < best_dist {
+                I dist < best_dist {
                     best_dist = dist;
                     best_idx = k as u8;
                 }
@@ -249,12 +249,12 @@ X ProductQuantizer {
     # Decode M bytes into approximate f32 vector
     # Reconstructs vector from centroid indices
     F decode(&self, code: &[u8]) -> Result<Vec<f32>, VaisError> {
-        if !self.trained {
-            return Err(err_not_trained());
+        I !self.trained {
+            R Err(err_not_trained());
         }
 
-        if code.len() != (self.num_subspaces as usize) {
-            return Err(err_invalid_code_length(self.num_subspaces, code.len()));
+        I code.len() != (self.num_subspaces as u64) {
+            R Err(err_invalid_code_length(self.num_subspaces, code.len()));
         }
 
         ~ vector = Vec::new();
@@ -262,15 +262,15 @@ X ProductQuantizer {
         # Decode each subspace
         ~ m: u32 = 0;
         L {
-            if m >= self.num_subspaces { break; }
+            I m >= self.num_subspaces { B }
 
-            ~ centroid_idx = code[m as usize] as usize;
-            ~ centroid = &self.codebooks[m as usize][centroid_idx];
+            ~ centroid_idx = code[m as u64] as u64;
+            ~ centroid = &self.codebooks[m as u64][centroid_idx];
 
             # Append centroid values to output vector
-            ~ j: usize = 0;
+            ~ j: u64 = 0;
             L {
-                if j >= centroid.len() { break; }
+                I j >= centroid.len() { B }
                 vector.push(centroid[j]);
                 j = j + 1;
             }
@@ -286,12 +286,12 @@ X ProductQuantizer {
     # Returns: dist_table[m][k] = distance(query_subvector_m, centroid_m_k)
     # Table size: M * K * 4 bytes (e.g., 96 * 256 * 4 = ~96KB)
     F build_distance_table(&self, query: &[f32]) -> Result<Vec<Vec<f32>>, VaisError> {
-        if !self.trained {
-            return Err(err_not_trained());
+        I !self.trained {
+            R Err(err_not_trained());
         }
 
-        if query.len() != (self.dim as usize) {
-            return Err(err_invalid_vector_dim(self.dim, query.len()));
+        I query.len() != (self.dim as u64) {
+            R Err(err_invalid_vector_dim(self.dim, query.len()));
         }
 
         ~ dist_table = Vec::new();
@@ -299,16 +299,16 @@ X ProductQuantizer {
         # For each subspace
         ~ m: u32 = 0;
         L {
-            if m >= self.num_subspaces { break; }
+            I m >= self.num_subspaces { B }
 
             # Extract query subvector
-            ~ start_idx = (m * self.sub_dim) as usize;
-            ~ end_idx = ((m + 1) * self.sub_dim) as usize;
+            ~ start_idx = (m * self.sub_dim) as u64;
+            ~ end_idx = ((m + 1) * self.sub_dim) as u64;
 
             ~ query_subvec = Vec::new();
-            ~ j: usize = start_idx;
+            ~ j: u64 = start_idx;
             L {
-                if j >= end_idx { break; }
+                I j >= end_idx { B }
                 query_subvec.push(query[j]);
                 j = j + 1;
             }
@@ -317,9 +317,9 @@ X ProductQuantizer {
             ~ centroid_dists = Vec::new();
             ~ k: u32 = 0;
             L {
-                if k >= self.num_centroids { break; }
+                I k >= self.num_centroids { B }
 
-                ~ centroid = &self.codebooks[m as usize][k as usize];
+                ~ centroid = &self.codebooks[m as u64][k as u64];
                 ~ dist = l2_distance_scalar(&query_subvec, centroid);
                 centroid_dists.push(dist);
 
@@ -344,10 +344,10 @@ X ProductQuantizer {
 
         ~ m: u32 = 0;
         L {
-            if m >= self.num_subspaces { break; }
+            I m >= self.num_subspaces { B }
 
-            ~ centroid_idx = code[m as usize] as usize;
-            ~ dist = dist_table[m as usize][centroid_idx];
+            ~ centroid_idx = code[m as u64] as u64;
+            ~ dist = dist_table[m as u64][centroid_idx];
             total_dist = total_dist + dist;
 
             m = m + 1;
@@ -371,21 +371,21 @@ X ProductQuantizer {
         buf.put_u32_le(self.num_subspaces);
         buf.put_u32_le(self.sub_dim);
         buf.put_u32_le(self.num_centroids);
-        buf.put_u8(if self.trained { 1 } else { 0 });
+        buf.put_u8(I self.trained { 1 } E { 0 });
 
         # Serialize codebooks
         ~ m: u32 = 0;
         L {
-            if m >= self.num_subspaces { break; }
+            I m >= self.num_subspaces { B }
 
             ~ k: u32 = 0;
             L {
-                if k >= self.num_centroids { break; }
+                I k >= self.num_centroids { B }
 
-                ~ centroid = &self.codebooks[m as usize][k as usize];
-                ~ j: usize = 0;
+                ~ centroid = &self.codebooks[m as u64][k as u64];
+                ~ j: u64 = 0;
                 L {
-                    if j >= centroid.len() { break; }
+                    I j >= centroid.len() { B }
                     buf.put_f32_le(centroid[j]);
                     j = j + 1;
                 }
@@ -411,18 +411,18 @@ X ProductQuantizer {
 
         ~ m: u32 = 0;
         L {
-            if m >= num_subspaces { break; }
+            I m >= num_subspaces { B }
 
             ~ subspace_codebook = Vec::new();
 
             ~ k: u32 = 0;
             L {
-                if k >= num_centroids { break; }
+                I k >= num_centroids { B }
 
                 ~ centroid = Vec::new();
                 ~ j: u32 = 0;
                 L {
-                    if j >= sub_dim { break; }
+                    I j >= sub_dim { B }
                     ~ val = buf.get_f32_le()?;
                     centroid.push(val);
                     j = j + 1;
@@ -458,8 +458,8 @@ X ProductQuantizer {
     }
 
     # Memory per encoded vector in bytes
-    F memory_per_vector(&self) -> usize {
-        self.num_subspaces as usize
+    F memory_per_vector(&self) -> u64 {
+        self.num_subspaces as u64
     }
 
     # Check if quantizer is trained
@@ -501,10 +501,10 @@ F kmeans_subspace(
     ~ centroids = Vec::new();
     ~ i: u32 = 0;
     L {
-        if i >= k { break; }
+        I i >= k { B }
 
-        ~ idx = ((i as usize) * n) / (k as usize);
-        if idx >= n {
+        ~ idx = ((i as u64) * n) / (k as u64);
+        I idx >= n {
             idx = n - 1;
         }
 
@@ -517,23 +517,23 @@ F kmeans_subspace(
     # Lloyd's algorithm
     ~ iter: u32 = 0;
     L {
-        if iter >= max_iterations { break; }
+        I iter >= max_iterations { B }
 
         # Assignment step: assign each point to nearest centroid
         ~ assignments = Vec::new();
-        ~ v: usize = 0;
+        ~ v: u64 = 0;
         L {
-            if v >= n { break; }
+            I v >= n { B }
 
             ~ best_idx: u32 = 0;
             ~ best_dist: f32 = f32::MAX;
 
             ~ c: u32 = 0;
             L {
-                if c >= k { break; }
+                I c >= k { B }
 
-                ~ dist = l2_distance_scalar(&data[v], &centroids[c as usize]);
-                if dist < best_dist {
+                ~ dist = l2_distance_scalar(&data[v], &centroids[c as u64]);
+                I dist < best_dist {
                     best_dist = dist;
                     best_idx = c;
                 }
@@ -550,15 +550,15 @@ F kmeans_subspace(
         ~ new_centroids = Vec::new();
         ~ c: u32 = 0;
         L {
-            if c >= k { break; }
+            I c >= k { B }
 
             # Find all points assigned to centroid c
             ~ cluster_points = Vec::new();
-            ~ v: usize = 0;
+            ~ v: u64 = 0;
             L {
-                if v >= n { break; }
+                I v >= n { B }
 
-                if assignments[v] == c {
+                I assignments[v] == c {
                     cluster_points.push(&data[v]);
                 }
 
@@ -567,16 +567,16 @@ F kmeans_subspace(
 
             # Compute mean
             ~ new_centroid = Vec::new();
-            if cluster_points.len() > 0 {
+            I cluster_points.len() > 0 {
                 ~ d: u32 = 0;
                 L {
-                    if d >= sub_dim { break; }
+                    I d >= sub_dim { B }
 
                     ~ sum: f32 = 0.0;
-                    ~ p: usize = 0;
+                    ~ p: u64 = 0;
                     L {
-                        if p >= cluster_points.len() { break; }
-                        sum = sum + cluster_points[p][d as usize];
+                        I p >= cluster_points.len() { B }
+                        sum = sum + cluster_points[p][d as u64];
                         p = p + 1;
                     }
 
@@ -585,9 +585,9 @@ F kmeans_subspace(
 
                     d = d + 1;
                 }
-            } else {
+            } E {
                 # Empty cluster: keep old centroid
-                new_centroid = centroids[c as usize].clone();
+                new_centroid = centroids[c as u64].clone();
             }
 
             new_centroids.push(new_centroid);
@@ -597,24 +597,22 @@ F kmeans_subspace(
 
         # Check for convergence (if centroids didn't change much)
         ~ converged = true;
-        ~ c: usize = 0;
+        ~ c: u64 = 0;
         L {
-            if c >= (k as usize) { break; }
+            I c >= (k as u64) { B }
 
             ~ dist = l2_distance_scalar(&centroids[c], &new_centroids[c]);
-            if dist > 1e-6 {
+            I dist > 1e-6 {
                 converged = false;
-                break;
-            }
+                B            }
 
             c = c + 1;
         }
 
         centroids = new_centroids;
 
-        if converged {
-            break;
-        }
+        I converged {
+            B        }
 
         iter = iter + 1;
     }
@@ -631,7 +629,7 @@ F test_pq_creation() {
     # Valid dimensions
     ~ pq = ProductQuantizer::new(1536, 96);
     assert!(pq.is_ok());
-    ~ pq = pq.unwrap();
+    ~ pq = pq!;
     assert_eq!(pq.dimension(), 1536);
     assert_eq!(pq.subspaces(), 96);
     assert_eq!(pq.memory_per_vector(), 96);
@@ -643,7 +641,7 @@ F test_pq_creation() {
 
 #[test]
 F test_pq_compression_ratio() {
-    ~ pq = ProductQuantizer::new(1536, 96).unwrap();
+    ~ pq = ProductQuantizer::new(1536, 96)!;
     ~ ratio = pq.compression_ratio();
     # 1536 * 4 / 96 = 64
     assert!((ratio - 64.0).abs() < 0.01);
@@ -677,7 +675,7 @@ F test_kmeans_subspace() {
 
 #[test]
 F test_pq_encode_decode() {
-    ~ pq = ProductQuantizer::new(8, 2).unwrap();
+    ~ pq = ProductQuantizer::new(8, 2)!;
 
     # Create simple training data (8D vectors, 2 subspaces of 4D each)
     ~ training = vec![
@@ -688,9 +686,9 @@ F test_pq_encode_decode() {
 
     # Pad training data to at least 256 vectors by duplicating
     ~ padded_training = Vec::new();
-    ~ i: usize = 0;
+    ~ i: u64 = 0;
     L {
-        if i >= 256 { break; }
+        I i >= 256 { B }
         padded_training.push(training[i % training.len()]);
         i = i + 1;
     }
@@ -702,13 +700,13 @@ F test_pq_encode_decode() {
 
     # Encode a vector
     ~ test_vec = vec![0.05, 0.05, 0.05, 0.05, 10.05, 10.05, 10.05, 10.05];
-    ~ code = pq.encode(&test_vec).unwrap();
+    ~ code = pq.encode(&test_vec)!;
 
     # Should have 2 bytes (one per subspace)
     assert_eq!(code.len(), 2);
 
     # Decode
-    ~ decoded = pq.decode(&code).unwrap();
+    ~ decoded = pq.decode(&code)!;
 
     # Should reconstruct to 8D vector
     assert_eq!(decoded.len(), 8);
@@ -716,7 +714,7 @@ F test_pq_encode_decode() {
 
 #[test]
 F test_pq_adc() {
-    ~ pq = ProductQuantizer::new(8, 2).unwrap();
+    ~ pq = ProductQuantizer::new(8, 2)!;
 
     # Create training data
     ~ training = vec![
@@ -725,18 +723,18 @@ F test_pq_adc() {
     ];
 
     ~ padded_training = Vec::new();
-    ~ i: usize = 0;
+    ~ i: u64 = 0;
     L {
-        if i >= 256 { break; }
+        I i >= 256 { B }
         padded_training.push(training[i % training.len()]);
         i = i + 1;
     }
 
-    pq.train(&padded_training, 5).unwrap();
+    pq.train(&padded_training, 5)!;
 
     # Build distance table for query
     ~ query = vec![0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0];
-    ~ dist_table = pq.build_distance_table(&query).unwrap();
+    ~ dist_table = pq.build_distance_table(&query)!;
 
     # Should have M=2 rows, K=256 columns
     assert_eq!(dist_table.len(), 2);
@@ -744,7 +742,7 @@ F test_pq_adc() {
 
     # Encode a vector and compute ADC distance
     ~ test_vec = vec![0.1, 0.1, 0.1, 0.1, 10.1, 10.1, 10.1, 10.1];
-    ~ code = pq.encode(&test_vec).unwrap();
+    ~ code = pq.encode(&test_vec)!;
     ~ adc_dist = pq.adc_distance(&dist_table, &code);
 
     # Distance should be non-negative
@@ -753,7 +751,7 @@ F test_pq_adc() {
 
 #[test]
 F test_pq_serialization() {
-    ~ pq = ProductQuantizer::new(8, 2).unwrap();
+    ~ pq = ProductQuantizer::new(8, 2)!;
 
     # Create minimal training data
     ~ training = vec![
@@ -761,14 +759,14 @@ F test_pq_serialization() {
     ];
 
     ~ padded_training = Vec::new();
-    ~ i: usize = 0;
+    ~ i: u64 = 0;
     L {
-        if i >= 256 { break; }
+        I i >= 256 { B }
         padded_training.push(training[0]);
         i = i + 1;
     }
 
-    pq.train(&padded_training, 5).unwrap();
+    pq.train(&padded_training, 5)!;
 
     # Serialize
     ~ buf = ByteBuffer::new();
@@ -776,7 +774,7 @@ F test_pq_serialization() {
 
     # Deserialize
     ~ buf_read = ByteBuffer::from_vec(buf.to_vec());
-    ~ pq2 = ProductQuantizer::deserialize(&buf_read).unwrap();
+    ~ pq2 = ProductQuantizer::deserialize(&buf_read)!;
 
     # Check fields
     assert_eq!(pq2.dimension(), 8);
@@ -785,7 +783,7 @@ F test_pq_serialization() {
 
     # Encode with both should produce same result
     ~ test_vec = vec![0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0];
-    ~ code1 = pq.encode(&test_vec).unwrap();
-    ~ code2 = pq2.encode(&test_vec).unwrap();
+    ~ code1 = pq.encode(&test_vec)!;
+    ~ code2 = pq2.encode(&test_vec)!;
     assert_eq!(code1, code2);
 }

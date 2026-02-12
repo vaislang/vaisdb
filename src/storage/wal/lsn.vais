@@ -48,7 +48,7 @@ X LsnAllocator {
         ~needs_new_segment = false;
 
         # Check if record fits in current segment
-        if self.current_offset + record_size > self.segment_size {
+        I self.current_offset + record_size > self.segment_size {
             self.current_segment += 1;
             self.current_offset = 0;
             needs_new_segment = true;
@@ -90,9 +90,9 @@ X LsnAllocator {
 
 # Compare two LSNs
 F lsn_compare(lsn1: u64, lsn2: u64) -> i32 {
-    if lsn1 < lsn2 { -1 }
-    else if lsn1 > lsn2 { 1 }
-    else { 0 }
+    I lsn1 < lsn2 { -1 }
+    E I lsn1 > lsn2 { 1 }
+    E { 0 }
 }
 
 # Get the segment number from an LSN

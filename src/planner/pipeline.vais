@@ -49,30 +49,30 @@ F err_hybrid_exec_fusion(reason: Str) -> VaisError {
 
 # Normalize a vector of (id, score) pairs to [0, 1] via min-max normalization
 F normalize_scores(results: &Vec<ScoredResult>) -> Vec<ScoredResult> {
-    if results.len() == 0 {
-        return Vec.new();
+    I results.len() == 0 {
+        R Vec.new();
     }
 
     # Find min and max
     ~min_score = results[0].score;
     ~max_score = results[0].score;
-    L r in results.iter() {
-        if r.score < min_score { min_score = r.score; }
-        if r.score > max_score { max_score = r.score; }
+    L r: results.iter() {
+        I r.score < min_score { min_score = r.score; }
+        I r.score > max_score { max_score = r.score; }
     }
 
     ~range = max_score - min_score;
-    if range <= 0.0 {
+    I range <= 0.0 {
         # All same score → normalize to 1.0
         ~normalized: Vec<ScoredResult> = Vec.new();
-        L r in results.iter() {
+        L r: results.iter() {
             normalized.push(ScoredResult { row: r.row.clone(), score: 1.0, source_engine: r.source_engine });
         }
-        return normalized;
+        R normalized;
     }
 
     ~normalized: Vec<ScoredResult> = Vec.new();
-    L r in results.iter() {
+    L r: results.iter() {
         normalized.push(ScoredResult {
             row: r.row.clone(),
             score: (r.score - min_score) / range,
@@ -119,8 +119,7 @@ F fuse_scored_results(
     }
 }
 
-# Weighted sum fusion: normalize both sets, combine by doc_id match
-# Uses HashMap-based O(N+M) approach instead of O(N*M) nested loops
+# Weighted sum fusion: normalize both sets, combine by doc_id M # Uses HashMap-based O(N+M) approach instead of O(N*M) nested loops
 F fuse_weighted_sum(
     left: &Vec<ScoredResult>,
     right: &Vec<ScoredResult>,
@@ -133,29 +132,29 @@ F fuse_weighted_sum(
 
     # Build hash map from right results: row_key → (index, score)
     # Key = (page_id, slot_id) packed as u64
-    ~right_map: Vec<(u64, usize, f64)> = Vec.new();
-    L i in 0..norm_right.len() {
+    ~right_map: Vec<(u64, u64, f64)> = Vec.new();
+    L i: 0..norm_right.len() {
         ~key = row_hash_key(&norm_right[i].row);
         right_map.push((key, i, norm_right[i].score));
     }
 
     # Track which right rows were matched
     ~right_matched: Vec<bool> = Vec.with_capacity(norm_right.len());
-    L _ in 0..norm_right.len() {
+    L _: 0..norm_right.len() {
         right_matched.push(false);
     }
 
     ~combined: Vec<ScoredResult> = Vec.new();
 
     # Process left rows: look up matching right score via hash
-    L lr in norm_left.iter() {
+    L lr: norm_left.iter() {
         ~left_key = row_hash_key(&lr.row);
         ~right_score = 0.0;
-        L (rk, ri, rs) in right_map.iter() {
-            if *rk == left_key && rows_match(&lr.row, &norm_right[*ri].row) {
+        L (rk, ri, rs): right_map.iter() {
+            I *rk == left_key && rows_match(&lr.row, &norm_right[*ri].row) {
                 right_score = *rs;
                 right_matched[*ri] = true;
-                break;
+                B;
             }
         }
         combined.push(ScoredResult {
@@ -166,8 +165,8 @@ F fuse_weighted_sum(
     }
 
     # Add unmatched right rows
-    L i in 0..norm_right.len() {
-        if !right_matched[i] {
+    L i: 0..norm_right.len() {
+        I !right_matched[i] {
             combined.push(ScoredResult {
                 row: norm_right[i].row.clone(),
                 score: weight_b * norm_right[i].score,
@@ -180,8 +179,8 @@ F fuse_weighted_sum(
     combined.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std.cmp.Ordering.Equal));
 
     # Limit to top_k
-    if combined.len() > top_k as usize {
-        combined.truncate(top_k as usize);
+    I combined.len() > top_k as u64 {
+        combined.truncate(top_k as u64);
     }
 
     combined
@@ -198,31 +197,31 @@ F fuse_rrf(
     # RRF score = Σ 1/(k + rank_i) across all result lists
 
     # Build hash map from right results: row_key → (index, rank)
-    ~right_map: Vec<(u64, usize, usize)> = Vec.new();
-    L j in 0..right.len() {
+    ~right_map: Vec<(u64, u64, u64)> = Vec.new();
+    L j: 0..right.len() {
         ~key = row_hash_key(&right[j].row);
         right_map.push((key, j, j));  # j is the rank
     }
 
     # Track which right rows were matched
     ~right_matched: Vec<bool> = Vec.with_capacity(right.len());
-    L _ in 0..right.len() {
+    L _: 0..right.len() {
         right_matched.push(false);
     }
 
     ~combined: Vec<ScoredResult> = Vec.new();
 
     # Process left results with rank-based scores
-    L i in 0..left.len() {
+    L i: 0..left.len() {
         ~rrf_score = 1.0 / (k as f64 + i as f64 + 1.0);
 
         # Look up matching right row via hash
         ~left_key = row_hash_key(&left[i].row);
-        L (rk, ri, rank) in right_map.iter() {
-            if *rk == left_key && rows_match(&left[i].row, &right[*ri].row) {
+        L (rk, ri, rank): right_map.iter() {
+            I *rk == left_key && rows_match(&left[i].row, &right[*ri].row) {
                 rrf_score += 1.0 / (k as f64 + *rank as f64 + 1.0);
                 right_matched[*ri] = true;
-                break;
+                B;
             }
         }
 
@@ -234,8 +233,8 @@ F fuse_rrf(
     }
 
     # Add unmatched right-only results
-    L j in 0..right.len() {
-        if !right_matched[j] {
+    L j: 0..right.len() {
+        I !right_matched[j] {
             ~rrf_score = 1.0 / (k as f64 + j as f64 + 1.0);
             combined.push(ScoredResult {
                 row: right[j].row.clone(),
@@ -246,8 +245,8 @@ F fuse_rrf(
     }
 
     combined.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std.cmp.Ordering.Equal));
-    if combined.len() > top_k as usize {
-        combined.truncate(top_k as usize);
+    I combined.len() > top_k as u64 {
+        combined.truncate(top_k as u64);
     }
 
     combined
@@ -258,7 +257,7 @@ F row_hash_key(row: &ExecutorRow) -> u64 {
     ((row.page_id as u64) << 32) | (row.slot_id as u64)
 }
 
-# Check if two ExecutorRow represent the same row (by page_id + slot_id)
+# Check I two ExecutorRow represent the same row (by page_id + slot_id)
 F rows_match(a: &ExecutorRow, b: &ExecutorRow) -> bool {
     a.page_id == b.page_id && a.slot_id == b.slot_id && a.page_id != 0
 }
@@ -269,7 +268,7 @@ F rows_match(a: &ExecutorRow, b: &ExecutorRow) -> bool {
 
 S HybridExecutor {
     results: Vec<ExecutorRow>,
-    cursor: usize,
+    cursor: u64,
     is_open: bool,
     stats: HybridExecStats,
 }
@@ -294,17 +293,17 @@ X HybridExecutor {
         Ok(())
     }
 
-    # Volcano-style next: return one row at a time
+    # Volcano-style next: R one row at a time
     F next(~self) -> Result<Option<ExecutorRow>, VaisError> {
-        if !self.is_open {
-            return Err(err_hybrid_exec_not_open());
+        I !self.is_open {
+            R Err(err_hybrid_exec_not_open());
         }
 
-        if self.cursor < self.results.len() {
+        I self.cursor < self.results.len() {
             ~row = self.results[self.cursor].clone();
             self.cursor += 1;
             Ok(Some(row))
-        } else {
+        } E {
             Ok(None)
         }
     }
@@ -327,7 +326,7 @@ X HybridExecutor {
 # Plan Execution — Recursive Interpreter
 # ============================================================================
 
-# Execute a HybridPlanNode and return materialized results
+# Execute a HybridPlanNode and R materialized results
 F execute_plan(
     plan: &HybridPlanNode,
     ctx: &ExecContext,
@@ -377,7 +376,7 @@ F execute_plan(
         HybridPlanNode.HybridAggregate { input, group_by, aggregates, having, .. } => {
             # Delegate to SQL aggregation executor
             ~rows = execute_plan(input, ctx)?;
-            # Simplified: return input rows (full aggregation handled by SQL layer)
+            # Simplified: R input rows (full aggregation handled by SQL layer)
             Ok(rows)
         },
     }
@@ -391,7 +390,7 @@ F execute_plan(
 F execute_sql_plan(plan: &PlanNode, ctx: &ExecContext) -> Result<Vec<ExecutorRow>, VaisError> {
     # Delegate to existing SQL executor pipeline
     # In a full implementation, would call sql/executor/scan.vais TableScanExecutor etc.
-    # For now, return empty result set as placeholder
+    # For now, R empty result set as placeholder
     Ok(Vec.new())
 }
 
@@ -473,7 +472,7 @@ F execute_score_fusion(
 
     # Convert back to ExecutorRow with fused score as extra column
     ~result: Vec<ExecutorRow> = Vec.new();
-    L sr in fused.iter() {
+    L sr: fused.iter() {
         ~row = sr.row.clone();
         # Append fused score as additional column
         # In a full implementation, would modify the Row to include the score
@@ -486,10 +485,10 @@ F execute_score_fusion(
 # Extract score from ExecutorRow (assumes last column is the score)
 F rows_to_scored(rows: &Vec<ExecutorRow>, engine: EngineType) -> Vec<ScoredResult> {
     ~scored: Vec<ScoredResult> = Vec.new();
-    L row in rows.iter() {
+    L row: rows.iter() {
         ~score = 0.0f64;
         ~col_count = row.column_count();
-        if col_count > 0 {
+        I col_count > 0 {
             M row.get(col_count - 1) {
                 SqlValue.FloatVal { v: f } => { score = *f; },
                 SqlValue.IntVal { v: i } => { score = *i as f64; },
@@ -517,28 +516,28 @@ F execute_cross_engine_join(
     ~right_rows = execute_plan(right, ctx)?;
 
     # Hash join: build hash table on smaller side, probe with larger
-    ~(build_rows, probe_rows) = if left_rows.len() <= right_rows.len() {
+    ~(build_rows, probe_rows) = I left_rows.len() <= right_rows.len() {
         (left_rows, right_rows)
-    } else {
+    } E {
         (right_rows, left_rows)
     };
 
     # Build phase: hash-bucketed table indexed by first column hash
     # Use a fixed number of buckets for O(1) average lookup
-    L NUM_BUCKETS: usize = 256;
-    ~buckets: Vec<Vec<(u64, usize)>> = Vec.with_capacity(NUM_BUCKETS);
-    L _ in 0..NUM_BUCKETS {
+    L NUM_BUCKETS: u64 = 256;
+    ~buckets: Vec<Vec<(u64, u64)>> = Vec.with_capacity(NUM_BUCKETS);
+    L _: 0..NUM_BUCKETS {
         buckets.push(Vec.new());
     }
     ~build_rows_vec: Vec<ExecutorRow> = Vec.new();
 
-    L row in build_rows.iter() {
-        ~key = if row.column_count() > 0 {
+    L row: build_rows.iter() {
+        ~key = I row.column_count() > 0 {
             hash_value(row.get(0))
-        } else {
+        } E {
             0u64
         };
-        ~bucket_idx = (key as usize) % NUM_BUCKETS;
+        ~bucket_idx = (key as u64) % NUM_BUCKETS;
         ~row_idx = build_rows_vec.len();
         build_rows_vec.push(row.clone());
         buckets[bucket_idx].push((key, row_idx));
@@ -546,16 +545,16 @@ F execute_cross_engine_join(
 
     # Probe phase: O(1) average per probe via bucket lookup
     ~result: Vec<ExecutorRow> = Vec.new();
-    L probe_row in probe_rows.iter() {
-        ~probe_key = if probe_row.column_count() > 0 {
+    L probe_row: probe_rows.iter() {
+        ~probe_key = I probe_row.column_count() > 0 {
             hash_value(probe_row.get(0))
-        } else {
+        } E {
             0u64
         };
 
-        ~bucket_idx = (probe_key as usize) % NUM_BUCKETS;
-        L (build_key, build_idx) in buckets[bucket_idx].iter() {
-            if *build_key == probe_key {
+        ~bucket_idx = (probe_key as u64) % NUM_BUCKETS;
+        L (build_key, build_idx): buckets[bucket_idx].iter() {
+            I *build_key == probe_key {
                 # Join condition check (if present)
                 ~should_join = M condition {
                     Some(ref cond_expr) => {
@@ -566,7 +565,7 @@ F execute_cross_engine_join(
                     None => true,  # Cross join
                 };
 
-                if should_join {
+                I should_join {
                     # Merge rows
                     ~merged = merge_rows(&build_rows_vec[*build_idx], probe_row);
                     result.push(merged);
@@ -585,10 +584,10 @@ F merge_rows(left: &ExecutorRow, right: &ExecutorRow) -> ExecutorRow {
 
     # Combine columns from both rows
     ~combined_values: Vec<SqlValue> = Vec.new();
-    L i in 0..left_row.column_count() {
+    L i: 0..left_row.column_count() {
         combined_values.push(left_row.get(i).clone());
     }
-    L i in 0..right_row.column_count() {
+    L i: 0..right_row.column_count() {
         combined_values.push(right_row.get(i).clone());
     }
 
@@ -605,7 +604,7 @@ F hash_value(value: &SqlValue) -> u64 {
     M value {
         SqlValue.IntVal { v: n } => {
             ~bytes = (*n as u64).to_le_bytes();
-            L b in bytes.iter() {
+            L b: bytes.iter() {
                 h ^= *b as u64;
                 h = h.wrapping_mul(FNV_PRIME);
             }
@@ -613,13 +612,13 @@ F hash_value(value: &SqlValue) -> u64 {
         SqlValue.FloatVal { v: f } => {
             ~bits = f.to_bits();
             ~bytes = bits.to_le_bytes();
-            L b in bytes.iter() {
+            L b: bytes.iter() {
                 h ^= *b as u64;
                 h = h.wrapping_mul(FNV_PRIME);
             }
         },
         SqlValue.StringVal { v: ref s } => {
-            L b in s.bytes() {
+            L b: s.bytes() {
                 h ^= b as u64;
                 h = h.wrapping_mul(FNV_PRIME);
             }
@@ -631,7 +630,7 @@ F hash_value(value: &SqlValue) -> u64 {
         _ => {
             # Other types: hash as string representation
             ~s = value.to_string();
-            L b in s.bytes() {
+            L b: s.bytes() {
                 h ^= b as u64;
                 h = h.wrapping_mul(FNV_PRIME);
             }
@@ -653,7 +652,7 @@ F execute_hybrid_filter(
     ~filtered: Vec<ExecutorRow> = Vec.new();
 
     ~eval_ctx = EvalContext.new();
-    L row in rows.iter() {
+    L row: rows.iter() {
         M eval_predicate(predicate, row.get_row(), &eval_ctx) {
             Ok(true) => filtered.push(row.clone()),
             Ok(false) => {},
@@ -673,12 +672,12 @@ F execute_hybrid_project(
     ~projected: Vec<ExecutorRow> = Vec.new();
 
     ~eval_ctx = EvalContext.new();
-    L row in rows.iter() {
+    L row: rows.iter() {
         ~values: Vec<SqlValue> = Vec.new();
-        L col in columns.iter() {
+        L col: columns.iter() {
             M eval_expr(&col.expr, row.get_row(), &eval_ctx) {
                 Ok(val) => values.push(val),
-                Err(e) => return Err(err_hybrid_exec_failed("Projection failed")),
+                Err(e) => R Err(err_hybrid_exec_failed("Projection failed")),
             }
         }
         ~proj_row = Row.from_values(values);
@@ -699,7 +698,7 @@ F execute_hybrid_sort(
 
     # Simplified sort: single key, ascending
     # Full impl would use multi-key comparator from sql/executor/sort_agg.vais
-    if order_by.len() > 0 && rows.len() > 1 {
+    I order_by.len() > 0 && rows.len() > 1 {
         ~eval_ctx = EvalContext.new();
         rows.sort_by(|a, b| {
             ~va = eval_expr(&order_by[0].expr, a.get_row(), &eval_ctx).unwrap_or(SqlValue.Null);
@@ -713,8 +712,8 @@ F execute_hybrid_sort(
             }
         });
 
-        # Reverse if descending
-        if !order_by[0].ascending {
+        # Reverse I descending
+        I !order_by[0].ascending {
             rows.reverse();
         }
     }
@@ -732,19 +731,19 @@ F execute_hybrid_limit(
 
     # Apply offset
     ~start = M offset {
-        Some(o) => o as usize,
+        Some(o) => o as u64,
         None => 0,
     };
 
-    if start >= rows.len() {
-        return Ok(Vec.new());
+    I start >= rows.len() {
+        R Ok(Vec.new());
     }
 
     # Apply limit
     ~end = M limit {
         Some(l) => {
-            ~e = start + l as usize;
-            if e > rows.len() { rows.len() } else { e }
+            ~e = start + l as u64;
+            I e > rows.len() { rows.len() } E { e }
         },
         None => rows.len(),
     };

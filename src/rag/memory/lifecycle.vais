@@ -134,7 +134,7 @@ X MemoryLifecycleManager {
         stats.expired_count = expired.len() as u32;
         ~ei: u32 = 0;
         W ei < expired.len() as u32 {
-            ~a = expired.get(ei as usize);
+            ~a = expired.get(ei as u64);
             actions.push(LifecycleAction.new(a.action_type, a.memory_id, a.reason.clone()));
             ei = ei + 1;
         }
@@ -144,7 +144,7 @@ X MemoryLifecycleManager {
         stats.evicted_count = evicted.len() as u32;
         ~vi: u32 = 0;
         W vi < evicted.len() as u32 {
-            ~a = evicted.get(vi as usize);
+            ~a = evicted.get(vi as u64);
             actions.push(LifecycleAction.new(a.action_type, a.memory_id, a.reason.clone()));
             vi = vi + 1;
         }
@@ -154,7 +154,7 @@ X MemoryLifecycleManager {
         stats.consolidated_count = consolidated.len() as u32;
         ~ci: u32 = 0;
         W ci < consolidated.len() as u32 {
-            ~a = consolidated.get(ci as usize);
+            ~a = consolidated.get(ci as u64);
             actions.push(LifecycleAction.new(a.action_type, a.memory_id, a.reason.clone()));
             ci = ci + 1;
         }
@@ -164,7 +164,7 @@ X MemoryLifecycleManager {
         stats.decayed_count = decayed.len() as u32;
         ~di: u32 = 0;
         W di < decayed.len() as u32 {
-            ~a = decayed.get(di as usize);
+            ~a = decayed.get(di as u64);
             actions.push(LifecycleAction.new(a.action_type, a.memory_id, a.reason.clone()));
             di = di + 1;
         }
@@ -181,13 +181,13 @@ X MemoryLifecycleManager {
 
         ~i: u32 = 0;
         W i < memories.len() as u32 {
-            ~entry = memories.get(i as usize);
+            ~entry = memories.get(i as u64);
 
             # Check if memory has expired based on TTL
-            if entry.ttl_seconds > 0 {
+            I entry.ttl_seconds > 0 {
                 ~age_diff = current_time - entry.created_at;
-                ~age: u64 = if age_diff > 0 { age_diff as u64 } else { 0 };
-                if age > entry.ttl_seconds {
+                ~age: u64 = I age_diff > 0 { age_diff as u64 } E { 0 };
+                I age > entry.ttl_seconds {
                     ~action = LifecycleAction.new(
                         ACTION_EXPIRE,
                         entry.memory_id,
@@ -212,16 +212,16 @@ X MemoryLifecycleManager {
         ~working_count: u32 = 0;
         ~i: u32 = 0;
         W i < memories.len() as u32 {
-            ~entry = memories.get(i as usize);
-            if entry.memory_type == MEMORY_TYPE_WORKING {
+            ~entry = memories.get(i as u64);
+            I entry.memory_type == MEMORY_TYPE_WORKING {
                 working_count = working_count + 1;
             }
             i = i + 1;
         }
 
         # If below limit, no eviction needed
-        if working_count <= self.config.max_working_memory_entries {
-            return actions;
+        I working_count <= self.config.max_working_memory_entries {
+            R actions;
         }
 
         # Need to evict (working_count - limit) entries
@@ -231,10 +231,10 @@ X MemoryLifecycleManager {
         ~candidates = Vec.new();
         ~i: u32 = 0;
         W i < memories.len() as u32 {
-            ~entry = memories.get(i as usize);
-            if entry.memory_type == MEMORY_TYPE_WORKING {
+            ~entry = memories.get(i as u64);
+            I entry.memory_type == MEMORY_TYPE_WORKING {
                 ~age_diff = current_time - entry.created_at;
-                ~age: u64 = if age_diff > 0 { age_diff as u64 } else { 0 };
+                ~age: u64 = I age_diff > 0 { age_diff as u64 } E { 0 };
                 candidates.push((entry.memory_id, entry.importance, age));
             }
             i = i + 1;
@@ -246,7 +246,7 @@ X MemoryLifecycleManager {
         # Take first evict_count candidates
         ~i: u32 = 0;
         W i < evict_count {
-            ~candidate = candidates.get(i as usize);
+            ~candidate = candidates.get(i as u64);
             ~action = LifecycleAction.new(
                 ACTION_EVICT,
                 candidate.0,
@@ -266,18 +266,18 @@ X MemoryLifecycleManager {
 
         ~i: u32 = 0;
         W i < memories.len() as u32 {
-            ~entry = memories.get(i as usize);
+            ~entry = memories.get(i as u64);
 
             # Only consolidate working memories
-            if entry.memory_type == MEMORY_TYPE_WORKING {
+            I entry.memory_type == MEMORY_TYPE_WORKING {
                 # Consolidate if:
                 # 1. High importance (> 0.8)
                 # 2. Accessed multiple times (> 3)
                 # 3. Not too old (< 1 hour)
                 ~age_diff = current_time - entry.created_at;
-                ~age: u64 = if age_diff > 0 { age_diff as u64 } else { 0 };
+                ~age: u64 = I age_diff > 0 { age_diff as u64 } E { 0 };
 
-                if entry.importance > 0.8 &&
+                I entry.importance > 0.8 &&
                    entry.access_count > 3 &&
                    age < 3600 {
                     ~action = LifecycleAction.new(
@@ -305,14 +305,14 @@ X MemoryLifecycleManager {
 
         ~i: u32 = 0;
         W i < memories.len() as u32 {
-            ~entry = memories.get(i as usize);
+            ~entry = memories.get(i as u64);
 
             # Apply decay based on time since last access
             ~tsa_diff = current_time - entry.last_accessed;
-            ~time_since_access: u64 = if tsa_diff > 0 { tsa_diff as u64 } else { 0 };
+            ~time_since_access: u64 = I tsa_diff > 0 { tsa_diff as u64 } E { 0 };
 
             # Decay if not accessed for more than 1 hour and importance > 0.1
-            if time_since_access > 3600 && entry.importance > 0.1 {
+            I time_since_access > 3600 && entry.importance > 0.1 {
                 ~action = LifecycleAction.new(
                     ACTION_DECAY,
                     entry.memory_id,
@@ -354,13 +354,13 @@ X MemoryLifecycleManager {
 F evict_compare_before(
     candidates: &Vec<(u64, f64, u64)>, idx_a: u32, idx_b: u32
 ) -> bool {
-    ~a = candidates.get(idx_a as usize);
-    ~b = candidates.get(idx_b as usize);
-    if a.1 < b.1 {
-        return true;
+    ~a = candidates.get(idx_a as u64);
+    ~b = candidates.get(idx_b as u64);
+    I a.1 < b.1 {
+        R true;
     }
-    if a.1 > b.1 {
-        return false;
+    I a.1 > b.1 {
+        R false;
     }
     # Same importance — older (higher age) comes first
     a.2 >= b.2
@@ -369,8 +369,8 @@ F evict_compare_before(
 ## Bottom-up merge sort on eviction candidates via index permutation
 F sort_eviction_candidates(candidates: &~Vec<(u64, f64, u64)>) {
     ~n = candidates.len() as u32;
-    if n <= 1 {
-        return;
+    I n <= 1 {
+        R;
     }
 
     # Build index + aux arrays
@@ -389,22 +389,22 @@ F sort_eviction_candidates(candidates: &~Vec<(u64, f64, u64)>) {
         ~left: u32 = 0;
         W left < n {
             ~mid = left + width;
-            if mid > n { mid = n; }
+            I mid > n { mid = n; }
             ~right = left + width * 2;
-            if right > n { right = n; }
+            I right > n { right = n; }
 
             ~li = left;
             ~ri = mid;
             ~k = left;
             W k < right {
-                if li < mid && (ri >= right ||
+                I li < mid && (ri >= right ||
                     evict_compare_before(candidates,
-                        *indices.get(li as usize),
-                        *indices.get(ri as usize))) {
-                    aux.set(k as usize, *indices.get(li as usize));
+                        *indices.get(li as u64),
+                        *indices.get(ri as u64))) {
+                    aux.set(k as u64, *indices.get(li as u64));
                     li = li + 1;
-                } else {
-                    aux.set(k as usize, *indices.get(ri as usize));
+                } E {
+                    aux.set(k as u64, *indices.get(ri as u64));
                     ri = ri + 1;
                 }
                 k = k + 1;
@@ -414,7 +414,7 @@ F sort_eviction_candidates(candidates: &~Vec<(u64, f64, u64)>) {
         # Copy aux → indices
         ~c: u32 = 0;
         W c < n {
-            indices.set(c as usize, *aux.get(c as usize));
+            indices.set(c as u64, *aux.get(c as u64));
             c = c + 1;
         }
         width = width * 2;
@@ -429,17 +429,17 @@ F sort_eviction_candidates(candidates: &~Vec<(u64, f64, u64)>) {
     }
     ~ci: u32 = 0;
     W ci < n {
-        if !*visited.get(ci as usize) && *indices.get(ci as usize) != ci {
+        I !*visited.get(ci as u64) && *indices.get(ci as u64) != ci {
             ~j = ci;
             ~done = false;
             W !done {
-                ~next = *indices.get(j as usize);
-                if next == ci {
-                    visited.set(j as usize, true);
+                ~next = *indices.get(j as u64);
+                I next == ci {
+                    visited.set(j as u64, true);
                     done = true;
-                } else {
-                    candidates.swap(j as usize, next as usize);
-                    visited.set(j as usize, true);
+                } E {
+                    candidates.swap(j as u64, next as u64);
+                    visited.set(j as u64, true);
                     j = next;
                 }
             }

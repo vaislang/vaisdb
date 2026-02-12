@@ -25,17 +25,17 @@ F split_leaf_at_median(
     pool: &~BufferPool,
 ) -> Result<SplitResult, VaisError> {
     ~mid = leaf.median_index();
-    ~entry_count = leaf.entry_count() as usize;
+    ~entry_count = leaf.entry_count() as u64;
 
-    if entry_count < 2 {
-        return Err(err_internal("Cannot split leaf with fewer than 2 entries"));
+    I entry_count < 2 {
+        R Err(err_internal("Cannot split leaf with fewer than 2 entries"));
     }
 
     # Create right sibling
     ~right = BTreeLeafNode.new(new_page_id, page_size, false);
 
     # Move entries [mid..] to right sibling
-    for i in mid..entry_count {
+    L i: mid..entry_count {
         ~key = leaf.get_key(i).to_vec();
         ~tid = leaf.entries[i].tid;
         right.insert(&key, tid)?;
@@ -43,7 +43,7 @@ F split_leaf_at_median(
 
     # Create left node (truncated original)
     ~left = BTreeLeafNode.new(leaf.header.page_id, page_size, leaf.is_root());
-    for i in 0..mid {
+    L i: 0..mid {
         ~key = leaf.get_key(i).to_vec();
         ~tid = leaf.entries[i].tid;
         left.insert(&key, tid)?;
@@ -57,7 +57,7 @@ F split_leaf_at_median(
     right.set_next_leaf(old_next);
 
     # Update next leaf's prev pointer
-    if old_next != NULL_PAGE {
+    I old_next != NULL_PAGE {
         ~next_frame = pool.fetch_page(file_id, old_next)?;
         ~next_data = pool.get_page(next_frame);
         ~next_leaf = BTreeLeafNode.from_page_data(next_data, page_size)?;
@@ -97,10 +97,10 @@ F split_internal_at_median(
     new_page_id: u32,
     pool: &~BufferPool,
 ) -> Result<SplitResult, VaisError> {
-    ~entry_count = internal.entry_count() as usize;
+    ~entry_count = internal.entry_count() as u64;
 
-    if entry_count < 3 {
-        return Err(err_internal("Cannot split internal node with fewer than 3 entries"));
+    I entry_count < 3 {
+        R Err(err_internal("Cannot split internal node with fewer than 3 entries"));
     }
 
     ~mid = entry_count / 2;
@@ -111,7 +111,7 @@ F split_internal_at_median(
     # Left child: entries [0..mid]
     ~left = BTreeInternalNode.new(internal.header.page_id, page_size, internal.is_root());
     left.set_leftmost_child(internal.leftmost_child);
-    for i in 0..mid {
+    L i: 0..mid {
         ~key = internal.get_key(i).to_vec();
         ~child = internal.entries[i].child_page;
         left.insert_entry(&key, child)?;
@@ -120,7 +120,7 @@ F split_internal_at_median(
     # Right child: entries [mid+1..], leftmost_child = entries[mid].child_page
     ~right = BTreeInternalNode.new(new_page_id, page_size, false);
     right.set_leftmost_child(internal.entries[mid].child_page);
-    for i in (mid + 1)..entry_count {
+    L i: (mid + 1)..entry_count {
         ~key = internal.get_key(i).to_vec();
         ~child = internal.entries[i].child_page;
         right.insert_entry(&key, child)?;
@@ -159,15 +159,15 @@ F split_leaf_and_insert(
     ~all_tids = Vec.new();
     ~insert_pos = leaf.lower_bound(key);
 
-    for i in 0..leaf.entry_count() as usize {
-        if i == insert_pos {
+    L i: 0..leaf.entry_count() as u64 {
+        I i == insert_pos {
             all_keys.push(key.to_vec());
             all_tids.push(tid);
         }
         all_keys.push(leaf.get_key(i).to_vec());
         all_tids.push(leaf.entries[i].tid);
     }
-    if insert_pos >= leaf.entry_count() as usize {
+    I insert_pos >= leaf.entry_count() as u64 {
         all_keys.push(key.to_vec());
         all_tids.push(tid);
     }
@@ -177,13 +177,13 @@ F split_leaf_and_insert(
 
     # Build left leaf (reuse original page)
     ~left = BTreeLeafNode.new(leaf.header.page_id, page_size, leaf.is_root());
-    for i in 0..split_at {
+    L i: 0..split_at {
         left.insert(&all_keys[i], all_tids[i])?;
     }
 
     # Build right leaf
     ~right = BTreeLeafNode.new(new_page_id, page_size, false);
-    for i in split_at..total {
+    L i: split_at..total {
         right.insert(&all_keys[i], all_tids[i])?;
     }
 
@@ -194,7 +194,7 @@ F split_leaf_and_insert(
     right.set_prev_leaf(leaf.header.page_id);
     right.set_next_leaf(old_next);
 
-    if old_next != NULL_PAGE {
+    I old_next != NULL_PAGE {
         ~next_frame = pool.fetch_page(file_id, old_next)?;
         ~next_data = pool.get_page(next_frame);
         ~next_leaf = BTreeLeafNode.from_page_data(next_data, page_size)?;

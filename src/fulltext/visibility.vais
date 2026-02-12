@@ -37,9 +37,9 @@ F filter_visible_postings(
     clog: &Clog,
 ) -> Vec<PostingEntry> {
     ~result = Vec.new();
-    ~i: usize = 0;
-    L while i < entries.len() {
-        if is_posting_visible(&entries[i], snapshot, clog) {
+    ~i: u64 = 0;
+    L W i < entries.len() {
+        I is_posting_visible(&entries[i], snapshot, clog) {
             result.push(entries[i]);
         }
         i += 1;
@@ -56,11 +56,11 @@ F count_visible_postings(
     entries: &Vec<PostingEntry>,
     snapshot: &Snapshot,
     clog: &Clog,
-) -> usize {
-    ~count: usize = 0;
-    ~i: usize = 0;
-    L while i < entries.len() {
-        if is_posting_visible(&entries[i], snapshot, clog) {
+) -> u64 {
+    ~count: u64 = 0;
+    ~i: u64 = 0;
+    L W i < entries.len() {
+        I is_posting_visible(&entries[i], snapshot, clog) {
             count += 1;
         }
         i += 1;
@@ -77,9 +77,9 @@ F filter_visible_postings_for_doc(
     clog: &Clog,
 ) -> Vec<PostingEntry> {
     ~result = Vec.new();
-    ~i: usize = 0;
-    L while i < entries.len() {
-        if entries[i].doc_id == doc_id && is_posting_visible(&entries[i], snapshot, clog) {
+    ~i: u64 = 0;
+    L W i < entries.len() {
+        I entries[i].doc_id == doc_id && is_posting_visible(&entries[i], snapshot, clog) {
             result.push(entries[i]);
         }
         i += 1;
@@ -94,9 +94,9 @@ F visible_doc_ids(
     clog: &Clog,
 ) -> Vec<u64> {
     ~result = Vec.new();
-    ~i: usize = 0;
-    L while i < entries.len() {
-        if is_posting_visible(&entries[i], snapshot, clog) {
+    ~i: u64 = 0;
+    L W i < entries.len() {
+        I is_posting_visible(&entries[i], snapshot, clog) {
             result.push(entries[i].doc_id);
         }
         i += 1;
@@ -112,9 +112,9 @@ F visible_term_frequency(
     clog: &Clog,
 ) -> u64 {
     ~total: u64 = 0;
-    ~i: usize = 0;
-    L while i < entries.len() {
-        if is_posting_visible(&entries[i], snapshot, clog) {
+    ~i: u64 = 0;
+    L W i < entries.len() {
+        I is_posting_visible(&entries[i], snapshot, clog) {
             total += entries[i].term_freq as u64;
         }
         i += 1;
@@ -133,10 +133,10 @@ F visible_doc_frequency(
     # We count unique doc_ids among visible entries
     ~doc_freq: u32 = 0;
     ~last_doc_id: u64 = 0;
-    ~i: usize = 0;
-    L while i < entries.len() {
-        if is_posting_visible(&entries[i], snapshot, clog) {
-            if i == 0 || entries[i].doc_id != last_doc_id {
+    ~i: u64 = 0;
+    L W i < entries.len() {
+        I is_posting_visible(&entries[i], snapshot, clog) {
+            I i == 0 || entries[i].doc_id != last_doc_id {
                 doc_freq += 1;
                 last_doc_id = entries[i].doc_id;
             }

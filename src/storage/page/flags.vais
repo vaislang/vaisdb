@@ -52,38 +52,38 @@ X PageFlags {
 
     # Individual flag setters
     F set_leaf(~self, val: bool) {
-        if val { self.bits |= FLAG_IS_LEAF; }
-        else { self.bits &= !FLAG_IS_LEAF; }
+        I val { self.bits |=FLAG_IS_LEAF; }
+        E { self.bits &= !FLAG_IS_LEAF; }
     }
 
     F set_root(~self, val: bool) {
-        if val { self.bits |= FLAG_IS_ROOT; }
-        else { self.bits &= !FLAG_IS_ROOT; }
+        I val { self.bits |=FLAG_IS_ROOT; }
+        E { self.bits &= !FLAG_IS_ROOT; }
     }
 
     F set_overflow(~self, val: bool) {
-        if val { self.bits |= FLAG_IS_OVERFLOW; }
-        else { self.bits &= !FLAG_IS_OVERFLOW; }
+        I val { self.bits |=FLAG_IS_OVERFLOW; }
+        E { self.bits &= !FLAG_IS_OVERFLOW; }
     }
 
     F set_compressed(~self, val: bool) {
-        if val { self.bits |= FLAG_IS_COMPRESSED; }
-        else { self.bits &= !FLAG_IS_COMPRESSED; }
+        I val { self.bits |=FLAG_IS_COMPRESSED; }
+        E { self.bits &= !FLAG_IS_COMPRESSED; }
     }
 
     F set_needs_compaction(~self, val: bool) {
-        if val { self.bits |= FLAG_NEEDS_COMPACTION; }
-        else { self.bits &= !FLAG_NEEDS_COMPACTION; }
+        I val { self.bits |=FLAG_NEEDS_COMPACTION; }
+        E { self.bits &= !FLAG_NEEDS_COMPACTION; }
     }
 
     F set_pinned(~self, val: bool) {
-        if val { self.bits |= FLAG_IS_PINNED; }
-        else { self.bits &= !FLAG_IS_PINNED; }
+        I val { self.bits |=FLAG_IS_PINNED; }
+        E { self.bits &= !FLAG_IS_PINNED; }
     }
 
     F set_tombstones(~self, val: bool) {
-        if val { self.bits |= FLAG_HAS_TOMBSTONES; }
-        else { self.bits &= !FLAG_HAS_TOMBSTONES; }
+        I val { self.bits |=FLAG_HAS_TOMBSTONES; }
+        E { self.bits &= !FLAG_HAS_TOMBSTONES; }
     }
 
     # Bulk operations

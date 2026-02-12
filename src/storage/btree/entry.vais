@@ -92,14 +92,14 @@ L KeyCmp = Less | Equal | Greater;
 
 # Compare two byte-slice keys lexicographically
 F compare_keys(a: &[u8], b: &[u8]) -> KeyCmp {
-    ~min_len = if a.len() < b.len() { a.len() } else { b.len() };
-    for i in 0..min_len {
-        if a[i] < b[i] { return KeyCmp.Less; }
-        if a[i] > b[i] { return KeyCmp.Greater; }
+    ~min_len = I a.len() < b.len() { a.len() } E { b.len() };
+    L i: 0..min_len {
+        I a[i] < b[i] { R KeyCmp.Less; }
+        I a[i] > b[i] { R KeyCmp.Greater; }
     }
-    if a.len() < b.len() { KeyCmp.Less }
-    else if a.len() > b.len() { KeyCmp.Greater }
-    else { KeyCmp.Equal }
+    I a.len() < b.len() { KeyCmp.Less }
+    E I a.len() > b.len() { KeyCmp.Greater }
+    E { KeyCmp.Equal }
 }
 
 # Check if key a < key b

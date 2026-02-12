@@ -140,13 +140,13 @@ X RagLock {
 ## Uses hash-based striping to reduce contention
 S DocumentLockManager {
     locks: Vec<RagLock>,
-    stripe_count: usize,
+    stripe_count: u64,
 }
 
 X DocumentLockManager {
     ## Create new document lock manager
     ## stripe_count should be power of 2 for efficient modulo
-    F new(stripe_count: usize) -> DocumentLockManager {
+    F new(stripe_count: u64) -> DocumentLockManager {
         ~locks = Vec.new();
         L i = 0;
         W i < stripe_count {
@@ -158,7 +158,7 @@ X DocumentLockManager {
 
     ## Get lock for document ID
     F get_lock(&self, doc_id: u64) -> &RagLock {
-        L stripe = (doc_id % self.stripe_count as u64) as usize;
+        L stripe = (doc_id % self.stripe_count as u64) as u64;
         &self.locks[stripe]
     }
 
@@ -207,12 +207,12 @@ X DocumentLockManager {
 ## Uses hash-based striping to reduce contention
 S ChunkLockManager {
     locks: Vec<RagLock>,
-    stripe_count: usize,
+    stripe_count: u64,
 }
 
 X ChunkLockManager {
     ## Create new chunk lock manager
-    F new(stripe_count: usize) -> ChunkLockManager {
+    F new(stripe_count: u64) -> ChunkLockManager {
         ~locks = Vec.new();
         L i = 0;
         W i < stripe_count {
@@ -224,7 +224,7 @@ X ChunkLockManager {
 
     ## Get lock for chunk ID
     F get_lock(&self, chunk_id: u64) -> &RagLock {
-        L stripe = (chunk_id % self.stripe_count as u64) as usize;
+        L stripe = (chunk_id % self.stripe_count as u64) as u64;
         &self.locks[stripe]
     }
 
@@ -273,12 +273,12 @@ X ChunkLockManager {
 ## Uses hash-based striping to reduce contention
 S MemoryLockManager {
     locks: Vec<RagLock>,
-    stripe_count: usize,
+    stripe_count: u64,
 }
 
 X MemoryLockManager {
     ## Create new memory lock manager
-    F new(stripe_count: usize) -> MemoryLockManager {
+    F new(stripe_count: u64) -> MemoryLockManager {
         ~locks = Vec.new();
         L i = 0;
         W i < stripe_count {
@@ -290,7 +290,7 @@ X MemoryLockManager {
 
     ## Get lock for memory ID
     F get_lock(&self, memory_id: u64) -> &RagLock {
-        L stripe = (memory_id % self.stripe_count as u64) as usize;
+        L stripe = (memory_id % self.stripe_count as u64) as u64;
         &self.locks[stripe]
     }
 
@@ -336,4 +336,4 @@ X MemoryLockManager {
 
 ## Default stripe count for lock managers
 ## Power of 2 for efficient modulo operations
-L DEFAULT_STRIPE_COUNT: usize = 256;
+L DEFAULT_STRIPE_COUNT: u64 = 256;

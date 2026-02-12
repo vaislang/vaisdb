@@ -33,7 +33,7 @@ X CompressedKey {
     F deserialize(buf: &ByteBuffer) -> Result<CompressedKey, VaisError> {
         ~prefix_len = buf.get_u16_le()?;
         ~suffix_len = buf.get_u16_le()?;
-        ~suffix = buf.get_bytes(suffix_len as usize)?;
+        ~suffix = buf.get_bytes(suffix_len as u64)?;
         Ok(CompressedKey { prefix_len, suffix })
     }
 }
@@ -43,14 +43,14 @@ X CompressedKey {
 F compress_keys(keys: &[&[u8]]) -> Vec<CompressedKey> {
     ~compressed = Vec.with_capacity(keys.len());
 
-    if keys.is_empty() {
-        return compressed;
+    I keys.is_empty() {
+        R compressed;
     }
 
     # First key is stored in full
     compressed.push(CompressedKey.new(0, keys[0].to_vec()));
 
-    for i in 1..keys.len() {
+    L i: 1..keys.len() {
         ~(prefix_len, suffix) = strip_prefix(keys[i], keys[i - 1]);
         compressed.push(CompressedKey.new(prefix_len, suffix));
     }
@@ -62,14 +62,14 @@ F compress_keys(keys: &[&[u8]]) -> Vec<CompressedKey> {
 F decompress_keys(compressed: &[CompressedKey]) -> Vec<Vec<u8>> {
     ~keys = Vec.with_capacity(compressed.len());
 
-    if compressed.is_empty() {
-        return keys;
+    I compressed.is_empty() {
+        R keys;
     }
 
     # First key is the full suffix (prefix_len = 0)
     keys.push(compressed[0].suffix.clone());
 
-    for i in 1..compressed.len() {
+    L i: 1..compressed.len() {
         ~prev_key = &keys[i - 1];
         ~full_key = reconstruct_key(prev_key, compressed[i].prefix_len, &compressed[i].suffix);
         keys.push(full_key);
@@ -80,14 +80,14 @@ F decompress_keys(compressed: &[CompressedKey]) -> Vec<Vec<u8>> {
 
 # Calculate the total compressed size for a set of sorted keys
 F compressed_total_size(keys: &[&[u8]]) -> u32 {
-    if keys.is_empty() {
-        return 0;
+    I keys.is_empty() {
+        R 0;
     }
 
     # First key: 4B header + full key
     ~total: u32 = 4 + keys[0].len() as u32;
 
-    for i in 1..keys.len() {
+    L i: 1..keys.len() {
         ~prefix_len = common_prefix_length(keys[i], keys[i - 1]);
         ~suffix_len = keys[i].len() - prefix_len;
         total += 4 + suffix_len as u32;  # 4B header + suffix
@@ -98,18 +98,18 @@ F compressed_total_size(keys: &[&[u8]]) -> u32 {
 
 # Calculate compression ratio (0.0 = no savings, 1.0 = all prefix)
 F compression_ratio(keys: &[&[u8]]) -> f64 {
-    if keys.is_empty() || keys.len() == 1 {
-        return 0.0;
+    I keys.is_empty() || keys.len() == 1 {
+        R 0.0;
     }
 
     ~original_size: u32 = 0;
-    for key in keys {
+    L key: keys {
         original_size += key.len() as u32;
     }
 
     ~comp_size = compressed_total_size(keys);
-    if original_size == 0 {
-        return 0.0;
+    I original_size == 0 {
+        R 0.0;
     }
 
     1.0 - (comp_size as f64 / (original_size + keys.len() as u32 * 4) as f64)
@@ -117,13 +117,13 @@ F compression_ratio(keys: &[&[u8]]) -> f64 {
 
 # Find a key in compressed format at a given index
 # Requires decompressing from the beginning (or from last restart point)
-F decompress_key_at(compressed: &[CompressedKey], index: usize) -> Result<Vec<u8>, VaisError> {
-    if index >= compressed.len() {
-        return Err(err_internal("Key index out of bounds"));
+F decompress_key_at(compressed: &[CompressedKey], index: u64) -> Result<Vec<u8>, VaisError> {
+    I index >= compressed.len() {
+        R Err(err_internal("Key index out of bounds"));
     }
 
     ~current_key = compressed[0].suffix.clone();
-    for i in 1..=index {
+    L i: 1..=index {
         current_key = reconstruct_key(&current_key, compressed[i].prefix_len, &compressed[i].suffix);
     }
 
@@ -140,16 +140,16 @@ F compress_keys_with_restarts(keys: &[&[u8]]) -> (Vec<CompressedKey>, Vec<u16>) 
     ~compressed = Vec.with_capacity(keys.len());
     ~restart_points = Vec.new();
 
-    if keys.is_empty() {
-        return (compressed, restart_points);
+    I keys.is_empty() {
+        R (compressed, restart_points);
     }
 
-    for i in 0..keys.len() {
-        if (i as u16) % RESTART_INTERVAL == 0 {
+    L i: 0..keys.len() {
+        I (i as u16) % RESTART_INTERVAL == 0 {
             # Restart point: store full key
             restart_points.push(i as u16);
             compressed.push(CompressedKey.new(0, keys[i].to_vec()));
-        } else {
+        } E {
             ~(prefix_len, suffix) = strip_prefix(keys[i], keys[i - 1]);
             compressed.push(CompressedKey.new(prefix_len, suffix));
         }
@@ -163,25 +163,25 @@ F compress_keys_with_restarts(keys: &[&[u8]]) -> (Vec<CompressedKey>, Vec<u16>) 
 F decompress_key_with_restarts(
     compressed: &[CompressedKey],
     restart_points: &[u16],
-    index: usize,
+    index: u64,
 ) -> Result<Vec<u8>, VaisError> {
-    if index >= compressed.len() {
-        return Err(err_internal("Key index out of bounds"));
+    I index >= compressed.len() {
+        R Err(err_internal("Key index out of bounds"));
     }
 
     # Find the nearest restart point at or before index
-    ~restart_idx: usize = 0;
-    for i in 0..restart_points.len() {
-        if restart_points[i] as usize <= index {
-            restart_idx = restart_points[i] as usize;
-        } else {
-            break;
+    ~restart_idx: u64 = 0;
+    L i: 0..restart_points.len() {
+        I restart_points[i] as u64 <= index {
+            restart_idx = restart_points[i] as u64;
+        } E {
+            B;
         }
     }
 
     # Decompress from restart point to target index
     ~current_key = compressed[restart_idx].suffix.clone();
-    for i in (restart_idx + 1)..=index {
+    L i: (restart_idx + 1)..=index {
         current_key = reconstruct_key(&current_key, compressed[i].prefix_len, &compressed[i].suffix);
     }
 

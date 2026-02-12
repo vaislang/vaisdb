@@ -15,9 +15,7 @@ U fulltext/search/bm25.{BM25Scorer, ln};
 # ============================================================================
 
 S PhraseResult {
-    doc_id: u64,        # Document containing the phrase match
-    score: f64,         # Relevance score for this match
-    match_count: u32,   # Number of times the phrase appears in this document
+    doc_id: u64,        # Document containing the phrase M score: f64,         # Relevance score for this M match_count: u32,   # Number of times the phrase appears in this document
 }
 
 X PhraseResult {
@@ -68,13 +66,13 @@ X PhraseSearcher {
         total_docs: u64,
     ) -> Vec<PhraseResult> {
         # Edge case: no terms or mismatched lengths
-        if terms.len() == 0 || terms.len() != posting_entries_per_term.len() {
-            return Vec.new();
+        I terms.len() == 0 || terms.len() != posting_entries_per_term.len() {
+            R Vec.new();
         }
 
         # Edge case: single term (not a phrase, but handle gracefully)
-        if terms.len() == 1 {
-            return self.handle_single_term(
+        I terms.len() == 1 {
+            R self.handle_single_term(
                 &posting_entries_per_term[0],
                 snapshot,
                 clog,
@@ -88,8 +86,8 @@ X PhraseSearcher {
 
         # Step 2: For each candidate, verify phrase positions
         ~results = Vec.new();
-        ~i: usize = 0;
-        L while i < candidate_docs.len() {
+        ~i: u64 = 0;
+        L W i < candidate_docs.len() {
             ~doc_id = candidate_docs[i];
 
             # Collect positions for each term in this document
@@ -103,7 +101,7 @@ X PhraseSearcher {
             # Verify consecutive positions with slop
             ~match_count = self.count_phrase_matches(&positions_per_term, slop);
 
-            if match_count > 0 {
+            I match_count > 0 {
                 # Calculate document length (sum of visible term frequencies)
                 ~doc_length = self.calculate_doc_length(
                     doc_id,
@@ -112,8 +110,7 @@ X PhraseSearcher {
                     clog,
                 );
 
-                # Score this phrase match
-                ~score = self.score_phrase(
+                # Score this phrase M ~score = self.score_phrase(
                     match_count,
                     doc_length,
                     avg_doc_length,
@@ -140,16 +137,16 @@ X PhraseSearcher {
         snapshot: &Snapshot,
         clog: &Clog,
     ) -> Vec<u64> {
-        if posting_entries_per_term.len() == 0 {
-            return Vec.new();
+        I posting_entries_per_term.len() == 0 {
+            R Vec.new();
         }
 
         # Start with doc_ids from first term (filtered by visibility)
         ~candidate_docs = Vec.new();
         ~first_postings = &posting_entries_per_term[0];
-        ~i: usize = 0;
-        L while i < first_postings.len() {
-            if is_posting_visible(&first_postings[i], snapshot, clog) {
+        ~i: u64 = 0;
+        L W i < first_postings.len() {
+            I is_posting_visible(&first_postings[i], snapshot, clog) {
                 candidate_docs.push(first_postings[i].doc_id);
             }
             i += 1;
@@ -159,15 +156,15 @@ X PhraseSearcher {
         candidate_docs = self.deduplicate_doc_ids(&candidate_docs);
 
         # Intersect with remaining terms
-        ~term_idx: usize = 1;
-        L while term_idx < posting_entries_per_term.len() {
+        ~term_idx: u64 = 1;
+        L W term_idx < posting_entries_per_term.len() {
             ~term_postings = &posting_entries_per_term[term_idx];
 
             # Get visible doc_ids for this term
             ~term_doc_ids = Vec.new();
-            ~j: usize = 0;
-            L while j < term_postings.len() {
-                if is_posting_visible(&term_postings[j], snapshot, clog) {
+            ~j: u64 = 0;
+            L W j < term_postings.len() {
+                I is_posting_visible(&term_postings[j], snapshot, clog) {
                     term_doc_ids.push(term_postings[j].doc_id);
                 }
                 j += 1;
@@ -178,8 +175,8 @@ X PhraseSearcher {
             candidate_docs = self.intersect_doc_id_lists(&candidate_docs, &term_doc_ids);
 
             # Early exit if no candidates remain
-            if candidate_docs.len() == 0 {
-                return candidate_docs;
+            I candidate_docs.len() == 0 {
+                R candidate_docs;
             }
 
             term_idx += 1;
@@ -199,17 +196,17 @@ X PhraseSearcher {
     ) -> Vec<Vec<u32>> {
         ~positions_per_term = Vec.with_capacity(posting_entries_per_term.len());
 
-        ~term_idx: usize = 0;
-        L while term_idx < posting_entries_per_term.len() {
+        ~term_idx: u64 = 0;
+        L W term_idx < posting_entries_per_term.len() {
             ~term_positions = Vec.new();
             ~postings = &posting_entries_per_term[term_idx];
 
-            ~i: usize = 0;
-            L while i < postings.len() {
-                if postings[i].doc_id == doc_id && is_posting_visible(&postings[i], snapshot, clog) {
+            ~i: u64 = 0;
+            L W i < postings.len() {
+                I postings[i].doc_id == doc_id && is_posting_visible(&postings[i], snapshot, clog) {
                     # Merge positions from this posting entry
-                    ~j: usize = 0;
-                    L while j < postings[i].positions.len() {
+                    ~j: u64 = 0;
+                    L W j < postings[i].positions.len() {
                         term_positions.push(postings[i].positions[j]);
                         j += 1;
                     }
@@ -236,15 +233,15 @@ X PhraseSearcher {
     #   ...
     #   If all terms found at consecutive (+slop) positions, increment match_count
     F count_phrase_matches(self, positions_per_term: &Vec<Vec<u32>>, slop: u32) -> u32 {
-        if positions_per_term.len() == 0 {
-            return 0;
+        I positions_per_term.len() == 0 {
+            R 0;
         }
 
         # Edge case: any term has no positions
-        ~i: usize = 0;
-        L while i < positions_per_term.len() {
-            if positions_per_term[i].len() == 0 {
-                return 0;
+        ~i: u64 = 0;
+        L W i < positions_per_term.len() {
+            I positions_per_term[i].len() == 0 {
+                R 0;
             }
             i += 1;
         }
@@ -253,18 +250,18 @@ X PhraseSearcher {
 
         # For each position in first term
         ~first_positions = &positions_per_term[0];
-        ~pos_idx: usize = 0;
-        L while pos_idx < first_positions.len() {
+        ~pos_idx: u64 = 0;
+        L W pos_idx < first_positions.len() {
             ~base_pos = first_positions[pos_idx];
 
-            # Try to match remaining terms at consecutive positions
+            # Try to M remaining terms at consecutive positions
             ~matched = self.try_match_phrase_at_position(
                 base_pos,
                 positions_per_term,
                 slop,
             );
 
-            if matched {
+            I matched {
                 match_count += 1;
             }
 
@@ -274,7 +271,7 @@ X PhraseSearcher {
         match_count
     }
 
-    # Try to match phrase starting at base_pos
+    # Try to M phrase starting at base_pos
     # Returns true if all terms found at consecutive (+slop) positions
     F try_match_phrase_at_position(
         self,
@@ -283,10 +280,10 @@ X PhraseSearcher {
         slop: u32,
     ) -> bool {
         # Start from term 1 (term 0 is at base_pos)
-        ~term_idx: usize = 1;
-        L while term_idx < positions_per_term.len() {
+        ~term_idx: u64 = 1;
+        L W term_idx < positions_per_term.len() {
             ~expected_pos = base_pos + (term_idx as u32);
-            ~min_pos = if expected_pos >= slop { expected_pos - slop } else { 0 };
+            ~min_pos = I expected_pos >= slop { expected_pos - slop } E { 0 };
             ~max_pos = expected_pos + slop;
 
             # Check if this term has a position in range [min_pos, max_pos]
@@ -296,8 +293,8 @@ X PhraseSearcher {
                 max_pos,
             );
 
-            if !found {
-                return false;
+            I !found {
+                R false;
             }
 
             term_idx += 1;
@@ -308,10 +305,10 @@ X PhraseSearcher {
 
     # Check if positions list contains any value in [min_pos, max_pos]
     F has_position_in_range(self, positions: &Vec<u32>, min_pos: u32, max_pos: u32) -> bool {
-        ~i: usize = 0;
-        L while i < positions.len() {
-            if positions[i] >= min_pos && positions[i] <= max_pos {
-                return true;
+        ~i: u64 = 0;
+        L W i < positions.len() {
+            I positions[i] >= min_pos && positions[i] <= max_pos {
+                R true;
             }
             i += 1;
         }
@@ -328,13 +325,13 @@ X PhraseSearcher {
     ) -> u32 {
         ~total_length: u32 = 0;
 
-        ~term_idx: usize = 0;
-        L while term_idx < posting_entries_per_term.len() {
+        ~term_idx: u64 = 0;
+        L W term_idx < posting_entries_per_term.len() {
             ~postings = &posting_entries_per_term[term_idx];
 
-            ~i: usize = 0;
-            L while i < postings.len() {
-                if postings[i].doc_id == doc_id && is_posting_visible(&postings[i], snapshot, clog) {
+            ~i: u64 = 0;
+            L W i < postings.len() {
+                I postings[i].doc_id == doc_id && is_posting_visible(&postings[i], snapshot, clog) {
                     total_length += postings[i].term_freq;
                 }
                 i += 1;
@@ -346,8 +343,7 @@ X PhraseSearcher {
         total_length
     }
 
-    # Score a phrase match
-    #
+    # Score a phrase M #
     # Formula: IDF-like component + frequency boost
     # score = ln(total_docs + 1) * ln(match_count + 1) / ln(doc_length / avg_doc_length + 1)
     #
@@ -361,8 +357,8 @@ X PhraseSearcher {
         avg_doc_length: f64,
         total_docs: u64,
     ) -> f64 {
-        if match_count == 0 || doc_length == 0 {
-            return 0.0;
+        I match_count == 0 || doc_length == 0 {
+            R 0.0;
         }
 
         # Corpus size component (IDF-like)
@@ -376,7 +372,7 @@ X PhraseSearcher {
         ~length_norm = ln(length_ratio + 1.0);
 
         # Avoid division by zero
-        if length_norm < 0.0001 {
+        I length_norm < 0.0001 {
             length_norm = 0.0001;
         }
 
@@ -394,9 +390,9 @@ X PhraseSearcher {
     ) -> Vec<PhraseResult> {
         ~results = Vec.new();
 
-        ~i: usize = 0;
-        L while i < postings.len() {
-            if is_posting_visible(&postings[i], snapshot, clog) {
+        ~i: u64 = 0;
+        L W i < postings.len() {
+            I is_posting_visible(&postings[i], snapshot, clog) {
                 ~doc_id = postings[i].doc_id;
                 ~match_count = postings[i].term_freq;
                 ~doc_length = postings[i].term_freq;
@@ -419,26 +415,26 @@ X PhraseSearcher {
 
     # Deduplicate doc_ids in a sorted or unsorted list
     F deduplicate_doc_ids(self, doc_ids: &Vec<u64>) -> Vec<u64> {
-        if doc_ids.len() == 0 {
-            return Vec.new();
+        I doc_ids.len() == 0 {
+            R Vec.new();
         }
 
         ~result = Vec.new();
-        ~i: usize = 0;
-        L while i < doc_ids.len() {
+        ~i: u64 = 0;
+        L W i < doc_ids.len() {
             ~doc_id = doc_ids[i];
 
             # Check if already in result
             ~found = false;
-            ~j: usize = 0;
-            L while j < result.len() {
-                if result[j] == doc_id {
+            ~j: u64 = 0;
+            L W j < result.len() {
+                I result[j] == doc_id {
                     found = true;
                 }
                 j += 1;
             }
 
-            if !found {
+            I !found {
                 result.push(doc_id);
             }
 
@@ -452,21 +448,21 @@ X PhraseSearcher {
     F intersect_doc_id_lists(self, list1: &Vec<u64>, list2: &Vec<u64>) -> Vec<u64> {
         ~result = Vec.new();
 
-        ~i: usize = 0;
-        L while i < list1.len() {
+        ~i: u64 = 0;
+        L W i < list1.len() {
             ~doc_id = list1[i];
 
             # Check if doc_id exists in list2
             ~found = false;
-            ~j: usize = 0;
-            L while j < list2.len() {
-                if list2[j] == doc_id {
+            ~j: u64 = 0;
+            L W j < list2.len() {
+                I list2[j] == doc_id {
                     found = true;
                 }
                 j += 1;
             }
 
-            if found {
+            I found {
                 result.push(doc_id);
             }
 
@@ -478,18 +474,18 @@ X PhraseSearcher {
 
     # Sort positions in ascending order (simple bubble sort)
     F sort_positions(self, positions: &Vec<u32>) -> Vec<u32> {
-        if positions.len() <= 1 {
-            return positions.clone();
+        I positions.len() <= 1 {
+            R positions.clone();
         }
 
         ~result = positions.clone();
         ~n = result.len();
 
-        ~i: usize = 0;
-        L while i < n {
-            ~j: usize = 0;
-            L while j < n - i - 1 {
-                if result[j] > result[j + 1] {
+        ~i: u64 = 0;
+        L W i < n {
+            ~j: u64 = 0;
+            L W j < n - i - 1 {
+                I result[j] > result[j + 1] {
                     # Swap
                     ~temp = result[j];
                     result[j] = result[j + 1];
@@ -505,16 +501,16 @@ X PhraseSearcher {
 
     # Sort results by score in descending order (simple bubble sort)
     F sort_results_by_score(self, results: &Vec<PhraseResult>) {
-        if results.len() <= 1 {
-            return;
+        I results.len() <= 1 {
+            R;
         }
 
         ~n = results.len();
-        ~i: usize = 0;
-        L while i < n {
-            ~j: usize = 0;
-            L while j < n - i - 1 {
-                if results[j].score < results[j + 1].score {
+        ~i: u64 = 0;
+        L W i < n {
+            ~j: u64 = 0;
+            L W j < n - i - 1 {
+                I results[j].score < results[j + 1].score {
                     # Swap
                     ~temp = results[j];
                     results[j] = results[j + 1];

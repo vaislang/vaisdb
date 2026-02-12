@@ -38,7 +38,7 @@ describe("Key Encoding") {
 
     it("should decode i64 round-trip") {
         ~values: [i64] = [-9999, -1, 0, 1, 9999, i64.MIN, i64.MAX];
-        for val in &values {
+        L val: &values {
             ~encoded = encode_i64_key(*val);
             ~decoded = decode_i64_key(&encoded);
             assert_eq(decoded, *val);
@@ -47,7 +47,7 @@ describe("Key Encoding") {
 
     it("should encode u64 round-trip") {
         ~values: [u64] = [0, 1, 255, 65535, u64.MAX];
-        for val in &values {
+        L val: &values {
             ~encoded = encode_u64_key(*val);
             ~decoded = decode_u64_key(&encoded);
             assert_eq(decoded, *val);
@@ -74,9 +74,9 @@ describe("Leaf Node") {
         ~k2 = encode_i64_key(20);
         ~k3 = encode_i64_key(30);
 
-        leaf.insert(&k1, 100).unwrap();
-        leaf.insert(&k3, 300).unwrap();
-        leaf.insert(&k2, 200).unwrap();
+        leaf.insert(&k1, 100)!;
+        leaf.insert(&k3, 300)!;
+        leaf.insert(&k2, 200)!;
 
         assert_eq(leaf.entry_count(), 3);
         assert_eq(leaf.get_tid(&k2), Some(200));
@@ -87,15 +87,15 @@ describe("Leaf Node") {
         ~leaf = BTreeLeafNode.new(1, PAGE_SIZE_DEFAULT, true);
 
         # Insert in reverse order
-        for i in (0..10).rev() {
+        L i: (0..10).rev() {
             ~key = encode_i64_key(i);
-            leaf.insert(&key, i as u32).unwrap();
+            leaf.insert(&key, i as u32)!;
         }
 
         # Keys should be in ascending order
-        for i in 0..10 {
+        L i: 0..10 {
             ~expected = encode_i64_key(i);
-            ~stored = leaf.get_key(i as usize);
+            ~stored = leaf.get_key(i as u64);
             M compare_keys(stored, &expected) {
                 KeyCmp.Equal => {},
                 _ => panic!("Keys not sorted at position {i}"),
@@ -109,9 +109,9 @@ describe("Leaf Node") {
         ~k2 = encode_i64_key(20);
         ~k3 = encode_i64_key(30);
 
-        leaf.insert(&k1, 100).unwrap();
-        leaf.insert(&k2, 200).unwrap();
-        leaf.insert(&k3, 300).unwrap();
+        leaf.insert(&k1, 100)!;
+        leaf.insert(&k2, 200)!;
+        leaf.insert(&k3, 300)!;
 
         ~removed = leaf.delete(&k2);
         assert_eq(removed, Some(200));
@@ -121,9 +121,9 @@ describe("Leaf Node") {
 
     it("should handle lower_bound correctly") {
         ~leaf = BTreeLeafNode.new(1, PAGE_SIZE_DEFAULT, true);
-        for i in [10, 20, 30, 40, 50] {
+        L i: [10, 20, 30, 40, 50] {
             ~key = encode_i64_key(i);
-            leaf.insert(&key, i as u32).unwrap();
+            leaf.insert(&key, i as u32)!;
         }
 
         # lower_bound for 25 should return index of 30
@@ -152,8 +152,8 @@ describe("Internal Node") {
 
         ~k20 = encode_i64_key(20);
         ~k40 = encode_i64_key(40);
-        node.insert_entry(&k20, 20).unwrap();  # child for 20 <= key < 40
-        node.insert_entry(&k40, 40).unwrap();  # child for key >= 40
+        node.insert_entry(&k20, 20)!;  # child for 20 <= key < 40
+        node.insert_entry(&k40, 40)!;  # child for key >= 40
 
         # key 5 → leftmost child (10)
         assert_eq(node.find_child(&encode_i64_key(5)), 10);
@@ -228,7 +228,7 @@ describe("Prefix Compression") {
 
     it("should support restart points for random access") {
         ~keys: Vec<&[u8]> = Vec.new();
-        for i in 0..32 {
+        L i: 0..32 {
             keys.push(format!("key_{:04}", i).as_bytes());
         }
 
@@ -236,7 +236,7 @@ describe("Prefix Compression") {
         assert_eq(restarts.len(), 2);  # restart at 0 and 16
 
         # Decompress key at index 20 using restart points
-        ~key = decompress_key_with_restarts(&compressed, &restarts, 20).unwrap();
+        ~key = decompress_key_with_restarts(&compressed, &restarts, 20)!;
         assert_eq(&key, format!("key_0020").as_bytes());
     }
 }
@@ -255,32 +255,32 @@ describe("100K Insert/Search/Delete") {
         ~inserted: u32 = 0;
 
         # Insert until leaf is full
-        for i in 0..100000u32 {
+        L i: 0..100000u32 {
             ~key = encode_i64_key(i as i64);
             M leaf.insert(&key, i) {
                 Ok(()) => { inserted += 1; },
-                Err(_) => break,  # Leaf full
+                Err(_) => B,  # Leaf full
             }
         }
 
         assert_true(inserted > 0);
 
         # Search for all inserted keys
-        for i in 0..inserted {
+        L i: 0..inserted {
             ~key = encode_i64_key(i as i64);
             ~tid = leaf.get_tid(&key);
             assert_eq(tid, Some(i));
         }
 
         # Delete even keys
-        for i in (0..inserted).step_by(2) {
+        L i: (0..inserted).step_by(2) {
             ~key = encode_i64_key(i as i64);
             ~removed = leaf.delete(&key);
             assert_eq(removed, Some(i));
         }
 
         # Verify odd keys still present
-        for i in (1..inserted).step_by(2) {
+        L i: (1..inserted).step_by(2) {
             ~key = encode_i64_key(i as i64);
             assert_true(leaf.get_tid(&key).is_some());
         }

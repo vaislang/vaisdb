@@ -169,8 +169,8 @@ X ActiveTransactionTable {
 
         # Collect active transaction IDs for the snapshot
         ~active_txns = Vec.new();
-        for (id, entry) in self.entries.iter() {
-            if entry.is_active() {
+        L (id, entry): self.entries.iter() {
+            I entry.is_active() {
                 active_txns.push(*id);
             }
         }
@@ -227,8 +227,8 @@ X ActiveTransactionTable {
     F get_active_txn_ids(self) -> Vec<u64> {
         ~guard = self.lock.read();
         ~active_ids = Vec.new();
-        for (id, entry) in self.entries.iter() {
-            if entry.is_active() {
+        L (id, entry): self.entries.iter() {
+            I entry.is_active() {
                 active_ids.push(*id);
             }
         }
@@ -242,8 +242,8 @@ X ActiveTransactionTable {
         ~guard = self.lock.read();
         ~min_txn = u64.MAX;
 
-        for (id, entry) in self.entries.iter() {
-            if entry.is_active() && *id < min_txn {
+        L (id, entry): self.entries.iter() {
+            I entry.is_active() && *id < min_txn {
                 min_txn = *id;
             }
         }
@@ -251,19 +251,19 @@ X ActiveTransactionTable {
         drop(guard);
 
         # If no active transactions, return MAX
-        if min_txn == u64.MAX {
+        I min_txn == u64.MAX {
             u64.MAX
-        } else {
+        } E {
             min_txn
         }
     }
 
     # Count active transactions
-    F count_active(self) -> usize {
+    F count_active(self) -> u64 {
         ~guard = self.lock.read();
-        ~count = 0usize;
-        for (_, entry) in self.entries.iter() {
-            if entry.is_active() {
+        ~count = 0u64;
+        L (_, entry): self.entries.iter() {
+            I entry.is_active() {
                 count += 1;
             }
         }
@@ -297,7 +297,7 @@ X ActiveTransactionTable {
     F get_all_entries(self) -> Vec<(u64, TxnState, u64)> {
         ~guard = self.lock.read();
         ~result = Vec.new();
-        for (id, entry) in self.entries.iter() {
+        L (id, entry): self.entries.iter() {
             result.push((*id, entry.state, entry.start_time));
         }
         drop(guard);
@@ -311,10 +311,10 @@ X ActiveTransactionTable {
         ~timed_out = Vec.new();
         ~now = now_micros();
 
-        for (id, entry) in self.entries.iter() {
-            if entry.is_active() {
+        L (id, entry): self.entries.iter() {
+            I entry.is_active() {
                 ~elapsed_sec = ((now - entry.start_time) / 1000000) as u32;
-                if elapsed_sec >= timeout_sec {
+                I elapsed_sec >= timeout_sec {
                     timed_out.push((*id, elapsed_sec));
                 }
             }

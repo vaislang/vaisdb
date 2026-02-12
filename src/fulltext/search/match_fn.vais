@@ -18,8 +18,7 @@ U fulltext/index/posting.{PostingStore};
 U fulltext/search/bm25.{BM25Scorer};
 U fulltext/visibility.{is_posting_visible, filter_visible_postings};
 
-# Result structure for a single full-text match
-S FullTextMatchResult {
+# Result structure for a single full-text M S FullTextMatchResult {
     doc_id: u64,
     score: f64,
     table_id: u32,
@@ -27,7 +26,7 @@ S FullTextMatchResult {
 }
 
 X FullTextMatchResult {
-    # Create a new match result
+    # Create a new M result
     F new(doc_id: u64, score: f64, table_id: u32, row_tid: u32) -> FullTextMatchResult {
         FullTextMatchResult {
             doc_id: doc_id,
@@ -54,12 +53,12 @@ S FullTextMatchExecutor {
     query_text: Str,
     top_k: u32,
     results: Vec<FullTextMatchResult>,
-    cursor: usize,
+    cursor: u64,
     is_open: bool,
 }
 
 X FullTextMatchExecutor {
-    # Create a new full-text match executor
+    # Create a new full-text M executor
     F new(index_id: u32, query_text: Str, top_k: u32) -> FullTextMatchExecutor {
         FullTextMatchExecutor {
             index_id: index_id,
@@ -94,17 +93,17 @@ X FullTextMatchExecutor {
         ~tokenizer = Tokenizer::new(config.clone());
         ~query_terms = tokenizer.tokenize_with_freqs(&self.query_text);
 
-        if query_terms.is_empty() {
+        I query_terms.is_empty() {
             # No terms to search, return empty results
             self.results = Vec::new();
-            return Ok(());
+            R Ok(());
         }
 
         # Step 2 & 3: Lookup posting lists and collect candidates
         ~candidates: Vec<(u64, u32, u32, f64)> = Vec::new(); # (doc_id, table_id, row_tid, raw_score)
         ~term_doc_freqs: Vec<(Str, u32)> = Vec::new(); # (term, df)
 
-        L term_freq_info in query_terms {
+        L term_freq_info: query_terms {
             ~term = term_freq_info.term.clone();
 
             # Lookup term in dictionary
@@ -120,7 +119,7 @@ X FullTextMatchExecutor {
                             term_doc_freqs.push((term.clone(), visible_postings.len() as u32));
 
                             # Collect candidates with term frequency
-                            L posting in visible_postings {
+                            L posting: visible_postings {
                                 ~tf = posting.term_freq as f64;
                                 candidates.push((
                                     posting.doc_id,
@@ -131,16 +130,16 @@ X FullTextMatchExecutor {
                             }
                         }
                         Err(e) => {
-                            return Err(e);
+                            R Err(e);
                         }
                     }
                 }
                 Ok(None) => {
                     # Term not found, skip
-                    continue;
+                    C;
                 }
                 Err(e) => {
-                    return Err(e);
+                    R Err(e);
                 }
             }
         }
@@ -150,15 +149,15 @@ X FullTextMatchExecutor {
         ~total_docs = meta.total_docs;
         ~avg_doc_length = meta.avg_doc_length;
 
-        L ~candidate in candidates.iter_mut() {
+        L ~candidate: candidates.iter_mut() {
             ~doc_id = candidate.0;
             ~tf = candidate.3;
 
             # Find df for this term (simplified: use first matching term)
             ~df = 1u32;
-            L term_df in &term_doc_freqs {
+            L term_df: &term_doc_freqs {
                 df = term_df.1;
-                break;
+                B;
             }
 
             # Get document length (simplified: use avg_doc_length)
@@ -172,24 +171,24 @@ X FullTextMatchExecutor {
         # Step 6: Sort by score descending
         candidates.sort_by(|a, b| {
             # Sort descending
-            if b.3 > a.3 {
-                return 1;
-            } else if b.3 < a.3 {
-                return -1;
-            } else {
-                return 0;
+            I b.3 > a.3 {
+                R 1;
+            } E I b.3 < a.3 {
+                R -1;
+            } E {
+                R 0;
             }
         });
 
         # Step 7: Take top_k results
-        ~top_k_count = if candidates.len() < self.top_k as usize {
+        ~top_k_count = I candidates.len() < self.top_k as u64 {
             candidates.len()
-        } else {
-            self.top_k as usize
+        } E {
+            self.top_k as u64
         };
 
         self.results = Vec::with_capacity(top_k_count);
-        L i in 0..top_k_count {
+        L i: 0..top_k_count {
             ~candidate = &candidates[i];
             self.results.push(FullTextMatchResult::new(
                 candidate.0,
@@ -210,8 +209,8 @@ X FullTextMatchExecutor {
 
     # Volcano interface: get next result
     F next(~self) -> Option<FullTextMatchResult> {
-        if !self.is_open || self.cursor >= self.results.len() {
-            return None;
+        I !self.is_open || self.cursor >= self.results.len() {
+            R None;
         }
         ~result = self.results[self.cursor].clone();
         self.cursor += 1;
@@ -224,12 +223,12 @@ X FullTextMatchExecutor {
     }
 
     # Get the current cursor position
-    F cursor_position(&self) -> usize {
+    F cursor_position(&self) -> u64 {
         self.cursor
     }
 
     # Get total number of results
-    F result_count(&self) -> usize {
+    F result_count(&self) -> u64 {
         self.results.len()
     }
 
@@ -266,13 +265,13 @@ X MultiTermScorer {
         ~total_docs = meta.total_docs;
         ~avg_doc_length = meta.avg_doc_length;
 
-        L term_posting_pair in term_postings {
+        L term_posting_pair: term_postings {
             ~postings = &term_posting_pair.1;
             ~df = postings.len() as u32;
 
             # Find posting for this doc_id
-            L posting in postings {
-                if posting.doc_id == doc_id {
+            L posting: postings {
+                I posting.doc_id == doc_id {
                     ~tf = posting.term_freq;
                     ~doc_length = posting.doc_length;
 
@@ -285,7 +284,7 @@ X MultiTermScorer {
                     );
 
                     total_score += term_score;
-                    break;
+                    B;
                 }
             }
         }

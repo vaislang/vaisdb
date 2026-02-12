@@ -10,7 +10,7 @@
 
 U std/result.{Result, Ok, Err};
 U std/vec.Vec;
-U std/string.String;
+# U std/string.String;  # Removed: Str is builtin
 U src/common/error.{VaisError, ErrorCategory};
 U src/vector/hnsw/types.{
     HnswMeta,
@@ -35,27 +35,27 @@ U src/storage/wal/record_vector.HnswDeleteNodePayload;
 # Error Constructors
 # ============================================================================
 
-F err_delete_failed(node_id: u64, detail: String) -> VaisError {
+F err_delete_failed(node_id: u64, detail: Str) -> VaisError {
     VaisError::new(
         ErrorCategory::Vector,
         "VE-02-03-004",
-        String::from("Failed to delete HNSW node {node_id}: {detail}"),
+        Str::from("Failed to delete HNSW node {node_id}: {detail}"),
     )
 }
 
-F err_mvcc_filter_failed(detail: String) -> VaisError {
+F err_mvcc_filter_failed(detail: Str) -> VaisError {
     VaisError::new(
         ErrorCategory::Vector,
         "VE-02-03-005",
-        String::from("MVCC post-filter failed: {detail}"),
+        Str::from("MVCC post-filter failed: {detail}"),
     )
 }
 
-F err_insufficient_results(k: usize, found: usize) -> VaisError {
+F err_insufficient_results(k: u64, found: u64) -> VaisError {
     VaisError::new(
         ErrorCategory::Vector,
         "VE-02-03-006",
-        String::from("Insufficient visible results after max retries: requested {k}, found {found}"),
+        Str::from("Insufficient visible results after max retries: requested {k}, found {found}"),
     )
 }
 
@@ -122,27 +122,27 @@ F hnsw_delete(
     page_id: u32,
 ) -> Result<Vec<u8>, VaisError> {
     # Step 1: Retrieve node
-    if node_id == INVALID_NODE_ID {
-        return Err(err_delete_failed(
+    I node_id == INVALID_NODE_ID {
+        R Err(err_delete_failed(
             node_id,
-            String::from("Invalid node ID"),
+            Str::from("Invalid node ID"),
         ));
     }
 
     ~node_res = store.get_node_mut(node_id);
     ~node = M node_res {
         Ok(n) => n,
-        Err(e) => return Err(err_delete_failed(
+        Err(e) => R Err(err_delete_failed(
             node_id,
-            String::from("Node not found in store"),
+            Str::from("Node not found in store"),
         )),
     };
 
     # Step 2: Validate not already deleted
-    if node.is_deleted {
-        return Err(err_delete_failed(
+    I node.is_deleted {
+        R Err(err_delete_failed(
             node_id,
-            String::from("Node already deleted"),
+            Str::from("Node already deleted"),
         ));
     }
 
@@ -153,7 +153,7 @@ F hnsw_delete(
     meta.delete_node();
 
     # Step 5: Collect affected layers for WAL record
-    ~layers_affected = Vec::with_capacity((node.max_layer + 1) as usize);
+    ~layers_affected = Vec::with_capacity((node.max_layer + 1) as u64);
     ~layer: u8 = 0;
     L while layer <= node.max_layer {
         layers_affected.push(layer);
@@ -192,23 +192,23 @@ F hnsw_delete(
 # - 30% deleted → oversample ≈ 2.14
 # - 50% deleted → oversample = 3.0
 F calculate_oversample_factor(meta: &HnswMeta) -> f64 {
-    if meta.total_nodes == 0 {
-        return 2.0;
+    I meta.total_nodes == 0 {
+        R 2.0;
     }
 
     ~invisible_ratio = (meta.total_deleted as f64) / (meta.total_nodes as f64);
 
     # Clamp invisible_ratio to prevent division by zero or overflow
-    if invisible_ratio >= 0.95 {
+    I invisible_ratio >= 0.95 {
         invisible_ratio = 0.95;
     }
 
     ~adaptive_factor = 1.0 / (1.0 - invisible_ratio) * 1.5;
 
     # Return max of base oversample (2.0) and adaptive factor
-    if adaptive_factor > 2.0 {
+    I adaptive_factor > 2.0 {
         adaptive_factor
-    } else {
+    } E {
         2.0
     }
 }
@@ -239,7 +239,7 @@ F calculate_oversample_factor(meta: &HnswMeta) -> f64 {
 # Returns: SearchResult with up to k visible neighbors
 F mvcc_filtered_search(
     query: &[f32],
-    k: usize,
+    k: u64,
     ef_search: u32,
     meta: &HnswMeta,
     store: &dyn NodeStore,
@@ -256,10 +256,10 @@ F mvcc_filtered_search(
 
     L while retry < max_retries {
         # Calculate actual k and ef for this attempt
-        ~actual_k = ((k as f64) * oversample).ceil() as usize;
-        ~actual_ef = if (actual_k as u32) > ef_search {
+        ~actual_k = ((k as f64) * oversample).ceil() as u64;
+        ~actual_ef = I (actual_k as u32) > ef_search {
             actual_k as u32
-        } else {
+        } E {
             ef_search
         };
 
@@ -275,7 +275,7 @@ F mvcc_filtered_search(
 
         # Filter results by MVCC visibility
         ~visible_results = Vec::with_capacity(k);
-        ~idx: usize = 0;
+        ~idx: u64 = 0;
         L while idx < search_result.results.len() {
             ~entry = &search_result.results[idx];
             ~node_id = entry.node_id;
@@ -287,12 +287,11 @@ F mvcc_filtered_search(
                 Err(e) => {
                     # Skip nodes that can't be retrieved
                     idx = idx + 1;
-                    continue;
-                },
+                    C                },
             };
 
             # Check MVCC visibility
-            if is_vector_visible(node, snapshot, clog) {
+            I is_vector_visible(node, snapshot, clog) {
                 visible_results.push(SearchResultEntry::new(
                     entry.node_id,
                     entry.distance,
@@ -303,9 +302,9 @@ F mvcc_filtered_search(
         }
 
         # Check if we have enough visible results
-        if visible_results.len() >= k {
+        I visible_results.len() >= k {
             # Success: truncate to k and return
-            if visible_results.len() > k {
+            I visible_results.len() > k {
                 visible_results.truncate(k);
             }
 
@@ -314,7 +313,7 @@ F mvcc_filtered_search(
             final_result.nodes_visited = search_result.nodes_visited;
             final_result.distance_computations = search_result.distance_computations;
 
-            return Ok(final_result);
+            R Ok(final_result);
         }
 
         # Insufficient results - double oversample and retry
@@ -327,10 +326,10 @@ F mvcc_filtered_search(
     # Caller should check result.results.len() < k
 
     # Perform final search with max oversample
-    ~actual_k_final = ((k as f64) * oversample).ceil() as usize;
-    ~actual_ef_final = if (actual_k_final as u32) > ef_search {
+    ~actual_k_final = ((k as f64) * oversample).ceil() as u64;
+    ~actual_ef_final = I (actual_k_final as u32) > ef_search {
         actual_k_final as u32
-    } else {
+    } E {
         ef_search
     };
 
@@ -345,7 +344,7 @@ F mvcc_filtered_search(
 
     # Final visibility filter
     ~final_visible = Vec::with_capacity(k);
-    ~final_idx: usize = 0;
+    ~final_idx: u64 = 0;
     L while final_idx < final_search.results.len() {
         ~final_entry = &final_search.results[final_idx];
         ~final_node_id = final_entry.node_id;
@@ -355,11 +354,10 @@ F mvcc_filtered_search(
             Ok(n) => n,
             Err(e) => {
                 final_idx = final_idx + 1;
-                continue;
-            },
+                C            },
         };
 
-        if is_vector_visible(final_node, snapshot, clog) {
+        I is_vector_visible(final_node, snapshot, clog) {
             final_visible.push(SearchResultEntry::new(
                 final_entry.node_id,
                 final_entry.distance,
@@ -370,7 +368,7 @@ F mvcc_filtered_search(
     }
 
     # Truncate to k if we exceeded
-    if final_visible.len() > k {
+    I final_visible.len() > k {
         final_visible.truncate(k);
     }
 
@@ -409,29 +407,29 @@ F is_gc_ready(
     clog: &Clog,
 ) -> bool {
     # Must be soft-deleted
-    if !node.is_deleted {
-        return false;
+    I !node.is_deleted {
+        R false;
     }
 
     # txn_id_expire must be valid
-    if node.txn_id_expire == INVALID_TXN_ID {
-        return false;
+    I node.txn_id_expire == INVALID_TXN_ID {
+        R false;
     }
 
     # Check if deleting transaction was aborted (not GC-ready if aborted)
-    if is_aborted_fast(node.txn_id_expire, clog) {
-        return false;
+    I is_aborted_fast(node.txn_id_expire, clog) {
+        R false;
     }
 
     # Check if deleting transaction is committed
-    if !clog.is_committed(node.txn_id_expire) {
-        return false;
+    I !clog.is_committed(node.txn_id_expire) {
+        R false;
     }
 
     # Check if deletion is before low water mark
     # If txn_id_expire < low_water_mark, no active txn can see this node
-    if node.txn_id_expire < low_water_mark {
-        return true;
+    I node.txn_id_expire < low_water_mark {
+        R true;
     }
 
     false
@@ -467,7 +465,7 @@ F scan_gc_candidates(
 ) -> Vec<u64> {
     ~ready_nodes = Vec::new();
 
-    ~idx: usize = 0;
+    ~idx: u64 = 0;
     L while idx < node_ids.len() {
         ~node_id = node_ids[idx];
 
@@ -477,11 +475,10 @@ F scan_gc_candidates(
             Err(e) => {
                 # Skip nodes that can't be retrieved
                 idx = idx + 1;
-                continue;
-            },
+                C            },
         };
 
-        if is_gc_ready(node, low_water_mark, clog) {
+        I is_gc_ready(node, low_water_mark, clog) {
             ready_nodes.push(node_id);
         }
 

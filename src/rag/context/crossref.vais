@@ -133,8 +133,8 @@ X CrossRefTracker {
         ~result = Vec.new();
         ~i: u32 = 0;
         W i < self.references.len() as u32 {
-            ~ref_item = self.references.get(i as usize);
-            if ref_item.source_chunk_id == chunk_id {
+            ~ref_item = self.references.get(i as u64);
+            I ref_item.source_chunk_id == chunk_id {
                 result.push(ref_item);
             }
             i = i + 1;
@@ -147,8 +147,8 @@ X CrossRefTracker {
         ~result = Vec.new();
         ~i: u32 = 0;
         W i < self.references.len() as u32 {
-            ~ref_item = self.references.get(i as usize);
-            if ref_item.target_chunk_id == chunk_id {
+            ~ref_item = self.references.get(i as u64);
+            I ref_item.target_chunk_id == chunk_id {
                 result.push(ref_item);
             }
             i = i + 1;
@@ -161,8 +161,8 @@ X CrossRefTracker {
         ~result = Vec.new();
         ~i: u32 = 0;
         W i < self.references.len() as u32 {
-            ~ref_item = self.references.get(i as usize);
-            if (ref_item.source_doc_id == doc_id || ref_item.target_doc_id == doc_id)
+            ~ref_item = self.references.get(i as u64);
+            I (ref_item.source_doc_id == doc_id || ref_item.target_doc_id == doc_id)
                 && ref_item.is_cross_document() {
                 result.push(ref_item);
             }
@@ -176,8 +176,8 @@ X CrossRefTracker {
         ~new_refs = Vec.new();
         ~i: u32 = 0;
         W i < self.references.len() as u32 {
-            ~ref_item = self.references.get(i as usize);
-            if ref_item.source_chunk_id != chunk_id && ref_item.target_chunk_id != chunk_id {
+            ~ref_item = self.references.get(i as u64);
+            I ref_item.source_chunk_id != chunk_id && ref_item.target_chunk_id != chunk_id {
                 ~copy = CrossReference.new(
                     ref_item.ref_id, ref_item.source_chunk_id,
                     ref_item.target_chunk_id, ref_item.ref_type,
@@ -197,8 +197,8 @@ X CrossRefTracker {
         ~new_refs = Vec.new();
         ~i: u32 = 0;
         W i < self.references.len() as u32 {
-            ~ref_item = self.references.get(i as usize);
-            if ref_item.source_doc_id != doc_id && ref_item.target_doc_id != doc_id {
+            ~ref_item = self.references.get(i as u64);
+            I ref_item.source_doc_id != doc_id && ref_item.target_doc_id != doc_id {
                 ~copy = CrossReference.new(
                     ref_item.ref_id, ref_item.source_chunk_id,
                     ref_item.target_chunk_id, ref_item.ref_type,
@@ -219,7 +219,7 @@ X CrossRefTracker {
         ~edges = Vec.new();
         ~i: u32 = 0;
         W i < self.references.len() as u32 {
-            ~ref_item = self.references.get(i as usize);
+            ~ref_item = self.references.get(i as u64);
 
             # Find source graph node
             ~src_node_opt = find_graph_node(ref_item.source_chunk_id, chunk_to_graph_node);
@@ -229,9 +229,9 @@ X CrossRefTracker {
                 Some(src_node) => {
                     M tgt_node_opt {
                         Some(tgt_node) => {
-                            ~edge_type = if ref_item.ref_type == REF_TYPE_EXPLICIT {
+                            ~edge_type = I ref_item.ref_type == REF_TYPE_EXPLICIT {
                                 EDGE_TYPE_REFERENCES
-                            } else {
+                            } E {
                                 EDGE_TYPE_RELATED_TO
                             };
                             edges.push((src_node, tgt_node, edge_type));

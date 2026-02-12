@@ -57,7 +57,7 @@ X Token {
 # SQL Tokenizer
 S Tokenizer {
     input: Vec<u8>,      # UTF-8 bytes of SQL input
-    pos: usize,          # Current byte position
+    pos: u64,          # Current byte position
     line: u32,           # Current line number (1-based)
     col: u32,            # Current column number (1-based)
 }
@@ -77,16 +77,16 @@ X Tokenizer {
     F next_token(~self) -> Result<Token, VaisError> {
         self.skip_whitespace_and_comments();
 
-        if self.is_at_end() {
-            return Ok(Token.new(TokenKind.Eof, self.line, self.col));
+        I self.is_at_end() {
+            R Ok(Token.new(TokenKind.Eof, self.line, self.col));
         }
 
-        let start_line = self.line;
-        let start_col = self.col;
-        let ch = self.peek();
+        start_line := self.line;
+        start_col := self.col;
+        ch := self.peek();
 
         # Handle single-character and multi-character operators
-        let kind = M ch {
+        kind := M ch {
             b'(' => {
                 self.advance();
                 TokenKind.LParen
@@ -135,32 +135,32 @@ X Tokenizer {
             },
             b'<' => {
                 self.advance();
-                if self.peek() == b'=' {
+                I self.peek() == b'=' {
                     self.advance();
                     TokenKind.Le
-                } else if self.peek() == b'>' {
+                } E I self.peek() == b'>' {
                     self.advance();
                     TokenKind.Neq
-                } else {
+                } E {
                     TokenKind.Lt
                 }
             },
             b'>' => {
                 self.advance();
-                if self.peek() == b'=' {
+                I self.peek() == b'=' {
                     self.advance();
                     TokenKind.Ge
-                } else {
+                } E {
                     TokenKind.Gt
                 }
             },
             b'!' => {
                 self.advance();
-                if self.peek() == b'=' {
+                I self.peek() == b'=' {
                     self.advance();
                     TokenKind.Neq
-                } else {
-                    return Err(VaisError.new(
+                } E {
+                    R Err(VaisError.new(
                         "VAIS-0101001",
                         "SQL parse error at line {start_line}, col {start_col}: unexpected character '!'"
                     ));
@@ -168,30 +168,30 @@ X Tokenizer {
             },
             b'|' => {
                 self.advance();
-                if self.peek() == b'|' {
+                I self.peek() == b'|' {
                     self.advance();
                     TokenKind.Pipe
-                } else {
-                    return Err(VaisError.new(
+                } E {
+                    R Err(VaisError.new(
                         "VAIS-0101001",
                         "SQL parse error at line {start_line}, col {start_col}: unexpected character '|'"
                     ));
                 }
             },
             b'\'' => {
-                return self.read_string_literal();
+                R self.read_string_literal();
             },
             b'$' => {
-                return self.read_parameter();
+                R self.read_parameter();
             },
             _ => {
-                if self.is_digit(ch) {
-                    return self.read_number();
-                } else if self.is_alpha(ch) || ch == b'_' {
-                    return Ok(Token.new(self.read_identifier_or_keyword(), start_line, start_col));
-                } else {
-                    let ch_str = Str.from_utf8_lossy(&[ch]);
-                    return Err(VaisError.new(
+                I self.is_digit(ch) {
+                    R self.read_number();
+                } E I self.is_alpha(ch) || ch == b'_' {
+                    R Ok(Token.new(self.read_identifier_or_keyword(), start_line, start_col));
+                } E {
+                    ch_str := Str.from_utf8_lossy(&[ch]);
+                    R Err(VaisError.new(
                         "VAIS-0101001",
                         "SQL parse error at line {start_line}, col {start_col}: unexpected character '{ch_str}'"
                     ));
@@ -204,16 +204,16 @@ X Tokenizer {
 
     # Tokenize entire input into vector of tokens
     F tokenize_all(~self) -> Result<Vec<Token>, VaisError> {
-        ~let tokens = Vec.new();
-        loop {
-            let tok = self.next_token()?;
-            let is_eof = M tok.kind {
+        ~tokens := Vec.new();
+        L {
+            tok := self.next_token()?;
+            is_eof := M tok.kind {
                 TokenKind.Eof => true,
                 _ => false,
             };
             tokens.push(tok);
-            if is_eof {
-                break;
+            I is_eof {
+                B;
             }
         }
         Ok(tokens)
@@ -221,40 +221,41 @@ X Tokenizer {
 
     # Skip whitespace and comments
     F skip_whitespace_and_comments(~self) {
-        loop {
-            let ch = self.peek();
-            if ch == b' ' || ch == b'\t' || ch == b'\n' || ch == b'\r' {
+        L {
+            ch := self.peek();
+            I ch == b' ' || ch == b'\t' || ch == b'\n' || ch == b'\r' {
                 self.skip_whitespace();
-            } else if ch == b'-' && self.peek_ahead(1) == b'-' {
+            } E I ch == b'-' && self.peek_ahead(1) == b'-' {
                 self.skip_line_comment();
-            } else if ch == b'/' && self.peek_ahead(1) == b'*' {
+            } E I ch == b'/' && self.peek_ahead(1) == b'*' {
                 self.skip_block_comment();
-            } else {
-                break;
+            } E {
+                B;
             }
         }
     }
 
     # Skip whitespace characters
     F skip_whitespace(~self) {
-        while !self.is_at_end() {
-            let ch = self.peek();
-            if ch == b' ' || ch == b'\t' {
+        L {
+            I self.is_at_end() { B }
+            ch := self.peek();
+            I ch == b' ' || ch == b'\t' {
                 self.advance();
-            } else if ch == b'\n' {
+            } E I ch == b'\n' {
                 self.advance();
                 self.line += 1;
                 self.col = 1;
-            } else if ch == b'\r' {
+            } E I ch == b'\r' {
                 self.advance();
                 # Handle \r\n
-                if self.peek() == b'\n' {
+                I self.peek() == b'\n' {
                     self.advance();
                 }
                 self.line += 1;
                 self.col = 1;
-            } else {
-                break;
+            } E {
+                B;
             }
         }
     }
@@ -266,7 +267,8 @@ X Tokenizer {
         self.advance();
 
         # Read until end of line or EOF
-        while !self.is_at_end() && self.peek() != b'\n' {
+        L {
+            I self.is_at_end() && self.peek() != b'\n' { B }
             self.advance();
         }
     }
@@ -278,13 +280,14 @@ X Tokenizer {
         self.advance();
 
         # Read until */ or EOF
-        while !self.is_at_end() {
-            if self.peek() == b'*' && self.peek_ahead(1) == b'/' {
+        L {
+            I self.is_at_end() { B }
+            I self.peek() == b'*' && self.peek_ahead(1) == b'/' {
                 self.advance();
                 self.advance();
-                break;
+                B;
             }
-            if self.peek() == b'\n' {
+            I self.peek() == b'\n' {
                 self.line += 1;
                 self.col = 0;  # Will be incremented to 1 by advance()
             }
@@ -294,59 +297,64 @@ X Tokenizer {
 
     # Read integer or float literal
     F read_number(~self) -> Result<Token, VaisError> {
-        let start_line = self.line;
-        let start_col = self.col;
-        ~let num_str = Vec.new();
-        ~let is_float = false;
+        start_line := self.line;
+        start_col := self.col;
+        ~num_str := Vec.new();
+        ~is_float := false;
 
         # Read digits
-        while !self.is_at_end() && self.is_digit(self.peek()) {
+        L {
+            I self.is_at_end() && self.is_digit(self.peek()) { B }
             num_str.push(self.advance());
         }
 
         # Check for decimal point
-        if !self.is_at_end() && self.peek() == b'.' && self.is_digit(self.peek_ahead(1)) {
+        I !self.is_at_end() && self.peek() == b'.' && self.is_digit(self.peek_ahead(1)) {
             is_float = true;
             num_str.push(self.advance());  # consume '.'
 
-            while !self.is_at_end() && self.is_digit(self.peek()) {
+            L {
+
+                I self.is_at_end() && self.is_digit(self.peek()) { B }
                 num_str.push(self.advance());
             }
         }
 
         # Check for scientific notation
-        if !self.is_at_end() && (self.peek() == b'e' || self.peek() == b'E') {
+        I !self.is_at_end() && (self.peek() == b'e' || self.peek() == b'E') {
             is_float = true;
             num_str.push(self.advance());  # consume 'e' or 'E'
 
-            if !self.is_at_end() && (self.peek() == b'+' || self.peek() == b'-') {
+            I !self.is_at_end() && (self.peek() == b'+' || self.peek() == b'-') {
                 num_str.push(self.advance());
             }
 
-            if !self.is_digit(self.peek()) {
-                return Err(VaisError.new(
+            I !self.is_digit(self.peek()) {
+                R Err(VaisError.new(
                     "VAIS-0101001",
                     "SQL parse error at line {start_line}, col {start_col}: invalid number format"
                 ));
             }
 
-            while !self.is_at_end() && self.is_digit(self.peek()) {
+            L {
+
+                I self.is_at_end() && self.is_digit(self.peek()) { B }
                 num_str.push(self.advance());
             }
         }
 
-        let num_string = Str.from_utf8_lossy(&num_str);
+        num_string := Str.from_utf8_lossy(&num_str);
 
-        if is_float {
-            let v = num_string.parse_f64().map_err(|_| {
+        I is_float {
+            v := num_string.parse_f64().map_err(|_| {
                 VaisError.new(
                     "VAIS-0101001",
                     "SQL parse error at line {start_line}, col {start_col}: invalid float literal '{num_string}'"
                 )
             })?;
             Ok(Token.new(TokenKind.FloatLit { v }, start_line, start_col))
-        } else {
-            let v = num_string.parse_i64().map_err(|_| {
+        } E {
+            v := num_string.parse_i64().map_err(|_| {
                 VaisError.new(
                     "VAIS-0101001",
                     "SQL parse error at line {start_line}, col {start_col}: invalid integer literal '{num_string}'"
@@ -358,63 +366,65 @@ X Tokenizer {
 
     # Read string literal ('...' with '' escape)
     F read_string_literal(~self) -> Result<Token, VaisError> {
-        let start_line = self.line;
-        let start_col = self.col;
+        start_line := self.line;
+        start_col := self.col;
 
         # Skip opening '
         self.advance();
 
-        ~let str_content = Vec.new();
+        ~str_content := Vec.new();
 
-        loop {
-            if self.is_at_end() {
-                return Err(VaisError.new(
+        L {
+            I self.is_at_end() {
+                R Err(VaisError.new(
                     "VAIS-0101001",
                     "SQL parse error at line {start_line}, col {start_col}: unterminated string literal"
                 ));
             }
 
-            let ch = self.peek();
+            ch := self.peek();
 
-            if ch == b'\'' {
+            I ch == b'\'' {
                 self.advance();
                 # Check for '' escape
-                if self.peek() == b'\'' {
+                I self.peek() == b'\'' {
                     str_content.push(b'\'');
                     self.advance();
-                } else {
+                } E {
                     # End of string
-                    break;
+                    B;
                 }
-            } else if ch == b'\n' {
+            } E I ch == b'\n' {
                 # Allow newlines in strings
                 str_content.push(self.advance());
                 self.line += 1;
                 self.col = 1;
-            } else {
+            } E {
                 str_content.push(self.advance());
             }
         }
 
-        let v = Str.from_utf8_lossy(&str_content);
+        v := Str.from_utf8_lossy(&str_content);
         Ok(Token.new(TokenKind.StringLit { v }, start_line, start_col))
     }
 
     # Read identifier or keyword
     F read_identifier_or_keyword(~self) -> TokenKind {
-        ~let ident = Vec.new();
+        ~ident := Vec.new();
 
-        while !self.is_at_end() {
-            let ch = self.peek();
-            if self.is_alpha(ch) || self.is_digit(ch) || ch == b'_' {
+        L {
+
+            I self.is_at_end() { B }
+            ch := self.peek();
+            I self.is_alpha(ch) || self.is_digit(ch) || ch == b'_' {
                 ident.push(self.advance());
-            } else {
-                break;
+            } E {
+                B;
             }
         }
 
-        let ident_str = Str.from_utf8_lossy(&ident);
-        let upper = ident_str.to_uppercase();
+        ident_str := Str.from_utf8_lossy(&ident);
+        upper := ident_str.to_uppercase();
 
         # Check if keyword (case-insensitive)
         M upper.as_str() {
@@ -521,26 +531,27 @@ X Tokenizer {
 
     # Read parameter marker ($1, $2, ...)
     F read_parameter(~self) -> Result<Token, VaisError> {
-        let start_line = self.line;
-        let start_col = self.col;
+        start_line := self.line;
+        start_col := self.col;
 
         # Skip $
         self.advance();
 
-        if !self.is_digit(self.peek()) {
-            return Err(VaisError.new(
+        I !self.is_digit(self.peek()) {
+            R Err(VaisError.new(
                 "VAIS-0101001",
                 "SQL parse error at line {start_line}, col {start_col}: invalid parameter marker (expected digit after '$')"
             ));
         }
 
-        ~let num_str = Vec.new();
-        while !self.is_at_end() && self.is_digit(self.peek()) {
+        ~num_str := Vec.new();
+        L {
+            I self.is_at_end() && self.is_digit(self.peek()) { B }
             num_str.push(self.advance());
         }
 
-        let num_string = Str.from_utf8_lossy(&num_str);
-        let idx = num_string.parse_u32().map_err(|_| {
+        num_string := Str.from_utf8_lossy(&num_str);
+        idx := num_string.parse_u32().map_err(|_| {
             VaisError.new(
                 "VAIS-0101001",
                 "SQL parse error at line {start_line}, col {start_col}: invalid parameter index '{num_string}'"
@@ -552,26 +563,26 @@ X Tokenizer {
 
     # Peek at current byte (0 if at end)
     F peek(self) -> u8 {
-        if self.is_at_end() {
+        I self.is_at_end() {
             0
-        } else {
+        } E {
             self.input[self.pos]
         }
     }
 
     # Peek ahead N bytes (0 if out of bounds)
-    F peek_ahead(self, n: usize) -> u8 {
-        let pos = self.pos + n;
-        if pos >= self.input.len() {
+    F peek_ahead(self, n: u64) -> u8 {
+        pos := self.pos + n;
+        I pos >= self.input.len() {
             0
-        } else {
+        } E {
             self.input[pos]
         }
     }
 
     # Consume and return current byte, update column
     F advance(~self) -> u8 {
-        let ch = self.input[self.pos];
+        ch := self.input[self.pos];
         self.pos += 1;
         self.col += 1;
         ch

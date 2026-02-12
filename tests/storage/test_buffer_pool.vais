@@ -27,7 +27,7 @@ describe("Clock Replacer") {
         replacer.unpin(2);
 
         # Evict should return one of the unpinned frames
-        ~victim = replacer.evict().unwrap();
+        ~victim = replacer.evict()!;
         assert_true(victim == 0 || victim == 1 || victim == 2);
     }
 
@@ -52,7 +52,7 @@ describe("Clock Replacer") {
         replacer.access(0);
 
         # First eviction should skip 0 (has ref bit) and evict 1
-        ~victim = replacer.evict().unwrap();
+        ~victim = replacer.evict()!;
         assert_eq(victim, 1);
     }
 }
@@ -102,10 +102,10 @@ describe("Buffer Pool Stats") {
         ~stats = BufferPoolStats.new();
 
         # 80 hits, 20 misses → 80% hit rate
-        for _ in 0..80 {
+        L _: 0..80 {
             stats.record_hit();
         }
-        for _ in 0..20 {
+        L _: 0..20 {
             stats.record_miss();
         }
 
@@ -136,7 +136,7 @@ describe("Buffer Pool Pin Safety") {
         replacer.unpin(1);
 
         # Evict should only consider frame 1
-        ~victim = replacer.evict().unwrap();
+        ~victim = replacer.evict()!;
         assert_eq(victim, 1);
 
         # Now all remaining are pinned → no more victims
@@ -153,12 +153,12 @@ describe("Buffer Pool Hit Rate > 90%") {
         ~total_pages: u32 = 100;
 
         # First access to all pages (100 misses)
-        for _ in 0..total_pages {
+        L _: 0..total_pages {
             stats.record_miss();
         }
 
         # Subsequent accesses: 900 more to hot pages (all hits)
-        for _ in 0..900 {
+        L _: 0..900 {
             stats.record_hit();
         }
 

@@ -884,6 +884,18 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ---
 
+## 완료: Vais 문법 정규화 (2026-02-12)
+- [x] 1. 제어흐름 키워드 수정: for→L, if→I, else→E, return→R, break→B, continue→C, while→L while, loop→L (전체 ~200 파일)
+- [x] 2. 모듈 시스템 수정: let→:= / ~(mutable) (9 파일, 456줄)
+- [x] 3. match→M, usize→u64 타입 수정 (148 파일, 1320 occurrences)
+- [x] 4. .unwrap()→!, String→Str, mut→~ 수정 (33 파일, 165 fixes). drop() 유지(RAII scope 리팩토링은 별도)
+- [x] 5. :: 경로구분자 검토 — 정상(turbofish 3건만 비표준)
+- [x] 6. 상수 정의 키워드 검토 — L 유지(C는 Continue 전용)
+- [x] 7. 전체 검증: for/if/else/return/while/loop/let/usize/match/.unwrap()/String/mut = 모두 0건
+진행률: 7/7 (100%)
+
+---
+
 ## Phase 8: Server & Client
 
 > **Status**: 🔄 In Progress

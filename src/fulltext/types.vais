@@ -159,8 +159,8 @@ X FullTextConfig {
         buf.put_f64_le(self.bm25_b);
         buf.put_u32_le(self.max_token_length);
         buf.put_u32_le(self.min_token_length);
-        buf.put_u8(if self.enable_stop_words { 1 } else { 0 });
-        buf.put_u8(if self.enable_positions { 1 } else { 0 });
+        buf.put_u8(I self.enable_stop_words { 1 } E { 0 });
+        buf.put_u8(I self.enable_positions { 1 } E { 0 });
         buf.put_u16_le(0);  # reserved
     }
 
@@ -209,17 +209,17 @@ X FullTextMeta {
 
     # Update average document length after insert/delete
     F update_avg_doc_length(~self, doc_token_count: u64, is_insert: bool) {
-        if is_insert {
+        I is_insert {
             ~old_total = self.avg_doc_length * (self.total_docs as f64);
             self.total_docs += 1;
             self.total_tokens += doc_token_count;
             self.avg_doc_length = (old_total + doc_token_count as f64) / (self.total_docs as f64);
-        } else {
-            if self.total_docs <= 1 {
+        } E {
+            I self.total_docs <= 1 {
                 self.total_docs = 0;
                 self.total_tokens = 0;
                 self.avg_doc_length = 0.0;
-            } else {
+            } E {
                 ~old_total = self.avg_doc_length * (self.total_docs as f64);
                 self.total_docs -= 1;
                 self.total_tokens -= doc_token_count;
@@ -302,8 +302,8 @@ X PostingEntry {
         buf.put_u32_le(self.positions.len() as u32);
 
         # Positions
-        ~i: usize = 0;
-        L while i < self.positions.len() {
+        ~i: u64 = 0;
+        L W i < self.positions.len() {
             buf.put_u32_le(self.positions[i]);
             i += 1;
         }
@@ -319,16 +319,16 @@ X PostingEntry {
     F deserialize(buf: &ByteBuffer) -> Result<PostingEntry, VaisError> {
         ~doc_id = buf.get_u64_le()?;
         ~term_freq = buf.get_u32_le()?;
-        ~position_count = buf.get_u32_le()? as usize;
+        ~position_count = buf.get_u32_le()? as u64;
 
-        if position_count > MAX_POSITIONS_PER_ENTRY as usize {
-            return Err(err_fulltext_too_many_positions(position_count as u32));
+        I position_count > MAX_POSITIONS_PER_ENTRY as u64 {
+            R Err(err_fulltext_too_many_positions(position_count as u32));
         }
 
         # Positions
         ~positions = Vec.with_capacity(position_count);
-        ~i: usize = 0;
-        L while i < position_count {
+        ~i: u64 = 0;
+        L W i < position_count {
             positions.push(buf.get_u32_le()?);
             i += 1;
         }
@@ -374,7 +374,7 @@ X PostingEntry {
 
     # Serialize to standalone byte vector (for WAL payload)
     F to_bytes(self) -> Vec<u8> {
-        ~buf = ByteBuffer.new(self.serialized_size() as usize);
+        ~buf = ByteBuffer.new(self.serialized_size() as u64);
         self.serialize(&buf);
         buf.to_vec()
     }
@@ -494,12 +494,12 @@ X DictEntry {
 
     # Decrement doc frequency
     F dec_doc_freq(~self, term_freq: u32) {
-        if self.doc_freq > 0 {
+        I self.doc_freq > 0 {
             self.doc_freq -= 1;
         }
-        if self.total_term_freq >= term_freq as u64 {
+        I self.total_term_freq >= term_freq as u64 {
             self.total_term_freq -= term_freq as u64;
-        } else {
+        } E {
             self.total_term_freq = 0;
         }
     }
@@ -552,8 +552,8 @@ L FNV_PRIME: u64 = 1099511628211;
 F fnv1a_hash(data: &Str) -> u64 {
     ~hash: u64 = FNV_OFFSET_BASIS;
     ~bytes = data.as_bytes();
-    ~i: usize = 0;
-    L while i < bytes.len() {
+    ~i: u64 = 0;
+    L W i < bytes.len() {
         hash = hash ^ (bytes[i] as u64);
         hash = hash * FNV_PRIME;
         i += 1;

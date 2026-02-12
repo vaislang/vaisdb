@@ -61,7 +61,7 @@ X WalSegmentHeader {
 
     # Serialize header to byte array (32 bytes)
     F to_bytes(&self) -> [u8; 32] {
-        ~buf = ByteBuffer.with_capacity(WAL_SEGMENT_HEADER_SIZE as usize);
+        ~buf = ByteBuffer.with_capacity(WAL_SEGMENT_HEADER_SIZE as u64);
         self.serialize(&~buf);
         ~bytes = [0u8; 32];
         buf.as_slice().copy_to(&~bytes, 0);
@@ -77,14 +77,14 @@ X WalSegmentHeader {
     # Verify header integrity
     F verify(&self) -> Result<(), VaisError> {
         # Check magic number
-        if self.magic != WAL_SEGMENT_MAGIC {
-            return Err(err_invalid_magic());
+        I self.magic != WAL_SEGMENT_MAGIC {
+            R Err(err_invalid_magic());
         }
 
         # Verify checksum
         ~bytes = self.to_bytes();
-        if !verify_segment_header_checksum(&bytes) {
-            return Err(err_wal_segment_corrupt(self.segment_number, 0));
+        I !verify_segment_header_checksum(&bytes) {
+            R Err(err_wal_segment_corrupt(self.segment_number, 0));
         }
 
         Ok(())
@@ -109,16 +109,16 @@ X WalSegmentHeader {
     # Parse segment number from filename
     F parse_segment_number(filename: &Str) -> Result<u32, VaisError> {
         # Expected format: NNNNNN.wal
-        if !filename.ends_with(".wal") {
-            return Err(VaisError.new(
+        I !filename.ends_with(".wal") {
+            R Err(VaisError.new(
                 "VAIS-0005001",
                 "Invalid WAL segment filename: {filename}"
             ));
         }
 
         ~parts: Vec<&str> = filename.split('.').collect();
-        if parts.len() != 2 {
-            return Err(VaisError.new(
+        I parts.len() != 2 {
+            R Err(VaisError.new(
                 "VAIS-0005001",
                 "Invalid WAL segment filename: {filename}"
             ));

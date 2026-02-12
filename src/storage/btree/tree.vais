@@ -68,7 +68,7 @@ X BTree {
         ~current_page = self.root_page_id;
         ~parent_guard: Option<LatchGuard> = None;
 
-        for level in 0..(self.height - 1) {
+        L level: 0..(self.height - 1) {
             # Acquire read latch on current node
             ~guard = LatchGuard.new_read(&self.latch_table, current_page);
 
@@ -127,13 +127,13 @@ X BTree {
 
         # Scan current leaf from start position
         ~i = start_idx;
-        loop {
-            while i < leaf.entry_count() as usize {
+        L {
+            L while i < leaf.entry_count() as u64 {
                 ~key = leaf.get_key(i).to_vec();
-                if key_greater_than(&key, end_key) {
+                I key_greater_than(&key, end_key) {
                     current_guard.release();
                     pool.unpin_page(frame_id, false);
-                    return Ok(results);
+                    R Ok(results);
                 }
                 results.push((key, leaf.entries[i].tid));
                 i += 1;
@@ -142,10 +142,10 @@ X BTree {
             # Follow next_page link with latch crabbing
             ~next = leaf.next_leaf();
 
-            if next == NULL_PAGE {
+            I next == NULL_PAGE {
                 current_guard.release();
                 pool.unpin_page(frame_id, false);
-                break;
+                B;
             }
 
             # Acquire next leaf's read latch before releasing current
@@ -179,7 +179,7 @@ X BTree {
 
     # Increment entry count
     F inc_entries(~self) { self.entry_count += 1; }
-    F dec_entries(~self) { if self.entry_count > 0 { self.entry_count -= 1; } }
+    F dec_entries(~self) { I self.entry_count > 0 { self.entry_count -= 1; } }
 }
 
 # Helper: check if a > b

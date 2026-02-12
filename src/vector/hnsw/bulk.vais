@@ -67,9 +67,9 @@ F err_progress_callback_failed(detail: Str) -> VaisError {
 # Configuration for bulk loading vectors into HNSW index
 # Controls batch size, WAL behavior, and progress reporting
 S BulkLoadConfig {
-    batch_size: usize,          # Vectors per batch (default 1000)
+    batch_size: u64,          # Vectors per batch (default 1000)
     skip_wal: bool,             # Skip WAL for speed (requires checkpoint after)
-    progress_interval: usize,   # Report progress every N vectors (0 = no progress)
+    progress_interval: u64,   # Report progress every N vectors (0 = no progress)
     seed: u64,                  # RNG seed for layer assignment (0 = use system time)
 }
 
@@ -85,7 +85,7 @@ X BulkLoadConfig {
     }
 
     # Create configuration with custom batch size
-    F with_batch_size(batch_size: usize) -> BulkLoadConfig {
+    F with_batch_size(batch_size: u64) -> BulkLoadConfig {
         BulkLoadConfig {
             batch_size,
             skip_wal: false,
@@ -102,7 +102,7 @@ X BulkLoadConfig {
     }
 
     # Set progress reporting interval
-    F with_progress_interval(~self, interval: usize) -> BulkLoadConfig {
+    F with_progress_interval(~self, interval: u64) -> BulkLoadConfig {
         self.progress_interval = interval;
         self
     }
@@ -115,8 +115,8 @@ X BulkLoadConfig {
 
     # Validate configuration
     F validate(self) -> Result<(), VaisError> {
-        if self.batch_size == 0 {
-            return Err(err_bulk_config_invalid("batch_size must be > 0"));
+        I self.batch_size == 0 {
+            R Err(err_bulk_config_invalid("batch_size must be > 0"));
         }
         Ok(())
     }
@@ -129,15 +129,15 @@ X BulkLoadConfig {
 # Progress information for bulk load operation
 # Updated periodically and passed to progress callback
 S BulkLoadProgress {
-    total_vectors: usize,       # Total vectors to insert
-    inserted_vectors: usize,    # Vectors inserted so far
+    total_vectors: u64,       # Total vectors to insert
+    inserted_vectors: u64,    # Vectors inserted so far
     current_phase: Str,         # Current phase: "storing_vectors", "building_index", "updating_meta"
     elapsed_ms: u64,            # Elapsed time in milliseconds
 }
 
 X BulkLoadProgress {
     # Create new progress tracker
-    F new(total_vectors: usize) -> BulkLoadProgress {
+    F new(total_vectors: u64) -> BulkLoadProgress {
         BulkLoadProgress {
             total_vectors,
             inserted_vectors: 0,
@@ -152,7 +152,7 @@ X BulkLoadProgress {
     }
 
     # Update inserted count
-    F set_inserted(~self, count: usize) {
+    F set_inserted(~self, count: u64) {
         self.inserted_vectors = count;
     }
 
@@ -163,9 +163,9 @@ X BulkLoadProgress {
 
     # Calculate progress percentage (0-100)
     F percentage(self) -> f64 {
-        if self.total_vectors == 0 {
+        I self.total_vectors == 0 {
             0.0
-        } else {
+        } E {
             (self.inserted_vectors as f64 / self.total_vectors as f64) * 100.0
         }
     }
@@ -183,7 +183,7 @@ X BulkLoadProgress {
 # Result of bulk load operation
 # Contains statistics about the operation
 S BulkLoadResult {
-    vectors_inserted: usize,    # Total vectors successfully inserted
+    vectors_inserted: u64,    # Total vectors successfully inserted
     layers_built: u8,           # Maximum layer built
     elapsed_ms: u64,            # Total elapsed time in milliseconds
     wal_skipped: bool,          # Whether WAL was skipped
@@ -192,7 +192,7 @@ S BulkLoadResult {
 X BulkLoadResult {
     # Create new result
     F new(
-        vectors_inserted: usize,
+        vectors_inserted: u64,
         layers_built: u8,
         elapsed_ms: u64,
         wal_skipped: bool
@@ -207,7 +207,7 @@ X BulkLoadResult {
 
     # Get human-readable summary
     F to_string(self) -> Str {
-        ~wal_status = if self.wal_skipped { "skipped" } else { "enabled" };
+        ~wal_status = I self.wal_skipped { "skipped" } E { "enabled" };
         "Bulk load completed: {self.vectors_inserted} vectors, {self.layers_built} layers, {self.elapsed_ms}ms (WAL: {wal_status})"
     }
 }
@@ -219,7 +219,7 @@ X BulkLoadResult {
 # Metadata for a single vector during bulk load
 # Stores pre-computed layer and storage location
 S VectorMeta {
-    vector_index: usize,        # Index in input vector array
+    vector_index: u64,        # Index in input vector array
     node_id: u64,               # Allocated node ID
     layer: u8,                  # Assigned layer (from exponential distribution)
     page_id: u32,               # Page where vector is stored
@@ -229,7 +229,7 @@ S VectorMeta {
 X VectorMeta {
     # Create new vector metadata
     F new(
-        vector_index: usize,
+        vector_index: u64,
         node_id: u64,
         layer: u8,
         page_id: u32,
@@ -262,7 +262,7 @@ X BulkLoader {
         config.validate()?;
 
         # Initialize RNG with seed (use simple value if seed is 0)
-        ~seed = if config.seed == 0 { 12345u64 } else { config.seed };
+        ~seed = I config.seed == 0 { 12345u64 } E { config.seed };
         ~rng = LayerRng.new(seed);
 
         Ok(BulkLoader { config, rng })
@@ -270,7 +270,7 @@ X BulkLoader {
 
     # Create bulk loader with default configuration
     F default() -> BulkLoader {
-        BulkLoader.new(BulkLoadConfig.default()).unwrap()
+        BulkLoader.new(BulkLoadConfig.default())!
     }
 
     # Main bulk insert entry point
@@ -303,13 +303,13 @@ X BulkLoader {
         txn_id: u64
     ) -> Result<BulkLoadResult, VaisError> {
         # Validate inputs
-        if vectors.len() == 0 {
-            return Err(err_bulk_load_failed("No vectors to insert"));
+        I vectors.len() == 0 {
+            R Err(err_bulk_load_failed("No vectors to insert"));
         }
 
         # Check WAL bypass consistency
-        if self.config.skip_wal && gcm.is_some() {
-            return Err(err_bulk_config_invalid("Cannot skip WAL when GCM is provided"));
+        I self.config.skip_wal && gcm.is_some() {
+            R Err(err_bulk_config_invalid("Cannot skip WAL when GCM is provided"));
         }
 
         # Initialize progress tracking
@@ -369,9 +369,9 @@ X BulkLoader {
         ~i = 0;
         L while i < vectors.len() {
             # Determine batch end
-            ~batch_end = if i + self.config.batch_size < vectors.len() {
+            ~batch_end = I i + self.config.batch_size < vectors.len() {
                 i + self.config.batch_size
-            } else {
+            } E {
                 vectors.len()
             };
 
@@ -404,8 +404,8 @@ X BulkLoader {
             }
 
             # Update progress
-            if self.config.progress_interval > 0 {
-                if (batch_end % self.config.progress_interval) == 0 {
+            I self.config.progress_interval > 0 {
+                I (batch_end % self.config.progress_interval) == 0 {
                     progress.set_inserted(batch_end);
                 }
             }
@@ -450,7 +450,7 @@ X BulkLoader {
 
             # Insert into HNSW graph
             # If skip_wal, pass None for gcm (handled by caller check)
-            ~updated_meta = if self.config.skip_wal {
+            ~updated_meta = I self.config.skip_wal {
                 # Skip WAL: create dummy GCM-like behavior
                 # In real implementation, hnsw_insert should handle Option<GCM>
                 # For now, we assume caller ensures gcm is None when skip_wal=true
@@ -461,11 +461,11 @@ X BulkLoader {
                     &meta.config,
                     store,
                     distance,
-                    gcm.unwrap(),  # This would panic if skip_wal=true; needs refactor
+                    gcm!,  # This would panic I skip_wal=true; needs refactor
                     txn_id,
                     0
                 )?
-            } else {
+            } E {
                 hnsw_insert(
                     node,
                     vector,
@@ -473,7 +473,7 @@ X BulkLoader {
                     &meta.config,
                     store,
                     distance,
-                    gcm.unwrap(),
+                    gcm!,
                     txn_id,
                     0
                 )?
@@ -483,13 +483,13 @@ X BulkLoader {
             *meta = updated_meta;
 
             # Track max layer
-            if vmeta.layer > max_layer {
+            I vmeta.layer > max_layer {
                 max_layer = vmeta.layer;
             }
 
             # Update progress
-            if self.config.progress_interval > 0 {
-                if ((i + 1) % self.config.progress_interval) == 0 {
+            I self.config.progress_interval > 0 {
+                I ((i + 1) % self.config.progress_interval) == 0 {
                     progress.set_inserted(i + 1);
                 }
             }
@@ -527,7 +527,7 @@ X BulkLoader {
 
 # Calculate optimal batch size based on available memory
 # Returns suggested batch size for given vector dimension and memory budget
-F calculate_optimal_batch_size(dim: u32, memory_budget_mb: u32) -> usize {
+F calculate_optimal_batch_size(dim: u32, memory_budget_mb: u32) -> u64 {
     # Each vector: MVCC (32B) + f32 * dim
     ~bytes_per_vector = 32 + (dim * 4);
 
@@ -538,20 +538,20 @@ F calculate_optimal_batch_size(dim: u32, memory_budget_mb: u32) -> usize {
     ~batch_size = (budget_bytes * 80 / 100) / bytes_per_vector;
 
     # Clamp to reasonable range [100, 10000]
-    if batch_size < 100 {
+    I batch_size < 100 {
         100
-    } else if batch_size > 10000 {
+    } E I batch_size > 10000 {
         10000
-    } else {
-        batch_size as usize
+    } E {
+        batch_size as u64
     }
 }
 
 # Estimate total memory required for bulk loading N vectors
 # Returns memory estimate in MB
-F estimate_bulk_load_memory(dim: u32, vector_count: usize) -> u32 {
+F estimate_bulk_load_memory(dim: u32, vector_count: u64) -> u32 {
     # Vector storage: MVCC + data
-    ~vector_storage_bytes = vector_count * (32 + (dim * 4) as usize);
+    ~vector_storage_bytes = vector_count * (32 + (dim * 4) as u64);
 
     # HNSW node storage (conservative estimate)
     # Each node: ~48B fixed + ~12B per neighbor * avg_neighbors

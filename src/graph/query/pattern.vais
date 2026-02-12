@@ -116,7 +116,7 @@ X PatternNode {
         # Check label constraints
         M self.labels {
             Some(ref required_labels) => {
-                ~i: usize = 0;
+                ~i: u64 = 0;
                 L while i < required_labels.len() {
                     # In production, would use label_index to check if node has label
                     # For now, simplified check
@@ -209,18 +209,18 @@ X PatternEdge {
 
     # Get effective max hops (use large number for unbounded)
     F effective_max_hops(self) -> u32 {
-        if self.is_unbounded() {
+        I self.is_unbounded() {
             1000  # Reasonable upper limit for unbounded
-        } else if self.max_hops == 0 {
-            self.min_hops  # Single hop if max not specified
-        } else {
+        } E I self.max_hops == 0 {
+            self.min_hops  # Single hop I max not specified
+        } E {
             self.max_hops
         }
     }
 
     # Get effective min hops
     F effective_min_hops(self) -> u32 {
-        if self.min_hops == 0 { 1 } else { self.min_hops }
+        I self.min_hops == 0 { 1 } E { self.min_hops }
     }
 }
 
@@ -253,14 +253,14 @@ X GraphPattern {
 
     # Validate pattern structure
     F validate(self) -> Result<(), VaisError> {
-        if self.nodes.is_empty() {
-            return Err(err_pattern_invalid("Pattern must have at least one node".to_string()));
+        I self.nodes.is_empty() {
+            R Err(err_pattern_invalid("Pattern must have at least one node".to_string()));
         }
 
         # Check that edge count is valid (should be nodes - 1 for linear pattern)
         # For more complex patterns, this validation would be more sophisticated
-        if self.edges.len() > 0 && self.edges.len() >= self.nodes.len() {
-            return Err(err_pattern_invalid("Too many edges for node count".to_string()));
+        I self.edges.len() > 0 && self.edges.len() >= self.nodes.len() {
+            R Err(err_pattern_invalid("Too many edges for node count".to_string()));
         }
 
         Ok(())
@@ -268,10 +268,10 @@ X GraphPattern {
 
     # Get node pattern by alias
     F get_node_by_alias(self, alias: &Str) -> Option<&PatternNode> {
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < self.nodes.len() {
-            if self.nodes[i].alias == *alias {
-                return Some(&self.nodes[i]);
+            I self.nodes[i].alias == *alias {
+                R Some(&self.nodes[i]);
             }
             i += 1;
         }
@@ -285,7 +285,7 @@ X GraphPattern {
 }
 
 # ============================================================================
-# PatternMatch — Single match result (variable bindings)
+# PatternMatch — Single M result (variable bindings)
 # ============================================================================
 
 S PatternMatch {
@@ -306,10 +306,10 @@ X PatternMatch {
 
     # Get bound node ID for variable
     F get_binding(self, var_name: &Str) -> Option<u64> {
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < self.bindings.len() {
-            if self.bindings[i].0 == *var_name {
-                return Some(self.bindings[i].1);
+            I self.bindings[i].0 == *var_name {
+                R Some(self.bindings[i].1);
             }
             i += 1;
         }
@@ -329,7 +329,7 @@ X PatternMatch {
     # Clone bindings
     F clone_bindings(self) -> Vec<(Str, u64)> {
         ~result = Vec.with_capacity(self.bindings.len());
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < self.bindings.len() {
             result.push((self.bindings[i].0.clone(), self.bindings[i].1));
             i += 1;
@@ -378,9 +378,9 @@ X PatternMatcher {
         pattern.validate()?;
 
         # For linear patterns (most common), use optimized linear matcher
-        if pattern.is_linear() {
+        I pattern.is_linear() {
             self.match_linear_pattern(pattern, snapshot, clog)
-        } else {
+        } E {
             # For complex patterns, use general matcher (not implemented in this phase)
             Err(err_pattern_invalid("Non-linear patterns not yet supported".to_string()))
         }
@@ -396,8 +396,8 @@ X PatternMatcher {
     ) -> Result<Vec<PatternMatch>, VaisError> {
         ~matches = Vec.new();
 
-        if pattern.nodes.is_empty() {
-            return Ok(matches);
+        I pattern.nodes.is_empty() {
+            R Ok(matches);
         }
 
         # Start with first node pattern
@@ -406,16 +406,16 @@ X PatternMatcher {
         # Get candidate start nodes (all nodes if no constraints, or from label index)
         ~start_candidates = self.get_candidate_nodes(start_node_pattern, snapshot, clog)?;
 
-        # For each start candidate, try to match the rest of the pattern
-        ~i: usize = 0;
+        # For each start candidate, try to M the rest of the pattern
+        ~i: u64 = 0;
         L while i < start_candidates.len() {
             ~start_node = start_candidates[i];
 
-            # Initialize match with first binding
+            # Initialize M with first binding
             ~current_match = PatternMatch.new();
             current_match.bind(start_node_pattern.alias.clone(), start_node);
 
-            # Try to extend match through edges
+            # Try to extend M through edges
             ~match_result = self.extend_linear_match(
                 &current_match,
                 start_node,
@@ -426,7 +426,7 @@ X PatternMatcher {
             )?;
 
             # Add all successful extensions to results
-            ~j: usize = 0;
+            ~j: u64 = 0;
             L while j < match_result.len() {
                 matches.push(match_result[j]);
                 j += 1;
@@ -438,34 +438,34 @@ X PatternMatcher {
         Ok(matches)
     }
 
-    # Recursively extend a partial match through remaining pattern edges
+    # Recursively extend a partial M through remaining pattern edges
     F extend_linear_match(
         self,
         current_match: &PatternMatch,
         current_node: u64,
         pattern: &GraphPattern,
-        next_node_idx: usize,
+        next_node_idx: u64,
         snapshot: &Snapshot,
         clog: &Clog
     ) -> Result<Vec<PatternMatch>, VaisError> {
         # Base case: all nodes matched
-        if next_node_idx >= pattern.nodes.len() {
+        I next_node_idx >= pattern.nodes.len() {
             ~result = Vec.new();
             ~complete_match = PatternMatch.new();
             ~bindings = current_match.clone_bindings();
-            ~i: usize = 0;
+            ~i: u64 = 0;
             L while i < bindings.len() {
                 complete_match.bind(bindings[i].0.clone(), bindings[i].1);
                 i += 1;
             }
             result.push(complete_match);
-            return Ok(result);
+            R Ok(result);
         }
 
         # Get edge pattern connecting current node to next node
         ~edge_idx = next_node_idx - 1;
-        if edge_idx >= pattern.edges.len() {
-            return Err(err_pattern_invalid("Edge pattern missing for node connection".to_string()));
+        I edge_idx >= pattern.edges.len() {
+            R Err(err_pattern_invalid("Edge pattern missing for node connection".to_string()));
         }
 
         ~edge_pattern = &pattern.edges[edge_idx];
@@ -479,9 +479,9 @@ X PatternMatcher {
             clog
         )?;
 
-        # Try extending match with each neighbor
+        # Try extending M with each neighbor
         ~matches = Vec.new();
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < neighbors.len() {
             ~neighbor_id = neighbors[i];
 
@@ -494,11 +494,10 @@ X PatternMatcher {
                 clog
             )?;
 
-            if node_matches {
-                # Create extended match
-                ~extended_match = PatternMatch.new();
+            I node_matches {
+                # Create extended M ~extended_match = PatternMatch.new();
                 ~bindings = current_match.clone_bindings();
-                ~j: usize = 0;
+                ~j: u64 = 0;
                 L while j < bindings.len() {
                     extended_match.bind(bindings[j].0.clone(), bindings[j].1);
                     j += 1;
@@ -516,7 +515,7 @@ X PatternMatcher {
                 )?;
 
                 # Add all further matches
-                ~k: usize = 0;
+                ~k: u64 = 0;
                 L while k < further_matches.len() {
                     matches.push(further_matches[k]);
                     k += 1;
@@ -540,14 +539,14 @@ X PatternMatcher {
         ~neighbors = Vec.new();
 
         # For variable-length paths, use BFS/DFS with depth limits
-        if edge_pattern.is_variable_length() {
+        I edge_pattern.is_variable_length() {
             neighbors = self.find_reachable_nodes(
                 node_id,
                 edge_pattern,
                 snapshot,
                 clog
             )?;
-        } else {
+        } E {
             # Single-hop: read adjacency list directly
             # Note: In production, would use node_store to get adj pages
             # For now, simplified implementation
@@ -556,7 +555,7 @@ X PatternMatcher {
             # ~adj_entries = self.read_adjacency_entries(node_id, edge_pattern.direction)?;
 
             # Filter by edge type and visibility
-            # ~i: usize = 0;
+            # ~i: u64 = 0;
             # L while i < adj_entries.len() {
             #     ~entry = &adj_entries[i];
             #     if is_adj_entry_visible(entry, snapshot, clog) {
@@ -603,19 +602,18 @@ X PatternMatcher {
             ~current_depth = current.1;
 
             # If within hop range, add to reachable set
-            if current_depth >= min_hops && current_depth <= max_hops && current_node != start_node {
+            I current_depth >= min_hops && current_depth <= max_hops && current_node != start_node {
                 reachable.push(current_node);
             }
 
             # Stop expanding if at max depth
-            if current_depth >= max_hops {
-                continue;
-            }
+            I current_depth >= max_hops {
+                C            }
 
             # Expand neighbors
             # In production: read adjacency list and filter by edge type
             # ~neighbors = self.get_filtered_neighbors(current_node, edge_pattern, snapshot, clog)?;
-            # ~i: usize = 0;
+            # ~i: u64 = 0;
             # L while i < neighbors.len() {
             #     if !self.is_visited(&visited, neighbors[i]) {
             #         visited.push(neighbors[i]);
@@ -654,10 +652,10 @@ X PatternMatcher {
 
     # Helper: check if node is in visited set
     F is_visited(self, visited: &Vec<u64>, node_id: u64) -> bool {
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < visited.len() {
-            if visited[i] == node_id {
-                return true;
+            I visited[i] == node_id {
+                R true;
             }
             i += 1;
         }

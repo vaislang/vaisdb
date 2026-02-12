@@ -47,8 +47,8 @@ X RagChunkInsertPayload {
 
     ## Deserialize payload from bytes
     F deserialize(data: &[u8]) -> Result<RagChunkInsertPayload, VaisError> {
-        if data.len() < 28 {
-            return Err(VaisError.WalCorruption(
+        I data.len() < 28 {
+            R Err(VaisError.WalCorruption(
                 Str.from("RagChunkInsertPayload: insufficient data")
             ));
         }
@@ -78,8 +78,8 @@ X RagChunkDeletePayload {
     }
 
     F deserialize(data: &[u8]) -> Result<RagChunkDeletePayload, VaisError> {
-        if data.len() < 16 {
-            return Err(VaisError.WalCorruption(
+        I data.len() < 16 {
+            R Err(VaisError.WalCorruption(
                 Str.from("RagChunkDeletePayload: insufficient data")
             ));
         }
@@ -110,8 +110,8 @@ X RagDocumentInsertPayload {
     }
 
     F deserialize(data: &[u8]) -> Result<RagDocumentInsertPayload, VaisError> {
-        if data.len() < 24 {
-            return Err(VaisError.WalCorruption(
+        I data.len() < 24 {
+            R Err(VaisError.WalCorruption(
                 Str.from("RagDocumentInsertPayload: insufficient data")
             ));
         }
@@ -138,8 +138,8 @@ X RagDocumentDeletePayload {
     }
 
     F deserialize(data: &[u8]) -> Result<RagDocumentDeletePayload, VaisError> {
-        if data.len() < 8 {
-            return Err(VaisError.WalCorruption(
+        I data.len() < 8 {
+            R Err(VaisError.WalCorruption(
                 Str.from("RagDocumentDeletePayload: insufficient data")
             ));
         }
@@ -169,8 +169,8 @@ X RagEmbeddingUpdatePayload {
     }
 
     F deserialize(data: &[u8]) -> Result<RagEmbeddingUpdatePayload, VaisError> {
-        if data.len() < 18 {
-            return Err(VaisError.WalCorruption(
+        I data.len() < 18 {
+            R Err(VaisError.WalCorruption(
                 Str.from("RagEmbeddingUpdatePayload: insufficient data")
             ));
         }
@@ -205,8 +205,8 @@ X RagMemoryWritePayload {
     }
 
     F deserialize(data: &[u8]) -> Result<RagMemoryWritePayload, VaisError> {
-        if data.len() < 24 {
-            return Err(VaisError.WalCorruption(
+        I data.len() < 24 {
+            R Err(VaisError.WalCorruption(
                 Str.from("RagMemoryWritePayload: insufficient data")
             ));
         }

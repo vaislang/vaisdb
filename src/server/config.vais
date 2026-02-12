@@ -598,7 +598,7 @@ F err_invalid_config(key: &Str, reason: &Str) -> VaisError {
 F err_invalid_config_value(key: &Str, reason: &Str) -> VaisError {
     VaisError.new(
         "VAIS-0007001",
-        "Invalid value for '{key}': {reason}"
+        "Invalid value L '{key}': {reason}"
     )
 }
 

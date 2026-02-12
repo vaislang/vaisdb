@@ -25,12 +25,12 @@ describe("Page Header") {
         header.item_count = 5;
         header.free_space_offset = 100;
 
-        ~buf = Vec.with_capacity(PAGE_SIZE_DEFAULT as usize);
-        buf.resize(PAGE_SIZE_DEFAULT as usize, 0u8);
+        ~buf = Vec.with_capacity(PAGE_SIZE_DEFAULT as u64);
+        buf.resize(PAGE_SIZE_DEFAULT as u64, 0u8);
         ~bb = ByteBuffer.wrap(&buf);
         header.serialize(&bb);
 
-        ~restored = PageHeader.read_from_page(&buf).unwrap();
+        ~restored = PageHeader.read_from_page(&buf)!;
         assert_eq(restored.page_id, 42);
         assert_eq(restored.page_type, PAGE_TYPE_HEAP);
         assert_eq(restored.item_count, 5);
@@ -38,8 +38,8 @@ describe("Page Header") {
     }
 
     it("should compute CRC32C checksum over full page") {
-        ~buf = Vec.with_capacity(PAGE_SIZE_DEFAULT as usize);
-        buf.resize(PAGE_SIZE_DEFAULT as usize, 0u8);
+        ~buf = Vec.with_capacity(PAGE_SIZE_DEFAULT as u64);
+        buf.resize(PAGE_SIZE_DEFAULT as u64, 0u8);
 
         ~header = PageHeader.new(1, PAGE_TYPE_HEAP, ENGINE_TAG_SQL);
         ~bb = ByteBuffer.wrap(&buf);
@@ -78,7 +78,7 @@ describe("Meta Page") {
         buf.resize(256, 0u8);
         original.serialize_to(&buf);
 
-        ~restored = MetaPage.deserialize_from(&buf).unwrap();
+        ~restored = MetaPage.deserialize_from(&buf)!;
         assert_eq(restored.magic, original.magic);
         assert_eq(restored.format_version, original.format_version);
         assert_eq(restored.database_uuid, original.database_uuid);
@@ -90,7 +90,7 @@ describe("Freelist Bitmap") {
         ~freelist = FreelistPage.new(PAGE_SIZE_DEFAULT);
 
         # Allocate a page
-        ~page_id = freelist.allocate().unwrap();
+        ~page_id = freelist.allocate()!;
         assert_true(freelist.is_allocated(page_id));
 
         # Deallocate
@@ -102,8 +102,8 @@ describe("Freelist Bitmap") {
         ~freelist = FreelistPage.new(PAGE_SIZE_DEFAULT);
         ~initial_free = freelist.free_count();
 
-        ~p1 = freelist.allocate().unwrap();
-        ~p2 = freelist.allocate().unwrap();
+        ~p1 = freelist.allocate()!;
+        ~p2 = freelist.allocate()!;
         assert_eq(freelist.free_count(), initial_free - 2);
 
         freelist.deallocate(p1);
@@ -116,8 +116,8 @@ describe("Heap Page (Slotted)") {
         ~heap = HeapPage.new(1, PAGE_SIZE_DEFAULT);
         ~tuple_data = [1u8, 2, 3, 4, 5, 6, 7, 8];
 
-        ~slot = heap.insert_tuple(&tuple_data).unwrap();
-        ~retrieved = heap.get_tuple(slot).unwrap();
+        ~slot = heap.insert_tuple(&tuple_data)!;
+        ~retrieved = heap.get_tuple(slot)!;
         assert_eq(retrieved, &tuple_data);
     }
 
@@ -126,8 +126,8 @@ describe("Heap Page (Slotted)") {
         ~data1 = [10u8; 32];
         ~data2 = [20u8; 32];
 
-        ~s1 = heap.insert_tuple(&data1).unwrap();
-        ~s2 = heap.insert_tuple(&data2).unwrap();
+        ~s1 = heap.insert_tuple(&data1)!;
+        ~s2 = heap.insert_tuple(&data2)!;
         ~free_before = heap.free_space();
 
         heap.delete_tuple(s1);
@@ -150,9 +150,9 @@ describe("Heap Page (Slotted)") {
 describe("Page I/O Round Trip") {
     it("should write and read 10K pages with checksum integrity") {
         # Simulate 10K page writes
-        for i in 0..10000u32 {
-            ~buf = Vec.with_capacity(PAGE_SIZE_DEFAULT as usize);
-            buf.resize(PAGE_SIZE_DEFAULT as usize, 0u8);
+        L i: 0..10000u32 {
+            ~buf = Vec.with_capacity(PAGE_SIZE_DEFAULT as u64);
+            buf.resize(PAGE_SIZE_DEFAULT as u64, 0u8);
 
             ~header = PageHeader.new(i, PAGE_TYPE_HEAP, ENGINE_TAG_SQL);
             header.item_count = (i % 100) as u16;
@@ -164,7 +164,7 @@ describe("Page I/O Round Trip") {
             assert_true(verify_page_checksum(&buf));
 
             # Read back
-            ~restored = PageHeader.read_from_page(&buf).unwrap();
+            ~restored = PageHeader.read_from_page(&buf)!;
             assert_eq(restored.page_id, i);
             assert_eq(restored.item_count, (i % 100) as u16);
         }

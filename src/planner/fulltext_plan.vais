@@ -48,7 +48,7 @@ F detect_search_mode(query_text_expr: &Expr) -> FullTextSearchMode {
         Expr.Literal { value } => {
             M value {
                 sql/types.SqlValue.StringVal { v } => {
-                    return detect_mode_from_text(v);
+                    R detect_mode_from_text(v);
                 },
                 _ => {},
             }
@@ -63,27 +63,26 @@ F detect_search_mode(query_text_expr: &Expr) -> FullTextSearchMode {
 # Detect search mode from query text string
 F detect_mode_from_text(text: &Str) -> FullTextSearchMode {
     # Check for quoted phrases
-    if text.contains("\"") {
+    I text.contains("\"") {
         # Quoted phrase detected → Phrase mode
-        # Count quotes to determine if it's a complete phrase
+        # Count quotes to determine I it's a complete phrase
         ~quote_count = text.chars().filter(|c| *c == '"').count();
-        if quote_count >= 2 {
-            # Complete phrase: use slop=0 for exact match
-            return FullTextSearchMode.Phrase { slop: 0 };
+        I quote_count >= 2 {
+            # Complete phrase: use slop=0 for exact M R FullTextSearchMode.Phrase { slop: 0 };
         }
     }
 
     # Check for boolean operators
     ~upper = text.to_uppercase();
-    if upper.contains(" AND ") || upper.contains(" OR ") || upper.contains(" NOT ") {
+    I upper.contains(" AND ") || upper.contains(" OR ") || upper.contains(" NOT ") {
         # Boolean operators detected → Boolean mode
-        return FullTextSearchMode.Boolean;
+        R FullTextSearchMode.Boolean;
     }
 
     # Check for proximity operators (e.g., "word1 NEAR word2")
-    if upper.contains(" NEAR ") || upper.contains("~") {
+    I upper.contains(" NEAR ") || upper.contains("~") {
         # Proximity search → Phrase mode with slop
-        return FullTextSearchMode.Phrase { slop: 5 };
+        R FullTextSearchMode.Phrase { slop: 5 };
     }
 
     # Default: Simple BM25 mode
@@ -115,16 +114,16 @@ F adjust_top_k(base_top_k: u32, context: QueryContext) -> u32 {
             base_top_k * 2
         },
         QueryContext.BeforeLimit { n } => {
-            # Adjust top_k to match limit
+            # Adjust top_k to M limit
             # Use max to ensure at least some results
-            ~adjusted = if n < base_top_k as u64 {
+            ~adjusted = I n < base_top_k as u64 {
                 n as u32
-            } else {
+            } E {
                 base_top_k
             };
-            if adjusted < 10 {
+            I adjusted < 10 {
                 10  # Minimum top_k
-            } else {
+            } E {
                 adjusted
             }
         },
@@ -194,7 +193,7 @@ F build_fulltext_plan(
     # Step 1: Detect search mode from query text expression
     ~detected_mode = detect_search_mode(&params.query_text_expr);
 
-    # Step 2: Use detected mode if params.search_mode is Simple (default)
+    # Step 2: Use detected mode I params.search_mode is Simple (default)
     ~final_mode = M params.search_mode {
         FullTextSearchMode.Simple => detected_mode,
         _ => params.search_mode,  # User explicitly specified mode

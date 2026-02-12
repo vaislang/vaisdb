@@ -58,7 +58,7 @@ X TableScanExecutor {
     ) -> TableScanExecutor {
         # Build schema types array from columns
         ~schema = Vec.with_capacity(columns.len());
-        for col in &columns {
+        L col: &columns {
             schema.push(col.data_type);
         }
 
@@ -96,20 +96,20 @@ X TableScanExecutor {
     # Get next visible row matching the filter
     # Returns None when scan is exhausted
     F next(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
-        if !self.is_open || self.is_exhausted {
-            return Ok(None);
+        I !self.is_open || self.is_exhausted {
+            R Ok(None);
         }
 
         L {
             # Try to get a tuple from the current page
             M self.try_next_from_current_page(ctx)? {
-                Some(row) => { return Ok(Some(row)); },
+                Some(row) => { R Ok(Some(row)); },
                 None => {
                     # Current page exhausted, move to next page
-                    if !self.advance_page(ctx)? {
+                    I !self.advance_page(ctx)? {
                         # No more pages
                         self.is_exhausted = true;
-                        return Ok(None);
+                        R Ok(None);
                     }
                     # Continue loop with new page
                 },
@@ -134,9 +134,9 @@ X TableScanExecutor {
 
     # Load the current page into memory
     F load_page(~self, ctx: &ExecContext) -> Result<(), VaisError> {
-        if self.current_page_id == 0 || self.current_page_id == NULL_PAGE {
+        I self.current_page_id == 0 || self.current_page_id == NULL_PAGE {
             self.is_exhausted = true;
-            return Ok(());
+            R Ok(());
         }
 
         ~frame_id = ctx.pool.fetch_page(FILE_ID_DATA, self.current_page_id)?;
@@ -155,10 +155,12 @@ X TableScanExecutor {
     F try_next_from_current_page(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
         ~heap = M &self.current_page {
             Some(ref h) => h,
-            None => { return Ok(None); },
+            None => { R Ok(None); },
         };
 
-        while self.current_slot < heap.item_count() {
+        L {
+
+            I !(self.current_slot < heap.item_count()) { B }
             ~slot_idx = self.current_slot;
             self.current_slot += 1;
             self.stats.add_scanned(1);
@@ -166,12 +168,12 @@ X TableScanExecutor {
             # Try to read the tuple (skip dead slots)
             ~tuple = M heap.read_tuple(slot_idx) {
                 Ok(t) => t,
-                Err(_) => { continue; },  # Dead or corrupt slot
+                Err(_) => { C; },  # Dead or corrupt slot
             };
 
             # MVCC visibility check
             ~mvcc = tuple.get_mvcc();
-            if !is_tuple_visible(
+            I !is_tuple_visible(
                 mvcc.txn_id_create,
                 mvcc.txn_id_expire,
                 mvcc.cmd_id,
@@ -179,7 +181,7 @@ X TableScanExecutor {
                 ctx.snapshot,
                 ctx.clog,
             ) {
-                continue;
+                C;
             }
 
             # Decode tuple data into a Row
@@ -188,16 +190,16 @@ X TableScanExecutor {
             # Apply pushed-down filter
             M &self.filter {
                 Some(ref filter_expr) => {
-                    if !eval_predicate(filter_expr, &row, &self.eval_ctx)? {
+                    I !eval_predicate(filter_expr, &row, &self.eval_ctx)? {
                         self.stats.add_rejected();
-                        continue;
+                        C;
                     }
                 },
                 None => {},
             }
 
             self.stats.add_produced();
-            return Ok(Some(ExecutorRow.with_alias(
+            R Ok(Some(ExecutorRow.with_alias(
                 row,
                 self.table_info.name.clone(),
                 self.current_page_id,
@@ -213,13 +215,13 @@ X TableScanExecutor {
     F advance_page(~self, ctx: &ExecContext) -> Result<bool, VaisError> {
         ~heap = M &self.current_page {
             Some(ref h) => h,
-            None => { return Ok(false); },
+            None => { R Ok(false); },
         };
 
         # Follow the next_page link in the page header
         ~next = heap.get_header().next_page;
-        if next == 0 || next == NULL_PAGE {
-            return Ok(false);
+        I next == 0 || next == NULL_PAGE {
+            R Ok(false);
         }
 
         self.current_page_id = next;
@@ -264,7 +266,7 @@ X IndexScanExecutor {
         residual_filter: Option<Expr>,
     ) -> IndexScanExecutor {
         ~schema = Vec.with_capacity(columns.len());
-        for col in &columns {
+        L col: &columns {
             schema.push(col.data_type);
         }
 
@@ -304,7 +306,7 @@ X IndexScanExecutor {
         };
 
         # If start is exclusive, skip entries equal to start key
-        if cursor.valid() && !self.key_range.start_inclusive {
+        I cursor.valid() && !self.key_range.start_inclusive {
             M &self.key_range.start {
                 Some(ref start_key) => {
                     ~(key, _) = cursor.current(ctx.pool)?;
@@ -328,22 +330,24 @@ X IndexScanExecutor {
 
     # Get next visible row matching the filter
     F next(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
-        if !self.is_open || self.is_exhausted {
-            return Ok(None);
+        I !self.is_open || self.is_exhausted {
+            R Ok(None);
         }
 
         ~cursor = M &self.cursor {
             Some(ref c) => c,
-            None => { return Ok(None); },
+            None => { R Ok(None); },
         };
 
-        while cursor.valid() {
+        L {
+
+            I !(cursor.valid()) { B }
             ~(key, tid) = cursor.current(ctx.pool)?;
 
             # Check if we've passed the end of the range
-            if self.key_range.is_past_end(&key) {
+            I self.key_range.is_past_end(&key) {
                 self.is_exhausted = true;
-                return Ok(None);
+                R Ok(None);
             }
 
             self.stats.add_scanned(1);
@@ -364,13 +368,13 @@ X IndexScanExecutor {
                 Err(_) => {
                     # Dead tuple, skip
                     cursor.next(ctx.pool)?;
-                    continue;
+                    C;
                 },
             };
 
             # MVCC visibility check
             ~mvcc = tuple.get_mvcc();
-            if !is_tuple_visible(
+            I !is_tuple_visible(
                 mvcc.txn_id_create,
                 mvcc.txn_id_expire,
                 mvcc.cmd_id,
@@ -379,7 +383,7 @@ X IndexScanExecutor {
                 ctx.clog,
             ) {
                 cursor.next(ctx.pool)?;
-                continue;
+                C;
             }
 
             # Decode tuple data into a Row
@@ -388,10 +392,10 @@ X IndexScanExecutor {
             # Apply residual filter (for conditions not covered by the index)
             M &self.residual_filter {
                 Some(ref filter_expr) => {
-                    if !eval_predicate(filter_expr, &row, &self.eval_ctx)? {
+                    I !eval_predicate(filter_expr, &row, &self.eval_ctx)? {
                         self.stats.add_rejected();
                         cursor.next(ctx.pool)?;
-                        continue;
+                        C;
                     }
                 },
                 None => {},
@@ -400,7 +404,7 @@ X IndexScanExecutor {
             self.stats.add_produced();
             cursor.next(ctx.pool)?;
 
-            return Ok(Some(ExecutorRow.with_alias(
+            R Ok(Some(ExecutorRow.with_alias(
                 row,
                 self.table_info.name.clone(),
                 page_id,
@@ -437,7 +441,7 @@ X IndexScanExecutor {
 # Ordering: type_tag(1B) + value_bytes (big-endian for correct lexicographic order)
 F build_index_key(values: &[SqlValue]) -> Vec<u8> {
     ~key = Vec.with_capacity(32);
-    for val in values {
+    L val: values {
         encode_key_value(&key, val);
     }
     key
@@ -467,9 +471,9 @@ F encode_key_value(key: &~Vec<u8>, val: &SqlValue) {
             key.push(0x02);  # FLOAT tag
             # IEEE 754 double: flip sign bit; if negative, flip all bits
             ~bits = v.to_bits();
-            if (*v).is_sign_bit_set() {
+            I (*v).is_sign_bit_set() {
                 bits = !bits;
-            } else {
+            } E {
                 bits = bits ^ 0x8000000000000000;
             }
             key.push(((bits >> 56) & 0xFF) as u8);
@@ -483,12 +487,12 @@ F encode_key_value(key: &~Vec<u8>, val: &SqlValue) {
         },
         SqlValue.BoolVal { v } => {
             key.push(0x03);  # BOOL tag
-            key.push(if *v { 1 } else { 0 });
+            key.push(I *v { 1 } E { 0 });
         },
         SqlValue.StringVal { v } => {
             key.push(0x04);  # STRING tag
             # Store string bytes directly (UTF-8 preserves lexicographic order for ASCII)
-            for b in v.as_bytes() {
+            L b: v.as_bytes() {
                 key.push(*b);
             }
             key.push(0x00);  # Null terminator for correct prefix comparison
@@ -515,7 +519,7 @@ F encode_key_value(key: &~Vec<u8>, val: &SqlValue) {
         },
         SqlValue.BlobVal { v } => {
             key.push(0x07);  # BLOB tag
-            for b in v {
+            L b: v {
                 key.push(*b);
             }
             key.push(0x00);  # Null terminator
@@ -529,9 +533,9 @@ F encode_key_value(key: &~Vec<u8>, val: &SqlValue) {
 
 # Build index key from a Row using the index's column positions
 # column_indices maps index columns to row column positions
-F build_index_key_from_row(row: &Row, column_indices: &[usize]) -> Vec<u8> {
+F build_index_key_from_row(row: &Row, column_indices: &[u64]) -> Vec<u8> {
     ~values = Vec.with_capacity(column_indices.len());
-    for idx in column_indices {
+    L idx: column_indices {
         values.push(row.get(*idx).clone());
     }
     build_index_key(values.as_slice())
@@ -541,19 +545,19 @@ F build_index_key_from_row(row: &Row, column_indices: &[usize]) -> Vec<u8> {
 F resolve_index_columns(
     index_columns: &[Str],
     table_columns: &[ColumnInfo],
-) -> Result<Vec<usize>, VaisError> {
+) -> Result<Vec<u64>, VaisError> {
     ~indices = Vec.with_capacity(index_columns.len());
-    for idx_col in index_columns {
+    L idx_col: index_columns {
         ~found = false;
-        for i in 0..table_columns.len() {
-            if &table_columns[i].name == idx_col {
+        L i: 0..table_columns.len() {
+            I &table_columns[i].name == idx_col {
                 indices.push(i);
                 found = true;
-                break;
+                B;
             }
         }
-        if !found {
-            return Err(err_internal("Index column '{idx_col}' not found in table"));
+        I !found {
+            R Err(err_internal("Index column '{idx_col}' not found in table"));
         }
     }
     Ok(indices)
@@ -573,7 +577,7 @@ S ProjectionExecutor {
 }
 
 L ProjectionItem =
-    ColumnIndex { idx: usize } |
+    ColumnIndex { idx: u64 } |
     Expression { expr: Expr, alias: Option<Str> };
 
 X ProjectionExecutor {
@@ -587,7 +591,7 @@ X ProjectionExecutor {
     # Project a single input row to the output schema
     F project(self, input: &ExecutorRow) -> Result<Row, VaisError> {
         ~values = Vec.with_capacity(self.projections.len());
-        for proj in &self.projections {
+        L proj: &self.projections {
             M proj {
                 ProjectionItem.ColumnIndex { idx } => {
                     values.push(input.get(*idx).clone());

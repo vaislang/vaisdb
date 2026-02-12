@@ -60,10 +60,10 @@ X PageAllocator {
 
     # Get file state for a given file_id
     F get_file_state(~self, file_id: u8) -> Result<&~FileAllocState, VaisError> {
-        if file_id >= 5 {
-            return Err(err_internal("Invalid file_id: {file_id}"));
+        I file_id >= 5 {
+            R Err(err_internal("Invalid file_id: {file_id}"));
         }
-        Ok(&self.file_states[file_id as usize])
+        Ok(&self.file_states[file_id as u64])
     }
 
     # Allocate a single page from the specified file
@@ -95,8 +95,8 @@ X PageAllocator {
     # NOTE: Caller must zero out the page data before deallocating
     F deallocate_page(~self, file_id: u8, page_id: u32, bitmap: &~FreelistBitmap) -> Result<(), VaisError> {
         # Verify file_id is valid
-        if file_id >= 5 {
-            return Err(err_internal("Invalid file_id: {file_id}"));
+        I file_id >= 5 {
+            R Err(err_internal("Invalid file_id: {file_id}"));
         }
 
         # Mark page as free
@@ -115,7 +115,7 @@ X PageAllocator {
         ~allocated = bitmap.allocate_bulk(self.pages_per_bitmap, count);
 
         # Update allocation hint to end of allocated range
-        if allocated.len() > 0 {
+        I allocated.len() > 0 {
             ~last_allocated = allocated[allocated.len() - 1];
             state.last_alloc_position = last_allocated + 1;
         }
@@ -146,7 +146,7 @@ X PageAllocator {
         ~state = self.get_file_state(file_id)?;
 
         # Mark all new pages as free
-        for page_id in old_total..new_total {
+        L page_id: old_total..new_total {
             bitmap.set_bit(page_id, self.pages_per_bitmap, true);
         }
 
@@ -158,10 +158,10 @@ X PageAllocator {
 
     # Get readonly file state (for queries)
     F get_file_state_readonly(self, file_id: u8) -> Result<&FileAllocState, VaisError> {
-        if file_id >= 5 {
-            return Err(err_internal("Invalid file_id: {file_id}"));
+        I file_id >= 5 {
+            R Err(err_internal("Invalid file_id: {file_id}"));
         }
-        Ok(&self.file_states[file_id as usize])
+        Ok(&self.file_states[file_id as u64])
     }
 
     # Get allocation statistics for a file
@@ -176,9 +176,9 @@ X PageAllocator {
             allocated_pages,
             free_pages,
             freelist_pages: state.freelist_pages,
-            utilization_percent: if state.total_pages > 0 {
+            utilization_percent: I state.total_pages > 0 {
                 (allocated_pages * 100) / state.total_pages
-            } else {
+            } E {
                 0
             },
         })

@@ -93,34 +93,34 @@ X RagIndexDef {
                     "fixed" => { self.chunk_strategy = CHUNK_STRATEGY_FIXED_SIZE; },
                     "sentence" => { self.chunk_strategy = CHUNK_STRATEGY_SENTENCE; },
                     "paragraph" => { self.chunk_strategy = CHUNK_STRATEGY_PARAGRAPH; },
-                    _ => { return Err(err_rag_invalid_option(key, value)); },
+                    _ => { R Err(err_rag_invalid_option(key, value)); },
                 }
             },
             "target_size" => {
                 ~size = parse_u32(value)?;
-                if size < 16 || size > 65536 {
-                    return Err(err_rag_invalid_option(key, value));
+                I size < 16 || size > 65536 {
+                    R Err(err_rag_invalid_option(key, value));
                 }
                 self.target_chunk_size = size;
             },
             "min_size" => {
                 ~size = parse_u32(value)?;
-                if size < 1 || size > 65536 {
-                    return Err(err_rag_invalid_option(key, value));
+                I size < 1 || size > 65536 {
+                    R Err(err_rag_invalid_option(key, value));
                 }
                 self.min_chunk_size = size;
             },
             "max_size" => {
                 ~size = parse_u32(value)?;
-                if size < 16 || size > 131072 {
-                    return Err(err_rag_invalid_option(key, value));
+                I size < 16 || size > 131072 {
+                    R Err(err_rag_invalid_option(key, value));
                 }
                 self.max_chunk_size = size;
             },
             "overlap" => {
                 ~overlap = parse_u32(value)?;
-                if overlap > 16384 {
-                    return Err(err_rag_invalid_option(key, value));
+                I overlap > 16384 {
+                    R Err(err_rag_invalid_option(key, value));
                 }
                 self.overlap_tokens = overlap;
             },
@@ -134,7 +134,7 @@ X RagIndexDef {
                 self.enable_hierarchy = value == "true";
             },
             _ => {
-                return Err(err_rag_invalid_option(key, value));
+                R Err(err_rag_invalid_option(key, value));
             },
         }
         Ok(())
@@ -179,9 +179,9 @@ X RagDDL {
         # Check for duplicate
         ~i: u32 = 0;
         W i < self.indexes.len() as u32 {
-            ~existing = self.indexes.get(i as usize);
-            if existing.index_name == def.index_name {
-                return Err(err_rag_index_exists(&def.index_name));
+            ~existing = self.indexes.get(i as u64);
+            I existing.index_name == def.index_name {
+                R Err(err_rag_index_exists(&def.index_name));
             }
             i = i + 1;
         }
@@ -197,10 +197,10 @@ X RagDDL {
 
         ~i: u32 = 0;
         W i < self.indexes.len() as u32 {
-            ~idx = self.indexes.get(i as usize);
-            if idx.index_name == *name {
+            ~idx = self.indexes.get(i as u64);
+            I idx.index_name == *name {
                 found = true;
-            } else {
+            } E {
                 ~copy = RagIndexDef.new(
                     idx.index_name.clone(),
                     idx.table_name.clone(),
@@ -221,8 +221,8 @@ X RagDDL {
             i = i + 1;
         }
 
-        if !found {
-            return Err(err_rag_index_not_found(name));
+        I !found {
+            R Err(err_rag_index_not_found(name));
         }
 
         self.indexes = new_indexes;
@@ -233,9 +233,9 @@ X RagDDL {
     F get_index(&self, name: &Str) -> Option<&RagIndexDef> {
         ~i: u32 = 0;
         W i < self.indexes.len() as u32 {
-            ~idx = self.indexes.get(i as usize);
-            if idx.index_name == *name {
-                return Some(idx);
+            ~idx = self.indexes.get(i as u64);
+            I idx.index_name == *name {
+                R Some(idx);
             }
             i = i + 1;
         }
@@ -247,8 +247,8 @@ X RagDDL {
         ~result = Vec.new();
         ~i: u32 = 0;
         W i < self.indexes.len() as u32 {
-            ~idx = self.indexes.get(i as usize);
-            if idx.table_name == *table_name {
+            ~idx = self.indexes.get(i as u64);
+            I idx.table_name == *table_name {
                 result.push(idx);
             }
             i = i + 1;
@@ -267,15 +267,15 @@ X RagDDL {
 # ============================================================================
 
 F parse_u32(s: &Str) -> Result<u32, VaisError> {
-    if s.len() == 0 {
-        return Err(VaisError.new(
+    I s.len() == 0 {
+        R Err(VaisError.new(
             "VAIS-0809004",
             "Cannot parse empty string as integer"
         ))
     }
     # Max u32 = 4294967295 (10 digits). Reject strings > 10 digits upfront.
-    if s.len() > 10 {
-        return Err(VaisError.new(
+    I s.len() > 10 {
+        R Err(VaisError.new(
             "VAIS-0809004",
             "Integer overflow: '{s}' exceeds u32 range"
         ))
@@ -284,15 +284,15 @@ F parse_u32(s: &Str) -> Result<u32, VaisError> {
     ~i: u32 = 0;
     W i < s.len() {
         ~c = s.byte_at(i);
-        if c < 48 || c > 57 {
-            return Err(VaisError.new(
+        I c < 48 || c > 57 {
+            R Err(VaisError.new(
                 "VAIS-0809004",
                 "Cannot parse '{s}' as integer"
             ));
         }
         result = result * 10 + (c - 48) as u64;
-        if result > 4294967295 {
-            return Err(VaisError.new(
+        I result > 4294967295 {
+            R Err(VaisError.new(
                 "VAIS-0809004",
                 "Integer overflow: '{s}' exceeds u32 range"
             ))

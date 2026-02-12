@@ -47,9 +47,9 @@ X VaisError {
     }
 
     F to_string(self) -> Str {
-        if self.detail.len() > 0 {
+        I self.detail.len() > 0 {
             "{self.code}: {self.message} ({self.detail})"
-        } else {
+        } E {
             "{self.code}: {self.message}"
         }
     }

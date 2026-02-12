@@ -56,12 +56,12 @@ X ExecutorRow {
     }
 
     # Get value at column index
-    F get(self, idx: usize) -> &SqlValue {
+    F get(self, idx: u64) -> &SqlValue {
         self.row.get(idx)
     }
 
     # Get column count
-    F column_count(self) -> usize {
+    F column_count(self) -> u64 {
         self.row.column_count()
     }
 }

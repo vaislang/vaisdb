@@ -42,7 +42,7 @@ F err_explain_not_select() -> VaisError {
 F err_explain_plan_failed(reason: Str) -> VaisError {
     VaisError.new(
         ERR_CODE_EXPLAIN_PLAN_FAILED,
-        "Plan build failed for EXPLAIN: {reason}"
+        "Plan build failed L EXPLAIN: {reason}"
     )
 }
 
@@ -94,14 +94,14 @@ F execute_explain(stmt: &Statement, analyze: bool, ctx: &ExecContext) -> Result<
     ~query = M stmt {
         Statement.Select { query } => query,
         _ => {
-            return Err(err_explain_not_select());
+            R Err(err_explain_not_select());
         },
     };
 
-    if analyze {
+    I analyze {
         # EXPLAIN ANALYZE: execute the query and collect actual statistics
         execute_explain_analyze(query, ctx)
-    } else {
+    } E {
         # EXPLAIN: show estimated plan only
         execute_explain_plan(query, ctx)
     }
@@ -117,7 +117,7 @@ F execute_explain_plan(query: &SelectQuery, ctx: &ExecContext) -> Result<Explain
     ~plan = M build_plan(query, ctx.catalog) {
         Ok(p) => p,
         Err(e) => {
-            return Err(err_explain_plan_failed(e.message()));
+            R Err(err_explain_plan_failed(e.message()));
         },
     };
 
@@ -125,7 +125,7 @@ F execute_explain_plan(query: &SelectQuery, ctx: &ExecContext) -> Result<Explain
     ~cost = M estimate_cost(&plan, ctx.catalog) {
         Ok(c) => c,
         Err(e) => {
-            return Err(err_explain_plan_failed(e.message()));
+            R Err(err_explain_plan_failed(e.message()));
         },
     };
 
@@ -140,7 +140,7 @@ F execute_explain_plan(query: &SelectQuery, ctx: &ExecContext) -> Result<Explain
 F format_explain_node(
     node: &PlanNode,
     cost: &CostEstimate,
-    indent: usize,
+    indent: u64,
     result: &~ExplainResult,
     ctx: &ExecContext,
 ) -> Result<(), VaisError> {
@@ -291,7 +291,7 @@ F execute_explain_analyze(query: &SelectQuery, ctx: &ExecContext) -> Result<Expl
     ~plan = M build_plan(query, ctx.catalog) {
         Ok(p) => p,
         Err(e) => {
-            return Err(err_explain_analyze_failed(e.message()));
+            R Err(err_explain_analyze_failed(e.message()));
         },
     };
 
@@ -302,7 +302,7 @@ F execute_explain_analyze(query: &SelectQuery, ctx: &ExecContext) -> Result<Expl
     M execute_and_collect(&plan, &~collector, ctx) {
         Ok(_) => {},
         Err(e) => {
-            return Err(err_explain_analyze_failed(e.message()));
+            R Err(err_explain_analyze_failed(e.message()));
         },
     }
 
@@ -340,7 +340,7 @@ X NodeStats {
 # Maps plan node (by position in tree) to actual execution stats
 S AnalyzeCollector {
     stats_map: Vec<NodeStats>,
-    current_node: usize,
+    current_node: u64,
 }
 
 X AnalyzeCollector {
@@ -352,7 +352,7 @@ X AnalyzeCollector {
     }
 
     # Start timing for a node (returns node index)
-    F begin_node(~self) -> usize {
+    F begin_node(~self) -> u64 {
         ~idx = self.stats_map.len();
         self.stats_map.push(NodeStats.new());
         idx
@@ -361,13 +361,13 @@ X AnalyzeCollector {
     # Record statistics for a node
     F record_node(
         ~self,
-        node_idx: usize,
+        node_idx: u64,
         rows_produced: u64,
         rows_scanned: u64,
         pages_read: u64,
         elapsed_ms: f64,
     ) {
-        if node_idx < self.stats_map.len() {
+        I node_idx < self.stats_map.len() {
             self.stats_map[node_idx].rows_produced = rows_produced;
             self.stats_map[node_idx].rows_scanned = rows_scanned;
             self.stats_map[node_idx].pages_read = pages_read;
@@ -376,7 +376,7 @@ X AnalyzeCollector {
     }
 
     # Get statistics for a node
-    F get_stats(self, node_idx: usize) -> &NodeStats {
+    F get_stats(self, node_idx: u64) -> &NodeStats {
         &self.stats_map[node_idx]
     }
 }
@@ -453,10 +453,10 @@ F execute_and_collect(
 F format_analyze_node(
     node: &PlanNode,
     collector: &AnalyzeCollector,
-    node_idx: usize,
+    node_idx: u64,
     result: &~ExplainResult,
     ctx: &ExecContext,
-) -> Result<usize, VaisError> {
+) -> Result<u64, VaisError> {
     ~prefix = "  ".repeat(node_idx);
 
     # Get estimated cost
@@ -497,7 +497,7 @@ F format_analyze_node(
 
             # Recursively format child
             ~next_idx = format_analyze_node(input, collector, node_idx + 1, result, ctx)?;
-            return Ok(next_idx);
+            R Ok(next_idx);
         },
 
         PlanNode.Project { input, columns } => {
@@ -506,7 +506,7 @@ F format_analyze_node(
 
             # Recursively format child
             ~next_idx = format_analyze_node(input, collector, node_idx + 1, result, ctx)?;
-            return Ok(next_idx);
+            R Ok(next_idx);
         },
 
         PlanNode.NestedLoopJoin { left, right, join_type, .. } => {
@@ -516,7 +516,7 @@ F format_analyze_node(
             # Recursively format children
             ~next_idx = format_analyze_node(left, collector, node_idx + 1, result, ctx)?;
             ~next_idx = format_analyze_node(right, collector, next_idx, result, ctx)?;
-            return Ok(next_idx);
+            R Ok(next_idx);
         },
 
         PlanNode.HashJoin { build, probe, join_type, .. } => {
@@ -526,7 +526,7 @@ F format_analyze_node(
             # Recursively format children
             ~next_idx = format_analyze_node(build, collector, node_idx + 1, result, ctx)?;
             ~next_idx = format_analyze_node(probe, collector, next_idx, result, ctx)?;
-            return Ok(next_idx);
+            R Ok(next_idx);
         },
 
         PlanNode.Sort { input, order_by } => {
@@ -535,7 +535,7 @@ F format_analyze_node(
 
             # Recursively format child
             ~next_idx = format_analyze_node(input, collector, node_idx + 1, result, ctx)?;
-            return Ok(next_idx);
+            R Ok(next_idx);
         },
 
         PlanNode.Aggregate { input, group_by, aggregates, .. } => {
@@ -544,7 +544,7 @@ F format_analyze_node(
 
             # Recursively format child
             ~next_idx = format_analyze_node(input, collector, node_idx + 1, result, ctx)?;
-            return Ok(next_idx);
+            R Ok(next_idx);
         },
 
         PlanNode.Limit { input, limit, offset } => {
@@ -562,7 +562,7 @@ F format_analyze_node(
 
             # Recursively format child
             ~next_idx = format_analyze_node(input, collector, node_idx + 1, result, ctx)?;
-            return Ok(next_idx);
+            R Ok(next_idx);
         },
 
         PlanNode.Distinct { input } => {
@@ -571,7 +571,7 @@ F format_analyze_node(
 
             # Recursively format child
             ~next_idx = format_analyze_node(input, collector, node_idx + 1, result, ctx)?;
-            return Ok(next_idx);
+            R Ok(next_idx);
         },
 
         PlanNode.Window { input, window_specs } => {
@@ -580,7 +580,7 @@ F format_analyze_node(
 
             # Recursively format child
             ~next_idx = format_analyze_node(input, collector, node_idx + 1, result, ctx)?;
-            return Ok(next_idx);
+            R Ok(next_idx);
         },
 
         PlanNode.Values { rows } => {

@@ -139,7 +139,7 @@ F err_rag_dimension_mismatch(expected: u32, found: u32) -> VaisError {
 F err_rag_reindex_in_progress(index_id: u32) -> VaisError {
     VaisError.new(
         "VAIS-0804001",
-        "Reindex already in progress for index {index_id}"
+        "Reindex already in progress L index {index_id}"
     )
 }
 
@@ -235,9 +235,9 @@ X RagConfig {
         buf.put_f64_le(self.fulltext_weight);
         buf.put_f64_le(self.graph_weight);
         ~flags: u8 = 0;
-        if self.enable_auto_embed { flags = flags | 0x01; }
-        if self.enable_auto_chunk { flags = flags | 0x02; }
-        if self.enable_hierarchy { flags = flags | 0x04; }
+        I self.enable_auto_embed { flags = flags | 0x01; }
+        I self.enable_auto_chunk { flags = flags | 0x02; }
+        I self.enable_hierarchy { flags = flags | 0x04; }
         buf.put_u8(flags);
         buf.put_u8(0);  # reserved
         buf.put_u16_le(0);  # reserved
@@ -552,11 +552,11 @@ X RagFusionConfig {
     ## Validate weights sum to reasonable range
     F validate(&self) -> Result<(), VaisError> {
         ~total = self.vector_weight + self.fulltext_weight + self.graph_weight;
-        if total < 0.01 {
-            return Err(err_rag_invalid_embedding_config("All search weights are zero"));
+        I total < 0.01 {
+            R Err(err_rag_invalid_embedding_config("All search weights are zero"));
         }
-        if self.top_k == 0 {
-            return Err(err_rag_invalid_embedding_config("top_k must be > 0"));
+        I self.top_k == 0 {
+            R Err(err_rag_invalid_embedding_config("top_k must be > 0"));
         }
         Ok(())
     }

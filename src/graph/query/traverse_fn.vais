@@ -61,7 +61,7 @@ S GraphTraverseParams {
     max_depth: u32,                      # Maximum traversal depth (0 = unlimited)
     direction: u8,                        # DIRECTION_OUTGOING, INCOMING, or BOTH
     edge_type_filter: Option<Vec<Str>>,  # Filter by edge type names (None = all types)
-    return_paths: bool,                   # Whether to return full path information
+    return_paths: bool,                   # Whether to R full path information
     use_dfs: bool,                        # true = DFS, false = BFS (default BFS)
 }
 
@@ -88,15 +88,15 @@ X GraphTraverseParams {
         use_dfs: bool
     ) -> Result<GraphTraverseParams, VaisError> {
         # Validate start node
-        if start_node_id == INVALID_NODE_ID {
-            return Err(err_traverse_invalid_params("start_node_id cannot be 0".to_string()));
+        I start_node_id == INVALID_NODE_ID {
+            R Err(err_traverse_invalid_params("start_node_id cannot be 0".to_string()));
         }
 
         # Validate direction
-        if direction != DIRECTION_OUTGOING &&
+        I direction != DIRECTION_OUTGOING &&
            direction != DIRECTION_INCOMING &&
            direction != DIRECTION_BOTH {
-            return Err(err_traverse_invalid_direction(direction));
+            R Err(err_traverse_invalid_direction(direction));
         }
 
         Ok(GraphTraverseParams {
@@ -111,14 +111,14 @@ X GraphTraverseParams {
 
     # Validate parameters before execution
     F validate(self) -> Result<(), VaisError> {
-        if self.start_node_id == INVALID_NODE_ID {
-            return Err(err_traverse_invalid_params("start_node_id is invalid".to_string()));
+        I self.start_node_id == INVALID_NODE_ID {
+            R Err(err_traverse_invalid_params("start_node_id is invalid".to_string()));
         }
 
-        if self.direction != DIRECTION_OUTGOING &&
+        I self.direction != DIRECTION_OUTGOING &&
            self.direction != DIRECTION_INCOMING &&
            self.direction != DIRECTION_BOTH {
-            return Err(err_traverse_invalid_direction(self.direction));
+            R Err(err_traverse_invalid_direction(self.direction));
         }
 
         Ok(())
@@ -133,11 +133,11 @@ X GraphTraverseParams {
             None => Ok(None),
             Some(ref names) => {
                 ~ids = Vec.with_capacity(names.len());
-                ~i: usize = 0;
+                ~i: u64 = 0;
                 L while i < names.len() {
                     M edge_type_table.get_or_create(&names[i]) {
                         Ok(id) => ids.push(id),
-                        Err(e) => return Err(e),
+                        Err(e) => R Err(e),
                     }
                     i += 1;
                 }
@@ -154,8 +154,8 @@ X GraphTraverseParams {
 S TraverseRow {
     node_id: u64,           # Node ID
     depth: u32,             # Depth from start node
-    path: Vec<u64>,         # Path from start node (if return_paths=true)
-    edge_types: Vec<u16>,   # Edge types along path (if return_paths=true)
+    path: Vec<u64>,         # Path from start node (I return_paths=true)
+    edge_types: Vec<u16>,   # Edge types along path (I return_paths=true)
 }
 
 X TraverseRow {
@@ -213,7 +213,7 @@ X GraphTraverseResult {
         self.rows.push(row);
     }
 
-    F row_count(self) -> usize {
+    F row_count(self) -> u64 {
         self.rows.len()
     }
 
@@ -224,14 +224,14 @@ X GraphTraverseResult {
     ) -> GraphTraverseResult {
         ~sql_result = GraphTraverseResult.new();
 
-        if !return_paths {
+        I !return_paths {
             # Simple mode: just node_id and depth
-            ~i: usize = 0;
+            ~i: u64 = 0;
             L while i < result.steps.len() {
                 sql_result.add_row(TraverseRow.from_step(&result.steps[i]));
                 i += 1;
             }
-        } else {
+        } E {
             # Path mode: reconstruct paths from traversal steps
             sql_result = GraphTraverseResult.build_paths_from_steps(&result.steps);
         }
@@ -244,17 +244,17 @@ X GraphTraverseResult {
     F build_paths_from_steps(steps: &Vec<TraversalStep>) -> GraphTraverseResult {
         ~result = GraphTraverseResult.new();
 
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < steps.len() {
             ~step = &steps[i];
 
-            if step.depth == 0 {
+            I step.depth == 0 {
                 # Root node - no path
                 result.add_row(TraverseRow.root(step.node_id));
-            } else {
+            } E {
                 # Build path by walking back through parent nodes
-                ~path = Vec.with_capacity(step.depth as usize + 1);
-                ~edge_types = Vec.with_capacity(step.depth as usize);
+                ~path = Vec.with_capacity(step.depth as u64 + 1);
+                ~edge_types = Vec.with_capacity(step.depth as u64);
 
                 # Walk back from current step to root
                 ~current_step = step;
@@ -263,9 +263,9 @@ X GraphTraverseResult {
                 L while depth > 0 {
                     # Find parent step
                     ~parent_found = false;
-                    ~j: usize = 0;
+                    ~j: u64 = 0;
                     L while j < i {
-                        if steps[j].node_id == current_step.parent_node &&
+                        I steps[j].node_id == current_step.parent_node &&
                            steps[j].depth == depth - 1 {
                             # Add edge type (prepend to front)
                             edge_types.insert(0, current_step.edge_type);
@@ -273,17 +273,15 @@ X GraphTraverseResult {
                             path.insert(0, steps[j].node_id);
                             current_step = &steps[j];
                             parent_found = true;
-                            break;
-                        }
+                            B                        }
                         j += 1;
                     }
 
-                    if !parent_found {
+                    I !parent_found {
                         # Path reconstruction failed - fall back to simple mode
                         path = Vec.new();
                         edge_types = Vec.new();
-                        break;
-                    }
+                        B                    }
 
                     depth -= 1;
                 }
@@ -352,10 +350,10 @@ X GraphTraverseFunction {
         };
 
         # Execute traversal (BFS or DFS)
-        ~traversal_result = if params.use_dfs {
+        ~traversal_result = I params.use_dfs {
             ~dfs = DfsTraversal.new(self.pool, snapshot.clone(), clog);
             dfs.traverse(params.start_node_id, self.adj_mgr, &config)?
-        } else {
+        } E {
             ~bfs = BfsTraversal.new(self.pool, snapshot.clone(), clog);
             bfs.traverse(params.start_node_id, self.adj_mgr, &config)?
         };
@@ -432,13 +430,13 @@ F parse_traverse_params(
 F parse_direction_string(direction_str: &Str) -> Result<u8, VaisError> {
     ~lower = direction_str.to_lowercase();
 
-    if lower == "out" || lower == "outgoing" {
+    I lower == "out" || lower == "outgoing" {
         Ok(DIRECTION_OUTGOING)
-    } else if lower == "in" || lower == "incoming" {
+    } E I lower == "in" || lower == "incoming" {
         Ok(DIRECTION_INCOMING)
-    } else if lower == "both" || lower == "any" {
+    } E I lower == "both" || lower == "any" {
         Ok(DIRECTION_BOTH)
-    } else {
+    } E {
         Err(err_traverse_invalid_params("direction must be 'out', 'in', or 'both'".to_string()))
     }
 }
@@ -446,16 +444,16 @@ F parse_direction_string(direction_str: &Str) -> Result<u8, VaisError> {
 # Parse edge type filter from comma-separated string
 # Example: "FOLLOWS,LIKES" -> vec!["FOLLOWS", "LIKES"]
 F parse_edge_type_filter(filter_str: &Str) -> Vec<Str> {
-    if filter_str.is_empty() {
-        return Vec.new();
+    I filter_str.is_empty() {
+        R Vec.new();
     }
 
     ~types = Vec.new();
     ~parts = filter_str.split(",");
-    ~i: usize = 0;
+    ~i: u64 = 0;
     L while i < parts.len() {
         ~trimmed = parts[i].trim();
-        if !trimmed.is_empty() {
+        I !trimmed.is_empty() {
             types.push(trimmed.to_string());
         }
         i += 1;

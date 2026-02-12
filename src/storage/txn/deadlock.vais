@@ -30,13 +30,13 @@ X WaitForGraph {
             Some(waiting_for) => {
                 # Add holder to waiting list if not already present
                 ~found = false;
-                for txn in waiting_for.iter() {
-                    if *txn == holder {
+                L txn: waiting_for.iter() {
+                    I *txn == holder {
                         found = true;
-                        break;
+                        B;
                     }
                 }
-                if !found {
+                I !found {
                     waiting_for.push(holder);
                 }
             },
@@ -60,23 +60,23 @@ X WaitForGraph {
 
         # Remove incoming edges (others waiting for txn_id)
         ~txns_to_update = Vec.new();
-        for (waiter, waiting_for) in self.edges.iter_mut() {
+        L (waiter, waiting_for): self.edges.iter_mut() {
             ~new_waiting_for = Vec.new();
-            for holder in waiting_for.iter() {
-                if *holder != txn_id {
+            L holder: waiting_for.iter() {
+                I *holder != txn_id {
                     new_waiting_for.push(*holder);
                 }
             }
-            if new_waiting_for.len() != waiting_for.len() {
+            I new_waiting_for.len() != waiting_for.len() {
                 txns_to_update.push((*waiter, new_waiting_for));
             }
         }
 
         # Apply updates
-        for (waiter, new_waiting_for) in txns_to_update {
-            if new_waiting_for.is_empty() {
+        L (waiter, new_waiting_for): txns_to_update {
+            I new_waiting_for.is_empty() {
                 self.edges.remove(&waiter);
-            } else {
+            } E {
                 self.edges.insert(waiter, new_waiting_for);
             }
         }
@@ -95,19 +95,19 @@ X WaitForGraph {
         ~rec_stack = HashMap.new();
 
         # Try detecting cycle from each node
-        for (start_txn, _) in self.edges.iter() {
-            if !visited.get(start_txn).unwrap_or(&false) {
+        L (start_txn, _): self.edges.iter() {
+            I !visited.get(start_txn).unwrap_or(&false) {
                 M self.detect_cycle_dfs(*start_txn, &~visited, &~rec_stack) {
                     Some(cycle_nodes) => {
                         # Found a cycle, choose victim (highest txn_id = youngest)
                         ~victim = cycle_nodes[0];
-                        for txn in cycle_nodes.iter() {
-                            if *txn > victim {
+                        L txn: cycle_nodes.iter() {
+                            I *txn > victim {
                                 victim = *txn;
                             }
                         }
                         drop(guard);
-                        return Some(victim);
+                        R Some(victim);
                     },
                     None => {},
                 }
@@ -133,21 +133,21 @@ X WaitForGraph {
         # Explore neighbors
         M self.edges.get(&node) {
             Some(neighbors) => {
-                for neighbor in neighbors.iter() {
+                L neighbor: neighbors.iter() {
                     # If neighbor not visited, recurse
-                    if !visited.get(neighbor).unwrap_or(&false) {
+                    I !visited.get(neighbor).unwrap_or(&false) {
                         M self.detect_cycle_dfs(*neighbor, visited, rec_stack) {
-                            Some(cycle) => return Some(cycle),
+                            Some(cycle) => R Some(cycle),
                             None => {},
                         }
                     }
                     # If neighbor is in recursion stack, cycle found
-                    else if *rec_stack.get(neighbor).unwrap_or(&false) {
+                    E I *rec_stack.get(neighbor).unwrap_or(&false) {
                         # Cycle detected - return nodes in cycle
                         ~cycle = Vec.new();
                         cycle.push(node);
                         cycle.push(*neighbor);
-                        return Some(cycle);
+                        R Some(cycle);
                     }
                 }
             },
@@ -188,11 +188,11 @@ X WaitForGraph {
         ~guard = self.lock.lock();
         ~waiters = Vec.new();
 
-        for (waiter, waiting_for) in self.edges.iter() {
-            for holder in waiting_for.iter() {
-                if *holder == txn_id {
+        L (waiter, waiting_for): self.edges.iter() {
+            L holder: waiting_for.iter() {
+                I *holder == txn_id {
                     waiters.push(*waiter);
-                    break;
+                    B;
                 }
             }
         }
@@ -202,10 +202,10 @@ X WaitForGraph {
     }
 
     # Get number of edges in the graph (for debugging)
-    F edge_count(self) -> usize {
+    F edge_count(self) -> u64 {
         ~guard = self.lock.lock();
-        ~count = 0usize;
-        for (_, waiting_for) in self.edges.iter() {
+        ~count = 0u64;
+        L (_, waiting_for): self.edges.iter() {
             count += waiting_for.len();
         }
         drop(guard);
@@ -213,7 +213,7 @@ X WaitForGraph {
     }
 
     # Get number of transactions in the graph
-    F node_count(self) -> usize {
+    F node_count(self) -> u64 {
         ~guard = self.lock.lock();
         ~count = self.edges.len();
         drop(guard);

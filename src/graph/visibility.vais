@@ -53,9 +53,9 @@ F filter_visible_entries(
     clog: &Clog,
 ) -> Vec<AdjEntry> {
     ~result = Vec.new();
-    ~i: usize = 0;
+    ~i: u64 = 0;
     L while i < entries.len() {
-        if is_adj_entry_visible(&entries[i], snapshot, clog) {
+        I is_adj_entry_visible(&entries[i], snapshot, clog) {
             result.push(entries[i]);
         }
         i += 1;
@@ -70,8 +70,8 @@ F filter_visible_entries(
 # Check if a node is visible AND active (not soft-deleted within the snapshot)
 # This combines MVCC visibility with the active flag check
 F is_node_accessible(node: &GraphNode, snapshot: &Snapshot, clog: &Clog) -> bool {
-    if !is_node_visible(node, snapshot, clog) {
-        return false;
+    I !is_node_visible(node, snapshot, clog) {
+        R false;
     }
     node.is_active()
 }
@@ -84,9 +84,9 @@ F filter_visible_by_type(
     clog: &Clog,
 ) -> Vec<AdjEntry> {
     ~result = Vec.new();
-    ~i: usize = 0;
+    ~i: u64 = 0;
     L while i < entries.len() {
-        if entries[i].edge_type == edge_type && is_adj_entry_visible(&entries[i], snapshot, clog) {
+        I entries[i].edge_type == edge_type && is_adj_entry_visible(&entries[i], snapshot, clog) {
             result.push(entries[i]);
         }
         i += 1;
@@ -102,9 +102,9 @@ F filter_visible_by_target(
     clog: &Clog,
 ) -> Vec<AdjEntry> {
     ~result = Vec.new();
-    ~i: usize = 0;
+    ~i: u64 = 0;
     L while i < entries.len() {
-        if entries[i].target_node == target_node && is_adj_entry_visible(&entries[i], snapshot, clog) {
+        I entries[i].target_node == target_node && is_adj_entry_visible(&entries[i], snapshot, clog) {
             result.push(entries[i]);
         }
         i += 1;
@@ -117,11 +117,11 @@ F count_visible_entries(
     entries: &Vec<AdjEntry>,
     snapshot: &Snapshot,
     clog: &Clog,
-) -> usize {
-    ~count: usize = 0;
-    ~i: usize = 0;
+) -> u64 {
+    ~count: u64 = 0;
+    ~i: u64 = 0;
     L while i < entries.len() {
-        if is_adj_entry_visible(&entries[i], snapshot, clog) {
+        I is_adj_entry_visible(&entries[i], snapshot, clog) {
             count += 1;
         }
         i += 1;
@@ -136,9 +136,9 @@ F visible_neighbor_ids(
     clog: &Clog,
 ) -> Vec<u64> {
     ~result = Vec.new();
-    ~i: usize = 0;
+    ~i: u64 = 0;
     L while i < entries.len() {
-        if is_adj_entry_visible(&entries[i], snapshot, clog) {
+        I is_adj_entry_visible(&entries[i], snapshot, clog) {
             result.push(entries[i].target_node);
         }
         i += 1;

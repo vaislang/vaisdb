@@ -80,24 +80,24 @@ X ReindexProgress {
 
     ## Calculate completion percentage
     F percent_complete(&self) -> f64 {
-        if self.total_vectors == 0 {
-            return 100.0;
+        I self.total_vectors == 0 {
+            R 100.0;
         }
         (self.processed_vectors as f64 / self.total_vectors as f64) * 100.0
     }
 
     ## Estimate remaining time based on current rate (seconds)
     F estimated_remaining_seconds(&self, current_time: i64) -> u64 {
-        if self.processed_vectors == 0 || self.started_at == 0 {
-            return 0;
+        I self.processed_vectors == 0 || self.started_at == 0 {
+            R 0;
         }
         ~elapsed = (current_time - self.started_at) as u64;
-        if elapsed == 0 {
-            return 0;
+        I elapsed == 0 {
+            R 0;
         }
         ~rate = self.processed_vectors as f64 / elapsed as f64;
-        if rate < 0.001 {
-            return 0;
+        I rate < 0.001 {
+            R 0;
         }
         ~remaining = self.total_vectors - self.processed_vectors;
         (remaining as f64 / rate) as u64
@@ -156,14 +156,14 @@ X EmbeddingManager {
     ## Register a new embedding model
     ## SET EMBEDDING_MODEL = 'openai:text-embedding-3-small'
     F register_model(~self, model_spec: &Str) -> Result<u32, VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
         # Parse model spec: "provider:model_name" or "provider:model_name:dimensions"
         ~parts = model_spec.split(":");
-        if parts.len() < 2 {
-            return Err(err_rag_invalid_embedding_config(
+        I parts.len() < 2 {
+            R Err(err_rag_invalid_embedding_config(
                 "Model spec must be 'provider:model_name' (e.g., 'openai:text-embedding-3-small')"
             ));
         }
@@ -203,16 +203,16 @@ X EmbeddingManager {
     ## For precomputed embeddings, this is a no-op (caller provides vector)
     ## For external API models, this prepares the request (actual API call is external)
     F prepare_embedding(&self, text: &Str) -> Result<EmbeddingRequest, VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
         M self.registry.get_active_model() {
             Some(model) => {
-                if model.requires_api() {
+                I model.requires_api() {
                     # External API: create request for the text
                     Ok(EmbeddingRequest.new(text.clone(), 0, 0))
-                } else {
+                } E {
                     # Precomputed or local: caller must provide vector
                     Ok(EmbeddingRequest.new(text.clone(), 0, 0))
                 }
@@ -234,15 +234,15 @@ X EmbeddingManager {
     F start_reindex(~self, index_id: u32, new_model_id: u32,
                     total_vectors: u64, strategy: u8,
                     current_time: i64) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
         # Check if reindex is already running
         M &self.reindex_progress {
             Some(progress) => {
-                if progress.is_running() {
-                    return Err(err_rag_reindex_in_progress(index_id));
+                I progress.is_running() {
+                    R Err(err_rag_reindex_in_progress(index_id));
                 }
             },
             None => {},
@@ -323,9 +323,9 @@ X EmbeddingManager {
     F get_reindex_old_model_id(&self) -> Option<u32> {
         M &self.reindex_progress {
             Some(progress) => {
-                if progress.is_running() {
+                I progress.is_running() {
                     Some(progress.old_model_id)
-                } else {
+                } E {
                     None
                 }
             },
@@ -351,25 +351,25 @@ X EmbeddingManager {
 ## Resolve model dimensions from known model names
 F resolve_model_dimensions(provider: &Str, name: &Str) -> Result<u32, VaisError> {
     # OpenAI models
-    if *provider == "openai" {
-        if name.contains("text-embedding-3-small") {
-            return Ok(1536);
+    I *provider == "openai" {
+        I name.contains("text-embedding-3-small") {
+            R Ok(1536);
         }
-        if name.contains("text-embedding-3-large") {
-            return Ok(3072);
+        I name.contains("text-embedding-3-large") {
+            R Ok(3072);
         }
-        if name.contains("text-embedding-ada-002") {
-            return Ok(1536);
+        I name.contains("text-embedding-ada-002") {
+            R Ok(1536);
         }
     }
 
     # Cohere models
-    if *provider == "cohere" {
-        if name.contains("embed-english-v3") {
-            return Ok(1024);
+    I *provider == "cohere" {
+        I name.contains("embed-english-v3") {
+            R Ok(1024);
         }
-        if name.contains("embed-multilingual-v3") {
-            return Ok(1024);
+        I name.contains("embed-multilingual-v3") {
+            R Ok(1024);
         }
     }
 
@@ -381,14 +381,14 @@ F resolve_model_dimensions(provider: &Str, name: &Str) -> Result<u32, VaisError>
 
 ## Resolve API endpoint from provider
 F resolve_api_endpoint(provider: &Str) -> Str {
-    if *provider == "openai" {
-        return "https://api.openai.com/v1/embeddings";
+    I *provider == "openai" {
+        R "https://api.openai.com/v1/embeddings";
     }
-    if *provider == "cohere" {
-        return "https://api.cohere.ai/v1/embed";
+    I *provider == "cohere" {
+        R "https://api.cohere.ai/v1/embed";
     }
-    if *provider == "local" || *provider == "precomputed" {
-        return Str.new();
+    I *provider == "local" || *provider == "precomputed" {
+        R Str.new();
     }
     Str.new()
 }
@@ -406,13 +406,13 @@ F format_reindex_status(progress: &ReindexProgress, current_time: i64) -> Str {
     ~pct = progress.percent_complete();
     ~eta = progress.estimated_remaining_seconds(current_time);
 
-    if progress.status == 3 {
+    I progress.status == 3 {
         # Failed
         "Reindex status: {status_str}\nIndex: {progress.index_id}\nError: {progress.error_message}"
-    } else if progress.status == 1 {
+    } E I progress.status == 1 {
         # Running
         "Reindex status: {status_str}\nIndex: {progress.index_id}\nProgress: {progress.processed_vectors}/{progress.total_vectors} ({pct:.1}%)\nEstimated remaining: {eta}s"
-    } else {
+    } E {
         "Reindex status: {status_str}\nIndex: {progress.index_id}\nProcessed: {progress.processed_vectors}/{progress.total_vectors}"
     }
 }

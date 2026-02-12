@@ -61,7 +61,7 @@ F verify_segment_header_checksum(header_data: &[u8]) -> bool {
 }
 
 # Helper: read u32 little-endian at offset
-F read_u32_le_at(data: &[u8], offset: usize) -> u32 {
+F read_u32_le_at(data: &[u8], offset: u64) -> u32 {
     (data[offset] as u32) |
     ((data[offset + 1] as u32) << 8) |
     ((data[offset + 2] as u32) << 16) |

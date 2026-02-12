@@ -145,8 +145,8 @@ X RagEngine {
 
     ## Open engine: load metadata, initialize subsystems
     F open(~self) -> Result<(), VaisError> {
-        if self.is_open {
-            return Ok(());
+        I self.is_open {
+            R Ok(());
         }
 
         self.memory_store.open();
@@ -157,8 +157,8 @@ X RagEngine {
 
     ## Close engine: flush state, release resources
     F close(~self) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Ok(());
+        I !self.is_open {
+            R Ok(());
         }
 
         self.session_mgr.close();
@@ -180,8 +180,8 @@ X RagEngine {
         content: &Str,
         current_time: i64,
     ) -> Result<(u64, u32), VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
         # Allocate document ID
@@ -195,7 +195,7 @@ X RagEngine {
         ~chunk_infos = Vec.new();
         ~ci: u32 = 0;
         W ci < chunk_count {
-            ~chunk = chunks.get(ci as usize);
+            ~chunk = chunks.get(ci as u64);
             ~chunk_id = self.meta.alloc_chunk_id();
 
             ~info = ChunkInfo {
@@ -214,7 +214,7 @@ X RagEngine {
         }
 
         # Build document hierarchy (if enabled)
-        if self.config.enable_hierarchy {
+        I self.config.enable_hierarchy {
             self.hierarchy.build_for_document(doc_id, &chunk_infos);
         }
 
@@ -227,7 +227,7 @@ X RagEngine {
         # WAL-log chunk inserts
         ~wi: u32 = 0;
         W wi < chunk_infos.len() as u32 {
-            ~info = chunk_infos.get(wi as usize);
+            ~info = chunk_infos.get(wi as u64);
             self.wal_mgr.log_chunk_insert(info.chunk_id, doc_id)?;
             wi = wi + 1;
         }
@@ -251,7 +251,7 @@ X RagEngine {
         ~ti: u32 = 0;
         W ti < chunk_infos.len() as u32 {
             doc_info.total_tokens = doc_info.total_tokens
-                + chunk_infos.get(ti as usize).token_count;
+                + chunk_infos.get(ti as u64).token_count;
             ti = ti + 1;
         }
 
@@ -264,8 +264,8 @@ X RagEngine {
 
     ## Delete a document and its chunks
     F delete_document(~self, doc_id: u64) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
         # WAL-log document deletion
@@ -277,7 +277,7 @@ X RagEngine {
         self.crossref_tracker.remove_doc_refs(doc_id);
 
         # Update counters
-        if self.meta.doc_count > 0 {
+        I self.meta.doc_count > 0 {
             self.meta.doc_count = self.meta.doc_count - 1;
         }
 
@@ -295,8 +295,8 @@ X RagEngine {
         query_text: &Str,
         fusion_config: &RagFusionConfig,
     ) -> Result<Vec<RagSearchResult>, VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
         # Validate fusion config
@@ -333,8 +333,8 @@ X RagEngine {
         session_id: u64,
         current_time: i64,
     ) -> Result<u64, VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
         ~memory_id = self.meta.alloc_memory_id();
@@ -362,8 +362,8 @@ X RagEngine {
         similarity_scores: &Vec<(u64, f64)>,
         current_time: i64,
     ) -> Result<Vec<MemorySearchResult>, VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
         ~memories = self.memory_store.get_all();
@@ -395,12 +395,12 @@ X RagEngine {
         ~self,
         current_time: i64,
     ) -> Result<LifecycleStats, VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
-        if !self.lifecycle_mgr.should_run(current_time) {
-            return Ok(LifecycleStats.new());
+        I !self.lifecycle_mgr.should_run(current_time) {
+            R Ok(LifecycleStats.new());
         }
 
         ~memories = self.memory_store.get_all();
@@ -409,19 +409,19 @@ X RagEngine {
         # Execute lifecycle actions
         ~i: u32 = 0;
         W i < actions.len() as u32 {
-            ~action = actions.get(i as usize);
+            ~action = actions.get(i as u64);
             M action.action_type {
                 0 => {
                     # ACTION_EXPIRE: remove expired memory
                     self.memory_store.remove(action.memory_id);
-                    if self.meta.memory_count > 0 {
+                    I self.meta.memory_count > 0 {
                         self.meta.memory_count = self.meta.memory_count - 1;
                     }
                 },
                 1 => {
                     # ACTION_EVICT: remove evicted working memory
                     self.memory_store.remove(action.memory_id);
-                    if self.meta.memory_count > 0 {
+                    I self.meta.memory_count > 0 {
                         self.meta.memory_count = self.meta.memory_count - 1;
                     }
                 },
@@ -451,8 +451,8 @@ X RagEngine {
         token_budget: u32,
         current_time: i64,
     ) -> Result<u64, VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
         ~session_id = self.session_mgr.create_session(
@@ -468,8 +468,8 @@ X RagEngine {
         session_id: u64,
         current_time: i64,
     ) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
         self.session_mgr.close_session(session_id, current_time)
     }

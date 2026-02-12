@@ -88,11 +88,11 @@ X DictionaryIndex {
         btree_delete(&self.tree, &key, txn_id, gcm, pool)?;
 
         # Remove from cache
-        ~i: usize = 0;
-        L while i < self.entries.len() {
-            if self.entries[i].term_hash == term_hash {
+        ~i: u64 = 0;
+        L W i < self.entries.len() {
+            I self.entries[i].term_hash == term_hash {
                 self.entries.remove(i);
-                break;
+                B;
             }
             i += 1;
         }
@@ -109,10 +109,10 @@ X DictionaryIndex {
         ~term_hash = fnv1a_hash(term);
 
         # Check in-memory cache first
-        ~i: usize = 0;
-        L while i < self.entries.len() {
-            if self.entries[i].term_hash == term_hash && self.entries[i].term == *term {
-                return Ok(Some(self.entries[i].clone()));
+        ~i: u64 = 0;
+        L W i < self.entries.len() {
+            I self.entries[i].term_hash == term_hash && self.entries[i].term == *term {
+                R Ok(Some(self.entries[i].clone()));
             }
             i += 1;
         }
@@ -135,10 +135,10 @@ X DictionaryIndex {
         pool: &~BufferPool,
     ) -> Result<Option<u32>, VaisError> {
         # Check cache
-        ~i: usize = 0;
-        L while i < self.entries.len() {
-            if self.entries[i].term_hash == term_hash {
-                return Ok(Some(self.entries[i].posting_head_page));
+        ~i: u64 = 0;
+        L W i < self.entries.len() {
+            I self.entries[i].term_hash == term_hash {
+                R Ok(Some(self.entries[i].posting_head_page));
             }
             i += 1;
         }
@@ -164,11 +164,11 @@ X DictionaryIndex {
         btree_insert(&self.tree, &key, new_posting_head, txn_id, gcm, pool)?;
 
         # Update cache
-        ~i: usize = 0;
-        L while i < self.entries.len() {
-            if self.entries[i].term_hash == term_hash {
+        ~i: u64 = 0;
+        L W i < self.entries.len() {
+            I self.entries[i].term_hash == term_hash {
                 self.entries[i].posting_head_page = new_posting_head;
-                break;
+                B;
             }
             i += 1;
         }
@@ -183,30 +183,30 @@ X DictionaryIndex {
         delta_doc_freq: i32,
         delta_term_freq: i64,
     ) {
-        ~i: usize = 0;
-        L while i < self.entries.len() {
-            if self.entries[i].term_hash == term_hash {
-                if delta_doc_freq > 0 {
+        ~i: u64 = 0;
+        L W i < self.entries.len() {
+            I self.entries[i].term_hash == term_hash {
+                I delta_doc_freq > 0 {
                     self.entries[i].doc_freq += delta_doc_freq as u32;
-                } else if delta_doc_freq < 0 {
+                } E I delta_doc_freq < 0 {
                     ~abs = (-delta_doc_freq) as u32;
-                    if self.entries[i].doc_freq >= abs {
+                    I self.entries[i].doc_freq >= abs {
                         self.entries[i].doc_freq -= abs;
-                    } else {
+                    } E {
                         self.entries[i].doc_freq = 0;
                     }
                 }
-                if delta_term_freq > 0 {
+                I delta_term_freq > 0 {
                     self.entries[i].total_term_freq += delta_term_freq as u64;
-                } else if delta_term_freq < 0 {
+                } E I delta_term_freq < 0 {
                     ~abs = (-delta_term_freq) as u64;
-                    if self.entries[i].total_term_freq >= abs {
+                    I self.entries[i].total_term_freq >= abs {
                         self.entries[i].total_term_freq -= abs;
-                    } else {
+                    } E {
                         self.entries[i].total_term_freq = 0;
                     }
                 }
-                break;
+                B;
             }
             i += 1;
         }
@@ -217,15 +217,15 @@ X DictionaryIndex {
         self,
         pool: &~BufferPool,
     ) -> Result<Vec<DictEntry>, VaisError> {
-        if !self.entries.is_empty() {
-            return Ok(self.entries.clone());
+        I !self.entries.is_empty() {
+            R Ok(self.entries.clone());
         }
 
         # Fall back to B+Tree full scan
         ~results = Vec.new();
         ~entries = self.tree.full_scan(pool)?;
-        ~i: usize = 0;
-        L while i < entries.len() {
+        ~i: u64 = 0;
+        L W i < entries.len() {
             ~term_hash = Self.decode_term_key(&entries[i].0);
             ~posting_head = entries[i].1;
             results.push(DictEntry {
@@ -241,7 +241,7 @@ X DictionaryIndex {
     }
 
     # Get total number of terms in dictionary
-    F term_count(self) -> usize {
+    F term_count(self) -> u64 {
         self.entries.len()
     }
 
@@ -270,8 +270,8 @@ X DictionaryIndex {
 
     # Decode term hash from big-endian u64 key
     F decode_term_key(key: &[u8]) -> u64 {
-        if key.len() < 8 {
-            return 0;
+        I key.len() < 8 {
+            R 0;
         }
         ~hash: u64 = 0;
         hash |= (key[0] as u64) << 56;

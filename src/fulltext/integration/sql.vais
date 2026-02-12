@@ -19,7 +19,7 @@ U fulltext/search/match_fn.{FullTextMatchResult};
 # Row schema: (doc_id: u64, score: f64, table_id: u32, row_tid: u32)
 S FullTextRowSource {
     results: Vec<FullTextMatchResult>,
-    cursor: usize,
+    cursor: u64,
     is_open: bool,
 }
 
@@ -47,8 +47,8 @@ X FullTextRowSource {
     # - Column 2: table_id (u32) → SqlValue::Int
     # - Column 3: row_tid (u32) → SqlValue::Int
     F next(~self) -> Option<ExecutorRow> {
-        if !self.is_open || self.cursor >= self.results.len() {
-            return None;
+        I !self.is_open || self.cursor >= self.results.len() {
+            R None;
         }
 
         ~result = &self.results[self.cursor];
@@ -86,12 +86,12 @@ X FullTextRowSource {
     }
 
     # Get current cursor position
-    F cursor_position(&self) -> usize {
+    F cursor_position(&self) -> u64 {
         self.cursor
     }
 
     # Get total result count
-    F result_count(&self) -> usize {
+    F result_count(&self) -> u64 {
         self.results.len()
     }
 
@@ -120,8 +120,8 @@ F filter_by_predicate(
 ) -> Vec<FullTextMatchResult> {
     ~filtered: Vec<FullTextMatchResult> = Vec::new();
 
-    L i in 0..results.len() {
-        if predicate_fn(&results[i]) {
+    L i: 0..results.len() {
+        I predicate_fn(&results[i]) {
             filtered.push(results[i].clone());
         }
     }
@@ -136,8 +136,8 @@ F filter_by_min_score(
 ) -> Vec<FullTextMatchResult> {
     ~filtered: Vec<FullTextMatchResult> = Vec::new();
 
-    L i in 0..results.len() {
-        if results[i].score >= min_score {
+    L i: 0..results.len() {
+        I results[i].score >= min_score {
             filtered.push(results[i].clone());
         }
     }
@@ -152,8 +152,8 @@ F filter_by_table(
 ) -> Vec<FullTextMatchResult> {
     ~filtered: Vec<FullTextMatchResult> = Vec::new();
 
-    L i in 0..results.len() {
-        if results[i].table_id == table_id {
+    L i: 0..results.len() {
+        I results[i].table_id == table_id {
             filtered.push(results[i].clone());
         }
     }
@@ -166,18 +166,18 @@ F sort_by_score_desc(results: &~Vec<FullTextMatchResult>) {
     ~n = results.len();
 
     # Selection sort descending
-    L i in 0..n {
+    L i: 0..n {
         ~max_idx = i;
 
         # Find max score in remaining elements
-        L j in (i + 1)..n {
-            if results[j].score > results[max_idx].score {
+        L j: (i + 1)..n {
+            I results[j].score > results[max_idx].score {
                 max_idx = j;
             }
         }
 
         # Swap if needed
-        if max_idx != i {
+        I max_idx != i {
             ~temp = results[i].clone();
             results[i] = results[max_idx].clone();
             results[max_idx] = temp;

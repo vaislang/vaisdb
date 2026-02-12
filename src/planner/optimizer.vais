@@ -65,17 +65,17 @@ F optimize_plan(
     ~optimized = plan;
 
     # Pass 1: Predicate pushdown — push filters into engine scan nodes
-    if config.enable_predicate_pushdown {
+    I config.enable_predicate_pushdown {
         optimized = push_predicates_down(optimized)?;
     }
 
     # Pass 2: Score fusion method selection
-    if config.enable_fusion_selection {
+    I config.enable_fusion_selection {
         optimized = select_fusion_method(optimized, stats)?;
     }
 
     # Pass 3: Cross-engine join reordering
-    if config.enable_join_reorder {
+    I config.enable_join_reorder {
         optimized = reorder_joins(optimized)?;
     }
 
@@ -101,10 +101,10 @@ F push_predicates_down(plan: HybridPlanNode) -> Result<HybridPlanNode, VaisError
                     ~sel = estimate_selectivity(&predicate);
                     ~new_params = params;
 
-                    if sel < 0.01 {
+                    I sel < 0.01 {
                         # Very selective → pre-filter (bitmap scan before HNSW)
                         new_params.pre_filter = Some(merge_predicates(new_params.pre_filter, predicate));
-                    } else {
+                    } E {
                         # Not very selective → post-filter (filter after HNSW search)
                         new_params.post_filter = Some(merge_predicates(new_params.post_filter, predicate));
                     }
@@ -342,7 +342,7 @@ F reorder_joins(plan: HybridPlanNode) -> Result<HybridPlanNode, VaisError> {
             # For INNER joins, put smaller side on left (build side of hash join)
             M join_type {
                 JoinType.Inner | JoinType.Cross => {
-                    if right_rows < left_rows {
+                    I right_rows < left_rows {
                         # Swap: smaller on left
                         Ok(HybridPlanNode.CrossEngineJoin {
                             left: Box.new(new_right),
@@ -351,7 +351,7 @@ F reorder_joins(plan: HybridPlanNode) -> Result<HybridPlanNode, VaisError> {
                             condition,
                             cost,
                         })
-                    } else {
+                    } E {
                         Ok(HybridPlanNode.CrossEngineJoin {
                             left: Box.new(new_left),
                             right: Box.new(new_right),
@@ -500,7 +500,7 @@ F recalculate_costs(
             ~child = recalculate_costs(*input, stats)?;
             ~cost = child.get_cost().clone();
             ~n = cost.row_estimate as f64;
-            if n > 1.0 {
+            I n > 1.0 {
                 cost.total_cpu_cost += n * n.log2() * 0.01;
             }
             cost.total_memory_bytes += cost.row_estimate * 128;
@@ -510,9 +510,9 @@ F recalculate_costs(
         HybridPlanNode.HybridLimit { input, limit, offset, .. } => {
             ~child = recalculate_costs(*input, stats)?;
             ~cost = child.get_cost().clone();
-            if limit.is_some() {
-                ~lim = limit.unwrap();
-                if lim < cost.row_estimate {
+            I limit.is_some() {
+                ~lim = limit!;
+                I lim < cost.row_estimate {
                     cost.row_estimate = lim;
                 }
             }
@@ -524,8 +524,8 @@ F recalculate_costs(
             ~cost = child.get_cost().clone();
             ~n = cost.row_estimate as f64;
             cost.total_cpu_cost += n * 0.05;
-            ~groups = if group_by.len() == 0 { 1u64 } else { (n * 0.1) as u64 };
-            if groups < 1 { groups = 1; }
+            ~groups = I group_by.len() == 0 { 1u64 } E { (n * 0.1) as u64 };
+            I groups < 1 { groups = 1; }
             cost.row_estimate = groups;
             cost.total_memory_bytes += groups * 128;
             Ok(HybridPlanNode.HybridAggregate { input: Box.new(child), group_by, aggregates, having, cost })
@@ -550,7 +550,7 @@ F build_initial_plan(
     ~engine_nodes: Vec<HybridPlanNode> = Vec.new();
 
     # Build vector scan nodes
-    L vp in profile.vector_calls.iter() {
+    L vp: profile.vector_calls.iter() {
         ~vs = M stats.find_vector_stats(0) {
             Some(s) => s,
             None => &VectorIndexStats.default(1536),
@@ -564,7 +564,7 @@ F build_initial_plan(
     }
 
     # Build graph traverse nodes
-    L gp in profile.graph_calls.iter() {
+    L gp: profile.graph_calls.iter() {
         ~gs = M &stats.graph_stats {
             Some(s) => s,
             None => &GraphStats.default(),
@@ -578,7 +578,7 @@ F build_initial_plan(
     }
 
     # Build fulltext scan nodes
-    L fp in profile.fulltext_calls.iter() {
+    L fp: profile.fulltext_calls.iter() {
         ~fs = M &stats.fulltext_stats {
             Some(s) => s,
             None => &FullTextStats.default(),
@@ -592,23 +592,23 @@ F build_initial_plan(
     }
 
     # Combine engine nodes
-    if engine_nodes.len() == 0 {
-        return Err(err_hybrid_plan_failed("No engine scan nodes detected".to_string()));
+    I engine_nodes.len() == 0 {
+        R Err(err_hybrid_plan_failed("No engine scan nodes detected".to_string()));
     }
 
-    if engine_nodes.len() == 1 {
-        return Ok(engine_nodes.remove(0));
+    I engine_nodes.len() == 1 {
+        R Ok(engine_nodes.remove(0));
     }
 
     # Multiple engines: combine with score fusion (for ranking queries)
     # or cross-engine join (for relational queries)
     ~combined = engine_nodes.remove(0);
-    L node in engine_nodes.drain(..) {
+    L node: engine_nodes.drain(..) {
         # Default: score fusion for hybrid search, join for relational
         ~left_cost = combined.get_cost().clone();
         ~right_cost = node.get_cost().clone();
 
-        if profile.needs_score_fusion() {
+        I profile.needs_score_fusion() {
             ~fusion_cost = estimate_fusion_cost(&left_cost, &right_cost, &FusionMethod.default_rrf(), 10);
             combined = HybridPlanNode.ScoreFusion {
                 left: Box.new(combined),
@@ -617,7 +617,7 @@ F build_initial_plan(
                 top_k: 10,
                 cost: fusion_cost,
             };
-        } else {
+        } E {
             ~join_cost = estimate_cross_engine_join_cost(&left_cost, &right_cost);
             combined = HybridPlanNode.CrossEngineJoin {
                 left: Box.new(combined),
@@ -653,29 +653,29 @@ F select_index(
     ~sel = estimate_selectivity(predicate);
 
     # If selectivity is very low (non-selective), prefer seq scan
-    if sel > 0.5 {
-        return IndexChoice.SeqScan { table: table_name.clone() };
+    I sel > 0.5 {
+        R IndexChoice.SeqScan { table: table_name.clone() };
     }
 
     # Check for vector search patterns (distance comparisons)
-    if is_vector_predicate(predicate) {
-        return IndexChoice.HnswIndex {
+    I is_vector_predicate(predicate) {
+        R IndexChoice.HnswIndex {
             table: table_name.clone(),
             column: extract_vector_column(predicate),
         };
     }
 
     # Check for full-text search patterns (MATCH, CONTAINS)
-    if is_fulltext_predicate(predicate) {
-        return IndexChoice.FullTextIndex {
+    I is_fulltext_predicate(predicate) {
+        R IndexChoice.FullTextIndex {
             table: table_name.clone(),
             column: extract_fulltext_column(predicate),
         };
     }
 
     # Default: B+Tree for equality/range predicates
-    if sel <= 0.3 {
-        return IndexChoice.BTreeIndex {
+    I sel <= 0.3 {
+        R IndexChoice.BTreeIndex {
             table: table_name.clone(),
             index_name: "auto".to_string(),
         };
@@ -684,7 +684,7 @@ F select_index(
     IndexChoice.SeqScan { table: table_name.clone() }
 }
 
-# Check if a predicate involves vector distance operations
+# Check I a predicate involves vector distance operations
 F is_vector_predicate(expr: &Expr) -> bool {
     M expr {
         Expr.FunctionCall { name, .. } => {
@@ -696,7 +696,7 @@ F is_vector_predicate(expr: &Expr) -> bool {
     }
 }
 
-# Check if a predicate involves full-text search
+# Check I a predicate involves full-text search
 F is_fulltext_predicate(expr: &Expr) -> bool {
     M expr {
         Expr.FunctionCall { name, .. } => {
@@ -711,13 +711,13 @@ F is_fulltext_predicate(expr: &Expr) -> bool {
 F extract_vector_column(expr: &Expr) -> Str {
     M expr {
         Expr.FunctionCall { args, .. } => {
-            if args.len() >= 2 {
+            I args.len() >= 2 {
                 M &args[1] {
                     Expr.Literal { value } => value.to_string(),
                     Expr.ColumnRef { column, .. } => column.clone(),
                     _ => "embedding".to_string(),
                 }
-            } else {
+            } E {
                 "embedding".to_string()
             }
         },
@@ -729,13 +729,13 @@ F extract_vector_column(expr: &Expr) -> Str {
 F extract_fulltext_column(expr: &Expr) -> Str {
     M expr {
         Expr.FunctionCall { args, .. } => {
-            if args.len() >= 2 {
+            I args.len() >= 2 {
                 M &args[1] {
                     Expr.Literal { value } => value.to_string(),
                     Expr.ColumnRef { column, .. } => column.clone(),
                     _ => "content".to_string(),
                 }
-            } else {
+            } E {
                 "content".to_string()
             }
         },

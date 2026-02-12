@@ -32,7 +32,7 @@ L DistanceMetric =
 
 # Error: Vector dimension mismatch
 # Code: VAIS-0205001
-F err_dimension_mismatch(dim_a: usize, dim_b: usize) -> VaisError {
+F err_dimension_mismatch(dim_a: u64, dim_b: u64) -> VaisError {
     VaisError.new(
         "VAIS-0205001",
         "Vector dimension mismatch: {dim_a} vs {dim_b}"
@@ -41,7 +41,7 @@ F err_dimension_mismatch(dim_a: usize, dim_b: usize) -> VaisError {
 
 # Error: Invalid vector dimension (zero or negative)
 # Code: VAIS-0205002
-F err_invalid_dimension(dim: usize) -> VaisError {
+F err_invalid_dimension(dim: u64) -> VaisError {
     VaisError.new(
         "VAIS-0205002",
         "Invalid vector dimension: {dim}"
@@ -66,12 +66,12 @@ F validate_dimensions(a: &[f32], b: &[f32]) -> Result<(), VaisError> {
     ~ dim_a = a.len();
     ~ dim_b = b.len();
 
-    if dim_a == 0 {
-        return Err(err_invalid_dimension(dim_a));
+    I dim_a == 0 {
+        R Err(err_invalid_dimension(dim_a));
     }
 
-    if dim_a != dim_b {
-        return Err(err_dimension_mismatch(dim_a, dim_b));
+    I dim_a != dim_b {
+        R Err(err_dimension_mismatch(dim_a, dim_b));
     }
 
     Ok(())
@@ -89,9 +89,9 @@ F cosine_distance_scalar(a: &[f32], b: &[f32]) -> f32 {
     ~ norm_a: f32 = 0.0;
     ~ norm_b: f32 = 0.0;
 
-    ~ i: usize = 0;
+    ~ i: u64 = 0;
     L {
-        if i >= a.len() { break; }
+        I i >= a.len() { B }
 
         ~ a_i = a[i];
         ~ b_i = b[i];
@@ -107,18 +107,18 @@ F cosine_distance_scalar(a: &[f32], b: &[f32]) -> f32 {
     ~ epsilon: f32 = 1e-8;
     ~ magnitude = sqrt(norm_a) * sqrt(norm_b);
 
-    if magnitude < epsilon {
+    I magnitude < epsilon {
         # Zero magnitude vector - return max distance
-        return 2.0;
+        R 2.0;
     }
 
     ~ cosine_sim = dot_product / magnitude;
 
     # Clamp to [-1, 1] to handle floating point errors
-    if cosine_sim > 1.0 {
+    I cosine_sim > 1.0 {
         cosine_sim = 1.0;
     }
-    if cosine_sim < -1.0 {
+    I cosine_sim < -1.0 {
         cosine_sim = -1.0;
     }
 
@@ -131,9 +131,9 @@ F cosine_distance_scalar(a: &[f32], b: &[f32]) -> f32 {
 F l2_distance_scalar(a: &[f32], b: &[f32]) -> f32 {
     ~ sum_sq: f32 = 0.0;
 
-    ~ i: usize = 0;
+    ~ i: u64 = 0;
     L {
-        if i >= a.len() { break; }
+        I i >= a.len() { B }
 
         ~ diff = a[i] - b[i];
         sum_sq = sum_sq + (diff * diff);
@@ -150,9 +150,9 @@ F l2_distance_scalar(a: &[f32], b: &[f32]) -> f32 {
 F dot_product_scalar(a: &[f32], b: &[f32]) -> f32 {
     ~ dot: f32 = 0.0;
 
-    ~ i: usize = 0;
+    ~ i: u64 = 0;
     L {
-        if i >= a.len() { break; }
+        I i >= a.len() { B }
 
         dot = dot + (a[i] * b[i]);
 
@@ -193,7 +193,7 @@ X DistanceComputer {
     }
 
     # Compute distance between two vectors
-    # Returns error if dimensions don't match or vectors are invalid
+    # Returns error if dimensions don't M or vectors are invalid
     F compute(&self, a: &[f32], b: &[f32]) -> Result<f32, VaisError> {
         # Validate dimensions
         validate_dimensions(a, b)?;
@@ -239,15 +239,15 @@ X DistanceComputer {
 # Normalize a vector to unit length
 # Returns a new vector with magnitude 1.0
 F normalize_vector(v: &[f32]) -> Result<Vec<f32>, VaisError> {
-    if v.len() == 0 {
-        return Err(err_invalid_dimension(0));
+    I v.len() == 0 {
+        R Err(err_invalid_dimension(0));
     }
 
     # Compute magnitude
     ~ sum_sq: f32 = 0.0;
-    ~ i: usize = 0;
+    ~ i: u64 = 0;
     L {
-        if i >= v.len() { break; }
+        I i >= v.len() { B }
         ~ val = v[i];
         sum_sq = sum_sq + (val * val);
         i = i + 1;
@@ -256,15 +256,15 @@ F normalize_vector(v: &[f32]) -> Result<Vec<f32>, VaisError> {
     ~ magnitude = sqrt(sum_sq);
     ~ epsilon: f32 = 1e-8;
 
-    if magnitude < epsilon {
-        return Err(err_zero_magnitude());
+    I magnitude < epsilon {
+        R Err(err_zero_magnitude());
     }
 
     # Create normalized vector
     ~ normalized = Vec::new();
     i = 0;
     L {
-        if i >= v.len() { break; }
+        I i >= v.len() { B }
         normalized.push(v[i] / magnitude);
         i = i + 1;
     }
@@ -274,15 +274,15 @@ F normalize_vector(v: &[f32]) -> Result<Vec<f32>, VaisError> {
 
 # Normalize a vector in-place
 F normalize_vector_inplace(v: &~[f32]) -> Result<(), VaisError> {
-    if v.len() == 0 {
-        return Err(err_invalid_dimension(0));
+    I v.len() == 0 {
+        R Err(err_invalid_dimension(0));
     }
 
     # Compute magnitude
     ~ sum_sq: f32 = 0.0;
-    ~ i: usize = 0;
+    ~ i: u64 = 0;
     L {
-        if i >= v.len() { break; }
+        I i >= v.len() { B }
         ~ val = v[i];
         sum_sq = sum_sq + (val * val);
         i = i + 1;
@@ -291,14 +291,14 @@ F normalize_vector_inplace(v: &~[f32]) -> Result<(), VaisError> {
     ~ magnitude = sqrt(sum_sq);
     ~ epsilon: f32 = 1e-8;
 
-    if magnitude < epsilon {
-        return Err(err_zero_magnitude());
+    I magnitude < epsilon {
+        R Err(err_zero_magnitude());
     }
 
     # Normalize in-place
     i = 0;
     L {
-        if i >= v.len() { break; }
+        I i >= v.len() { B }
         v[i] = v[i] / magnitude;
         i = i + 1;
     }
@@ -310,9 +310,9 @@ F normalize_vector_inplace(v: &~[f32]) -> Result<(), VaisError> {
 F vector_magnitude(v: &[f32]) -> f32 {
     ~ sum_sq: f32 = 0.0;
 
-    ~ i: usize = 0;
+    ~ i: u64 = 0;
     L {
-        if i >= v.len() { break; }
+        I i >= v.len() { B }
         ~ val = v[i];
         sum_sq = sum_sq + (val * val);
         i = i + 1;
@@ -326,9 +326,9 @@ F dot_product(a: &[f32], b: &[f32]) -> Result<f32, VaisError> {
     validate_dimensions(a, b)?;
 
     ~ dot: f32 = 0.0;
-    ~ i: usize = 0;
+    ~ i: u64 = 0;
     L {
-        if i >= a.len() { break; }
+        I i >= a.len() { B }
         dot = dot + (a[i] * b[i]);
         i = i + 1;
     }
@@ -349,9 +349,9 @@ F batch_compute_distances(
 ) -> Result<Vec<f32>, VaisError> {
     ~ distances = Vec::new();
 
-    ~ i: usize = 0;
+    ~ i: u64 = 0;
     L {
-        if i >= candidates.len() { break; }
+        I i >= candidates.len() { B }
 
         ~ distance = computer.compute(query, candidates[i])?;
         distances.push(distance);
@@ -409,7 +409,7 @@ F test_dot_product_distance() {
 #[test]
 F test_normalize_vector() {
     ~ v = vec![3.0, 4.0, 0.0];
-    ~ normalized = normalize_vector(&v).unwrap();
+    ~ normalized = normalize_vector(&v)!;
 
     # Magnitude should be 1.0
     ~ mag = vector_magnitude(&normalized);
@@ -440,7 +440,7 @@ F test_batch_compute() {
         &vec![1.0, 1.0],
     ];
 
-    ~ distances = batch_compute_distances(&computer, &query, &candidates).unwrap();
+    ~ distances = batch_compute_distances(&computer, &query, &candidates)!;
 
     assert_eq!(distances.len(), 3);
     assert!((distances[0] - 1.0).abs() < 0.001);

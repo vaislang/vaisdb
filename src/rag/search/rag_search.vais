@@ -97,15 +97,15 @@ X RagSearchParams {
 
     ## Validate parameters
     F validate(&self) -> Result<(), VaisError> {
-        if self.query_text.is_empty() {
-            return Err(err_rag_search_invalid_params(&"query_text is empty"));
+        I self.query_text.is_empty() {
+            R Err(err_rag_search_invalid_params(&"query_text is empty"));
         }
-        if self.top_k == 0 {
-            return Err(err_rag_search_invalid_params(&"top_k must be > 0"));
+        I self.top_k == 0 {
+            R Err(err_rag_search_invalid_params(&"top_k must be > 0"));
         }
         ~total_weight = self.vector_weight + self.fulltext_weight + self.graph_weight;
-        if total_weight < 0.01 {
-            return Err(err_rag_search_invalid_params(&"All search weights are zero"));
+        I total_weight < 0.01 {
+            R Err(err_rag_search_invalid_params(&"All search weights are zero"));
         }
         Ok(())
     }
@@ -211,16 +211,16 @@ X RagSearchExecutor {
         # Step 5: Sort by score descending, take top_k
         sort_scored_chunks_desc(&~fused);
 
-        ~limit = if self.params.top_k < fused.len() as u32 {
+        ~limit = I self.params.top_k < fused.len() as u32 {
             self.params.top_k
-        } else {
+        } E {
             fused.len() as u32
         };
 
         # Step 6-7: Build RagSearchResult from top_k fused chunks
         ~i: u32 = 0;
         W i < limit {
-            ~sc = fused.get(i as usize);
+            ~sc = fused.get(i as u64);
 
             # Look up chunk text
             ~text = lookup_chunk_text(sc.chunk_id, chunk_text_lookup);
@@ -241,13 +241,13 @@ X RagSearchExecutor {
 
     ## Get the next result (Volcano iterator)
     F next(&~self) -> Option<&RagSearchResult> {
-        if !self.is_open {
-            return None;
+        I !self.is_open {
+            R None;
         }
-        if self.cursor >= self.results.len() as u32 {
-            return None;
+        I self.cursor >= self.results.len() as u32 {
+            R None;
         }
-        ~result = self.results.get(self.cursor as usize);
+        ~result = self.results.get(self.cursor as u64);
         self.cursor = self.cursor + 1;
         Some(result)
     }
@@ -316,7 +316,7 @@ F fuse_weighted_sum(
     ~keys = chunk_doc_map.keys();
     ~i: u32 = 0;
     W i < keys.len() as u32 {
-        ~chunk_id = keys.get(i as usize);
+        ~chunk_id = keys.get(i as u64);
         ~doc_id = chunk_doc_map.get(chunk_id);
 
         ~score_v = get_score_from_map(&map_v, chunk_id);
@@ -356,7 +356,7 @@ F fuse_rrf(
     ~keys = chunk_doc_map.keys();
     ~i: u32 = 0;
     W i < keys.len() as u32 {
-        ~chunk_id = keys.get(i as usize);
+        ~chunk_id = keys.get(i as u64);
         ~doc_id = chunk_doc_map.get(chunk_id);
 
         ~rrf_score: f64 = 0.0;
@@ -386,8 +386,8 @@ F fuse_rrf(
 
 ## Normalize scores to [0, 1] via min-max normalization
 F normalize_engine_scores(chunks: &Vec<ScoredChunk>) -> Vec<ScoredChunk> {
-    if chunks.len() == 0 {
-        return Vec.new();
+    I chunks.len() == 0 {
+        R Vec.new();
     }
 
     # Find min and max
@@ -395,27 +395,27 @@ F normalize_engine_scores(chunks: &Vec<ScoredChunk>) -> Vec<ScoredChunk> {
     ~max_s = chunks.get(0).score;
     ~i: u32 = 1;
     W i < chunks.len() as u32 {
-        ~s = chunks.get(i as usize).score;
-        if s < min_s { min_s = s; }
-        if s > max_s { max_s = s; }
+        ~s = chunks.get(i as u64).score;
+        I s < min_s { min_s = s; }
+        I s > max_s { max_s = s; }
         i = i + 1;
     }
 
     ~range = max_s - min_s;
     ~result = Vec.new();
 
-    if range < 0.000001 {
+    I range < 0.000001 {
         # All scores equal → normalize to 1.0
         ~j: u32 = 0;
         W j < chunks.len() as u32 {
-            ~c = chunks.get(j as usize);
+            ~c = chunks.get(j as u64);
             result.push(ScoredChunk.new(c.chunk_id, c.doc_id, 1.0, c.source_engine));
             j = j + 1;
         }
-    } else {
+    } E {
         ~j: u32 = 0;
         W j < chunks.len() as u32 {
-            ~c = chunks.get(j as usize);
+            ~c = chunks.get(j as u64);
             ~norm = (c.score - min_s) / range;
             result.push(ScoredChunk.new(c.chunk_id, c.doc_id, norm, c.source_engine));
             j = j + 1;
@@ -428,8 +428,8 @@ F normalize_engine_scores(chunks: &Vec<ScoredChunk>) -> Vec<ScoredChunk> {
 F collect_unique_chunks_map(chunks: &Vec<ScoredChunk>, acc: &~HashMap<u64, u64>) {
     ~i: u32 = 0;
     W i < chunks.len() as u32 {
-        ~c = chunks.get(i as usize);
-        if !acc.contains_key(&c.chunk_id) {
+        ~c = chunks.get(i as u64);
+        I !acc.contains_key(&c.chunk_id) {
             acc.insert(c.chunk_id, c.doc_id);
         }
         i = i + 1;
@@ -441,7 +441,7 @@ F build_score_map(chunks: &Vec<ScoredChunk>) -> HashMap<u64, f64> {
     ~map: HashMap<u64, f64> = HashMap.new();
     ~i: u32 = 0;
     W i < chunks.len() as u32 {
-        ~c = chunks.get(i as usize);
+        ~c = chunks.get(i as u64);
         map.insert(c.chunk_id, c.score);
         i = i + 1;
     }
@@ -462,8 +462,8 @@ F build_rank_map(chunks: &Vec<ScoredChunk>) -> HashMap<u64, u32> {
     ~map: HashMap<u64, u32> = HashMap.new();
     ~i: u32 = 0;
     W i < chunks.len() as u32 {
-        ~c = chunks.get(i as usize);
-        if !map.contains_key(&c.chunk_id) {
+        ~c = chunks.get(i as u64);
+        I !map.contains_key(&c.chunk_id) {
             map.insert(c.chunk_id, i + 1);  # 1-based rank
         }
         i = i + 1;
@@ -474,8 +474,8 @@ F build_rank_map(chunks: &Vec<ScoredChunk>) -> HashMap<u64, u32> {
 ## Sort scored chunks by score descending — O(N log N) merge sort
 F sort_scored_chunks_desc(chunks: &~Vec<ScoredChunk>) {
     ~n = chunks.len() as u32;
-    if n <= 1 {
-        return;
+    I n <= 1 {
+        R;
     }
     # Bottom-up merge sort using auxiliary vector of indices
     ~indices = Vec.new();
@@ -492,21 +492,21 @@ F sort_scored_chunks_desc(chunks: &~Vec<ScoredChunk>) {
         ~left: u32 = 0;
         W left < n {
             ~mid = left + width;
-            if mid > n { mid = n; }
+            I mid > n { mid = n; }
             ~right = left + width * 2;
-            if right > n { right = n; }
+            I right > n { right = n; }
             # Merge [left, mid) and [mid, right) from indices into aux
             ~li = left;
             ~ri = mid;
             ~k = left;
             W k < right {
-                if li < mid && (ri >= right ||
-                    chunks.get(indices.get(li as usize) as usize).score >=
-                    chunks.get(indices.get(ri as usize) as usize).score) {
-                    aux.set(k as usize, indices.get(li as usize));
+                I li < mid && (ri >= right ||
+                    chunks.get(indices.get(li as u64) as u64).score >=
+                    chunks.get(indices.get(ri as u64) as u64).score) {
+                    aux.set(k as u64, indices.get(li as u64));
                     li = li + 1;
-                } else {
-                    aux.set(k as usize, indices.get(ri as usize));
+                } E {
+                    aux.set(k as u64, indices.get(ri as u64));
                     ri = ri + 1;
                 }
                 k = k + 1;
@@ -516,7 +516,7 @@ F sort_scored_chunks_desc(chunks: &~Vec<ScoredChunk>) {
         # Copy aux back to indices
         ~c: u32 = 0;
         W c < n {
-            indices.set(c as usize, aux.get(c as usize));
+            indices.set(c as u64, aux.get(c as u64));
             c = c + 1;
         }
         width = width * 2;
@@ -526,15 +526,15 @@ F sort_scored_chunks_desc(chunks: &~Vec<ScoredChunk>) {
     ~sorted = Vec.new();
     ~si: u32 = 0;
     W si < n {
-        ~idx = indices.get(si as usize);
-        ~c = chunks.get(idx as usize);
+        ~idx = indices.get(si as u64);
+        ~c = chunks.get(idx as u64);
         sorted.push(ScoredChunk.new(c.chunk_id, c.doc_id, c.score, c.source_engine));
         si = si + 1;
     }
     ~wi: u32 = 0;
     W wi < n {
-        ~s = sorted.get(wi as usize);
-        ~target = chunks.get_mut(wi as usize);
+        ~s = sorted.get(wi as u64);
+        ~target = chunks.get_mut(wi as u64);
         target.chunk_id = s.chunk_id;
         target.doc_id = s.doc_id;
         target.score = s.score;
@@ -549,9 +549,9 @@ F lookup_chunk_text(chunk_id: u64, lookup: &Vec<(u64, Str)>) -> Str {
     # Callers with many lookups should use build_chunk_text_map instead
     ~i: u32 = 0;
     W i < lookup.len() as u32 {
-        ~entry = lookup.get(i as usize);
-        if entry.0 == chunk_id {
-            return entry.1.clone();
+        ~entry = lookup.get(i as u64);
+        I entry.0 == chunk_id {
+            R entry.1.clone();
         }
         i = i + 1;
     }
@@ -563,7 +563,7 @@ F build_chunk_text_map(lookup: &Vec<(u64, Str)>) -> HashMap<u64, Str> {
     ~map: HashMap<u64, Str> = HashMap.new();
     ~i: u32 = 0;
     W i < lookup.len() as u32 {
-        ~entry = lookup.get(i as usize);
+        ~entry = lookup.get(i as u64);
         map.insert(entry.0, entry.1.clone());
         i = i + 1;
     }

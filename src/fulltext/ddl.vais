@@ -144,7 +144,7 @@ X FullTextDDL {
         M self.allocator.free_page(FILE_ID_FULLTEXT, meta.dict_root_page, txn_id, cmd_id, gcm) {
             Ok(_) => {}
             Err(e) => {
-                return Err(e);
+                R Err(e);
             }
         }
 
@@ -186,24 +186,24 @@ X FullTextDDL {
         ~total_tokens = 0u64;
 
         # Step 1 & 2: Scan rows and tokenize
-        L row in rows {
+        L row: rows {
             ~doc_id = row.0;
             ~text_content = &row.1;
 
             # Tokenize the text
             ~term_freqs = tokenizer.tokenize_with_freqs(text_content);
 
-            if term_freqs.is_empty() {
-                continue;
+            I term_freqs.is_empty() {
+                C;
             }
 
             ~doc_length = 0u32;
-            L tf_info in &term_freqs {
+            L tf_info: &term_freqs {
                 doc_length += tf_info.freq;
             }
 
             # Step 3: Build posting lists for each term
-            L tf_info in term_freqs {
+            L tf_info: term_freqs {
                 ~term = &tf_info.term;
                 ~term_freq = tf_info.freq;
                 ~positions = &tf_info.positions;
@@ -235,7 +235,7 @@ X FullTextDDL {
                         ) {
                             Ok(_) => {}
                             Err(e) => {
-                                return Err(e);
+                                R Err(e);
                             }
                         }
                     }
@@ -277,22 +277,22 @@ X FullTextDDL {
                                         ) {
                                             Ok(_) => {}
                                             Err(e) => {
-                                                return Err(e);
+                                                R Err(e);
                                             }
                                         }
                                     }
                                     Err(e) => {
-                                        return Err(e);
+                                        R Err(e);
                                     }
                                 }
                             }
                             Err(e) => {
-                                return Err(e);
+                                R Err(e);
                             }
                         }
                     }
                     Err(e) => {
-                        return Err(e);
+                        R Err(e);
                     }
                 }
             }
@@ -346,17 +346,17 @@ X IndexEntry {
         # Step 1: Tokenize text
         ~term_freqs = tokenizer.tokenize_with_freqs(text);
 
-        if term_freqs.is_empty() {
-            return Ok(());
+        I term_freqs.is_empty() {
+            R Ok(());
         }
 
         ~doc_length = 0u32;
-        L tf_info in &term_freqs {
+        L tf_info: &term_freqs {
             doc_length += tf_info.freq;
         }
 
         # Step 2 & 3: Process each term
-        L tf_info in term_freqs {
+        L tf_info: term_freqs {
             ~term = &tf_info.term;
             ~term_freq = tf_info.freq;
 
@@ -385,7 +385,7 @@ X IndexEntry {
                     ) {
                         Ok(_) => {}
                         Err(e) => {
-                            return Err(e);
+                            R Err(e);
                         }
                     }
                 }
@@ -422,22 +422,22 @@ X IndexEntry {
                                     ) {
                                         Ok(_) => {}
                                         Err(e) => {
-                                            return Err(e);
+                                            R Err(e);
                                         }
                                     }
                                 }
                                 Err(e) => {
-                                    return Err(e);
+                                    R Err(e);
                                 }
                             }
                         }
                         Err(e) => {
-                            return Err(e);
+                            R Err(e);
                         }
                     }
                 }
                 Err(e) => {
-                    return Err(e);
+                    R Err(e);
                 }
             }
         }
@@ -472,12 +472,12 @@ X IndexEntry {
         # Step 1: Tokenize text to find affected terms
         ~term_freqs = tokenizer.tokenize_with_freqs(text);
 
-        if term_freqs.is_empty() {
-            return Ok(());
+        I term_freqs.is_empty() {
+            R Ok(());
         }
 
         # Step 2 & 3: Process each term
-        L tf_info in term_freqs {
+        L tf_info: term_freqs {
             ~term = &tf_info.term;
 
             # Lookup dictionary entry
@@ -487,29 +487,29 @@ X IndexEntry {
                     M posting_store.read_all_entries(dict_entry.posting_head_page, &self.pool) {
                         Ok(postings) => {
                             # Find posting entry with matching doc_id
-                            L posting in postings {
-                                if posting.doc_id == doc_id {
+                            L posting: postings {
+                                I posting.doc_id == doc_id {
                                     # Mark as expired
                                     # Note: Actual implementation would update the posting entry
                                     # in the page to set txn_id_expire = txn_id
                                     # For now, we acknowledge that this requires page-level update
                                     # which should be done via posting_store.expire_entry()
                                     # (not yet implemented in posting.vais)
-                                    break;
+                                    B;
                                 }
                             }
                         }
                         Err(e) => {
-                            return Err(e);
+                            R Err(e);
                         }
                     }
                 }
                 Ok(None) => {
                     # Term not found, nothing to delete
-                    continue;
+                    C;
                 }
                 Err(e) => {
-                    return Err(e);
+                    R Err(e);
                 }
             }
         }

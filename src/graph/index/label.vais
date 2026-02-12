@@ -68,10 +68,10 @@ X LabelIndex {
         # Insert into B+Tree
         ~inserted = btree_insert(&self.tree, &key, tid, txn_id, gcm, pool)?;
 
-        if !inserted {
+        I !inserted {
             # Key already exists, this is fine (idempotent)
             Ok(())
-        } else {
+        } E {
             Ok(())
         }
     }
@@ -113,12 +113,12 @@ X LabelIndex {
         ~entries = self.tree.range_scan(&prefix_key, &end_key, pool)?;
 
         # Extract node_ids from keys
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < entries.len() {
             ~key = &entries[i].0;
             M Self.decode_label_key(key) {
                 Some((~decoded_label_id, ~node_id)) => {
-                    if decoded_label_id == label_id {
+                    I decoded_label_id == label_id {
                         results.push(node_id);
                     }
                 },
@@ -157,7 +157,7 @@ X LabelIndex {
 
         # Encode node_id as big-endian u64
         ~node_bytes = encode_u64_key(node_id);
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < node_bytes.len() {
             key.push(node_bytes[i]);
             i += 1;
@@ -176,8 +176,8 @@ X LabelIndex {
 
     # Decode composite key back to (label_id, node_id)
     F decode_label_key(key: &[u8]) -> Option<(u16, u64)> {
-        if key.len() < 10 {
-            return None;
+        I key.len() < 10 {
+            R None;
         }
 
         # Decode label_id (big-endian u16)

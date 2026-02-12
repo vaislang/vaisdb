@@ -70,8 +70,8 @@ X OverflowPage {
         header.write_to_page(page_data);
 
         # Write overflow data after header
-        for i in 0..self.data.len() {
-            page_data[PAGE_HEADER_SIZE as usize + i] = self.data[i];
+        L i: 0..self.data.len() {
+            page_data[PAGE_HEADER_SIZE as u64 + i] = self.data[i];
         }
 
         # Update checksum
@@ -83,16 +83,16 @@ X OverflowPage {
         ~header = PageHeader.read_from_page(page_data)?;
 
         # Verify this is an overflow page
-        if header.page_type != PAGE_TYPE_OVERFLOW {
-            return Err(err_internal("Expected OVERFLOW page type"));
+        I header.page_type != PAGE_TYPE_OVERFLOW {
+            R Err(err_internal("Expected OVERFLOW page type"));
         }
 
         # Read data after header
-        ~data_len = (header.free_space_offset as u32 - PAGE_HEADER_SIZE) as usize;
+        ~data_len = (header.free_space_offset as u32 - PAGE_HEADER_SIZE) as u64;
         ~data = Vec.with_capacity(data_len);
 
-        for i in 0..data_len {
-            data.push(page_data[PAGE_HEADER_SIZE as usize + i]);
+        L i: 0..data_len {
+            data.push(page_data[PAGE_HEADER_SIZE as u64 + i]);
         }
 
         Ok(OverflowPage { data })
@@ -112,32 +112,32 @@ F write_overflow_data(
     page_lsn: u64,
     txn_id: u64
 ) -> Result<u32, VaisError> {
-    ~max_per_page = max_data_per_page(page_size) as usize;
+    ~max_per_page = max_data_per_page(page_size) as u64;
     ~num_pages = (data.len() + max_per_page - 1) / max_per_page;
 
-    if num_pages == 0 {
-        return Err(err_internal("Cannot create overflow chain with zero data"));
+    I num_pages == 0 {
+        R Err(err_internal("Cannot create overflow chain with zero data"));
     }
 
     # Allocate all needed pages upfront
     ~page_ids = allocator.allocate_bulk(file_id, num_pages as u32, bitmap)?;
 
-    if page_ids.len() < num_pages {
-        return Err(err_internal("Could not allocate enough overflow pages"));
+    I page_ids.len() < num_pages {
+        R Err(err_internal("Could not allocate enough overflow pages"));
     }
 
     ~first_page_id = page_ids[0];
 
     # Write each overflow page
-    for i in 0..num_pages {
+    L i: 0..num_pages {
         ~start_offset = i * max_per_page;
         ~end_offset = (start_offset + max_per_page).min(data.len());
         ~chunk = &data[start_offset..end_offset];
 
         ~page_id = page_ids[i];
-        ~next_page = if i + 1 < num_pages {
+        ~next_page = I i + 1 < num_pages {
             page_ids[i + 1]
-        } else {
+        } E {
             NULL_PAGE  # Last page in chain
         };
 
@@ -161,14 +161,14 @@ F read_overflow_data(
     page_size: u32,
     expected_total_len: u32
 ) -> Result<Vec<u8>, VaisError> {
-    ~result = Vec.with_capacity(expected_total_len as usize);
+    ~result = Vec.with_capacity(expected_total_len as u64);
     ~current_page_id = first_page_id;
     ~max_iterations = 1000;  # Safety limit to prevent infinite loops
     ~iteration = 0u32;
 
-    while current_page_id != NULL_PAGE {
-        if iteration >= max_iterations {
-            return Err(err_internal("Overflow chain too long or circular"));
+    L while current_page_id != NULL_PAGE {
+        I iteration >= max_iterations {
+            R Err(err_internal("Overflow chain too long or circular"));
         }
         iteration += 1;
 
@@ -181,12 +181,12 @@ F read_overflow_data(
         # current_page_id = header.next_page;
 
         # For now, just break (this is a placeholder)
-        break;
+        B;
     }
 
     # Verify we read the expected amount
-    if result.len() != expected_total_len as usize {
-        return Err(err_page_corruption(
+    I result.len() != expected_total_len as u64 {
+        R Err(err_page_corruption(
             first_page_id,
             PAGE_TYPE_OVERFLOW
         ).with_detail("Overflow chain length mismatch"));
@@ -210,9 +210,9 @@ F free_overflow_chain(
     ~pages_to_free = Vec.new();
 
     # Collect all page IDs in chain
-    while current_page_id != NULL_PAGE {
-        if iteration >= max_iterations {
-            return Err(err_internal("Overflow chain too long or circular"));
+    L while current_page_id != NULL_PAGE {
+        I iteration >= max_iterations {
+            R Err(err_internal("Overflow chain too long or circular"));
         }
         iteration += 1;
 
@@ -224,11 +224,11 @@ F free_overflow_chain(
         # current_page_id = header.next_page;
 
         # For now, just break
-        break;
+        B;
     }
 
     # Zero out and deallocate all pages
-    for page_id in pages_to_free {
+    L page_id: pages_to_free {
         # In real implementation, zero out page data:
         # let page_buffer = allocate_page_buffer(page_size);
         # zero_page_buffer(&page_buffer);
@@ -260,6 +260,6 @@ F inline_threshold(page_size: u32) -> u32 {
 # Split data into inline portion and overflow portion
 # Returns (inline_data, overflow_data)
 F split_for_overflow(data: &[u8], inline_size: u32) -> (&[u8], &[u8]) {
-    ~inline_end = (inline_size as usize).min(data.len());
+    ~inline_end = (inline_size as u64).min(data.len());
     (&data[0..inline_end], &data[inline_end..])
 }

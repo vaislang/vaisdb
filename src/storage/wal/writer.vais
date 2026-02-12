@@ -61,26 +61,26 @@ X WalWriter {
 
         # Find the latest segment
         ~latest_segment = self.find_latest_segment()?;
-        if latest_segment > 0 {
+        I latest_segment > 0 {
             # Resume from existing segment
             self.current_segment = latest_segment;
             ~seg_path = self.segment_path(latest_segment);
             ~file = File.open(&seg_path, OpenMode.ReadWrite)?;
 
             # Read segment header to find last LSN
-            ~header_buf = Vec.with_capacity(WAL_SEGMENT_HEADER_SIZE as usize);
-            header_buf.resize(WAL_SEGMENT_HEADER_SIZE as usize, 0u8);
+            ~header_buf = Vec.with_capacity(WAL_SEGMENT_HEADER_SIZE as u64);
+            header_buf.resize(WAL_SEGMENT_HEADER_SIZE as u64, 0u8);
             file.read_at(0, &header_buf)?;
             ~seg_header = WalSegmentHeader.deserialize(&header_buf)?;
 
             # Resume LSN allocator from last LSN
-            if seg_header.last_lsn != NULL_LSN {
+            I seg_header.last_lsn != NULL_LSN {
                 self.lsn_allocator = LsnAllocator.resume(seg_header.last_lsn, self.segment_size);
             }
 
             self.current_file = Some(file);
             self.current_segment_header = Some(seg_header);
-        } else {
+        } E {
             # Create first segment
             self.create_new_segment()?;
         }
@@ -106,7 +106,7 @@ X WalWriter {
         # Allocate LSN
         ~(lsn, needs_new_segment) = self.lsn_allocator.allocate(record_length);
 
-        if needs_new_segment {
+        I needs_new_segment {
             self.finalize_current_segment()?;
             self.create_new_segment()?;
         }
@@ -128,14 +128,14 @@ X WalWriter {
         );
 
         # Serialize header + payload
-        ~record_buf = Vec.with_capacity(record_length as usize);
-        record_buf.resize(record_length as usize, 0u8);
+        ~record_buf = Vec.with_capacity(record_length as u64);
+        record_buf.resize(record_length as u64, 0u8);
         ~buf = ByteBuffer.wrap(&record_buf);
         header.serialize(&buf);
 
         # Write payload after header
-        for i in 0..payload.len() {
-            record_buf[WAL_RECORD_HEADER_SIZE as usize + i] = payload[i];
+        L i: 0..payload.len() {
+            record_buf[WAL_RECORD_HEADER_SIZE as u64 + i] = payload[i];
         }
 
         # Compute CRC32C checksum over entire record (with checksum field zeroed)
@@ -147,9 +147,9 @@ X WalWriter {
         record_buf[39] = ((checksum >> 24) & 0xFF) as u8;
 
         # Append to buffer or write directly
-        if self.buffer.can_fit(record_length) {
+        I self.buffer.can_fit(record_length) {
             self.buffer.append(&record_buf)?;
-        } else {
+        } E {
             # Flush existing buffer first
             self.flush_buffer()?;
             self.buffer.append(&record_buf)?;
@@ -159,8 +159,8 @@ X WalWriter {
         self.prev_lsn_map.insert(txn_id, lsn);
 
         # Update segment header's last_lsn
-        if ~seg_header = &self.current_segment_header {
-            if M seg_header {
+        I ~seg_header = &self.current_segment_header {
+            I M seg_header {
                 Some(ref ~h) => {
                     h.last_lsn = lsn;
                 },
@@ -209,7 +209,7 @@ X WalWriter {
     # Close the WAL writer
     F close(~self) -> Result<(), VaisError> {
         ~guard = self.lock.lock();
-        if self.is_open {
+        I self.is_open {
             self.flush_buffer()?;
             self.finalize_current_segment()?;
             self.current_file = None;
@@ -223,8 +223,8 @@ X WalWriter {
 
     # Flush the in-memory buffer to disk
     F flush_buffer(~self) -> Result<(), VaisError> {
-        if self.buffer.is_empty() {
-            return Ok(());
+        I self.buffer.is_empty() {
+            R Ok(());
         }
 
         M &self.current_file {
@@ -232,7 +232,7 @@ X WalWriter {
                 file.write_all(self.buffer.contents())?;
             },
             None => {
-                return Err(err_internal("WAL writer: no open segment file"));
+                R Err(err_internal("WAL writer: no open segment file"));
             },
         }
 
@@ -252,8 +252,8 @@ X WalWriter {
         ~first_lsn = self.lsn_allocator.current_lsn();
         ~seg_header = WalSegmentHeader.new(seg_num, first_lsn);
 
-        ~header_buf = Vec.with_capacity(WAL_SEGMENT_HEADER_SIZE as usize);
-        header_buf.resize(WAL_SEGMENT_HEADER_SIZE as usize, 0u8);
+        ~header_buf = Vec.with_capacity(WAL_SEGMENT_HEADER_SIZE as u64);
+        header_buf.resize(WAL_SEGMENT_HEADER_SIZE as u64, 0u8);
         seg_header.serialize_to(&header_buf);
         file.write_all(&header_buf)?;
 
@@ -267,8 +267,8 @@ X WalWriter {
     F finalize_current_segment(~self) -> Result<(), VaisError> {
         M (&self.current_file, &self.current_segment_header) {
             (Some(ref file), Some(ref seg_header)) => {
-                ~header_buf = Vec.with_capacity(WAL_SEGMENT_HEADER_SIZE as usize);
-                header_buf.resize(WAL_SEGMENT_HEADER_SIZE as usize, 0u8);
+                ~header_buf = Vec.with_capacity(WAL_SEGMENT_HEADER_SIZE as u64);
+                header_buf.resize(WAL_SEGMENT_HEADER_SIZE as u64, 0u8);
                 seg_header.serialize_to(&header_buf);
                 file.write_at(0, &header_buf)?;
                 fsync(file)?;
@@ -283,13 +283,13 @@ X WalWriter {
         ~entries = std/file.read_dir(&self.wal_dir)?;
         ~max_segment: u32 = 0;
 
-        for entry in &entries {
+        L entry: &entries {
             ~name = entry.file_name();
             # Segment files are named NNNNNN.wal (e.g., 000001.wal)
-            if name.ends_with(".wal") && name.len() == 10 {
+            I name.ends_with(".wal") && name.len() == 10 {
                 M name[0..6].parse_u32() {
                     Ok(num) => {
-                        if num > max_segment { max_segment = num; }
+                        I num > max_segment { max_segment = num; }
                     },
                     Err(_) => {},
                 }

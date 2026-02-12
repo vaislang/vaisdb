@@ -18,8 +18,8 @@ X MmapRegion {
     # Create a new mmap region for a file
     F open(file: File, page_size: u32) -> Result<MmapRegion, VaisError> {
         ~file_size = file.size()?;
-        if file_size == 0 {
-            return Ok(MmapRegion {
+        I file_size == 0 {
+            R Ok(MmapRegion {
                 file,
                 base_addr: 0,
                 length: 0,
@@ -27,7 +27,7 @@ X MmapRegion {
             });
         }
 
-        ~addr = file.mmap(0, file_size as usize)?;
+        ~addr = file.mmap(0, file_size as u64)?;
         Ok(MmapRegion {
             file,
             base_addr: addr,
@@ -39,29 +39,29 @@ X MmapRegion {
     # Read a page via mmap (zero-copy slice reference)
     F read_page(self, page_id: u32) -> Result<&[u8], VaisError> {
         ~offset = (page_id as u64) * (self.page_size as u64);
-        if offset + (self.page_size as u64) > self.length {
-            return Err(err_io("mmap", "Page beyond mapped region"));
+        I offset + (self.page_size as u64) > self.length {
+            R Err(err_io("mmap", "Page beyond mapped region"));
         }
 
         ~page_ptr = self.base_addr + offset;
-        Ok(unsafe_slice_from_addr(page_ptr, self.page_size as usize))
+        Ok(unsafe_slice_from_addr(page_ptr, self.page_size as u64))
     }
 
     # Write a page via mmap (copy into mapped region)
     F write_page(~self, page_id: u32, data: &[u8]) -> Result<(), VaisError> {
         ~offset = (page_id as u64) * (self.page_size as u64);
-        if offset + (self.page_size as u64) > self.length {
-            return Err(err_io("mmap", "Page beyond mapped region"));
+        I offset + (self.page_size as u64) > self.length {
+            R Err(err_io("mmap", "Page beyond mapped region"));
         }
 
         ~page_ptr = self.base_addr + offset;
-        unsafe_copy_to_addr(page_ptr, data, self.page_size as usize);
+        unsafe_copy_to_addr(page_ptr, data, self.page_size as u64);
         Ok(())
     }
 
     # Sync mapped pages to disk
     F sync(self) -> Result<(), VaisError> {
-        if self.base_addr != 0 {
+        I self.base_addr != 0 {
             self.file.fsync()?;
         }
         Ok(())
@@ -69,12 +69,12 @@ X MmapRegion {
 
     # Remap after file extension
     F remap(~self) -> Result<(), VaisError> {
-        if self.base_addr != 0 {
-            self.file.munmap(self.base_addr, self.length as usize)?;
+        I self.base_addr != 0 {
+            self.file.munmap(self.base_addr, self.length as u64)?;
         }
         ~file_size = self.file.size()?;
-        if file_size > 0 {
-            self.base_addr = self.file.mmap(0, file_size as usize)?;
+        I file_size > 0 {
+            self.base_addr = self.file.mmap(0, file_size as u64)?;
             self.length = file_size;
         }
         Ok(())
@@ -84,14 +84,14 @@ X MmapRegion {
     F advise_sequential(self, page_id: u32, count: u32) -> Result<(), VaisError> {
         ~offset = (page_id as u64) * (self.page_size as u64);
         ~length = (count as u64) * (self.page_size as u64);
-        self.file.madvise(offset, length as usize, "sequential")?;
+        self.file.madvise(offset, length as u64, "sequential")?;
         Ok(())
     }
 
     # Close and unmap
     F close(~self) -> Result<(), VaisError> {
-        if self.base_addr != 0 {
-            self.file.munmap(self.base_addr, self.length as usize)?;
+        I self.base_addr != 0 {
+            self.file.munmap(self.base_addr, self.length as u64)?;
             self.base_addr = 0;
             self.length = 0;
         }
@@ -107,6 +107,6 @@ X MmapRegion {
 
 # Extern C FFI helpers for raw pointer operations
 extern "C" {
-    F unsafe_slice_from_addr(addr: u64, len: usize) -> &[u8];
-    F unsafe_copy_to_addr(addr: u64, data: &[u8], len: usize);
+    F unsafe_slice_from_addr(addr: u64, len: u64) -> &[u8];
+    F unsafe_copy_to_addr(addr: u64, data: &[u8], len: u64);
 }

@@ -59,7 +59,7 @@ F write_string(buf: &~ByteBuffer, s: &Str) {
 
 # Read a length-prefixed string from ByteBuffer
 F read_string(buf: &ByteBuffer) -> Result<Str, VaisError> {
-    ~len = buf.get_u32_le()? as usize;
+    ~len = buf.get_u32_le()? as u64;
     ~bytes = buf.get_bytes(len)?;
     Str.from_utf8(bytes)
 }
@@ -72,23 +72,23 @@ F write_bytes(buf: &~ByteBuffer, data: &[u8]) {
 
 # Read a length-prefixed byte array from ByteBuffer
 F read_bytes(buf: &ByteBuffer) -> Result<Vec<u8>, VaisError> {
-    ~len = buf.get_u32_le()? as usize;
+    ~len = buf.get_u32_le()? as u64;
     buf.get_bytes(len)
 }
 
 # Write a Vec<u32> with length prefix
 F write_vec_u32(buf: &~ByteBuffer, vec: &Vec<u32>) {
     buf.put_u32_le(vec.len() as u32);
-    for val in vec {
+    L val: vec {
         buf.put_u32_le(val);
     }
 }
 
 # Read a Vec<u32> with length prefix
 F read_vec_u32(buf: &ByteBuffer) -> Result<Vec<u32>, VaisError> {
-    ~count = buf.get_u32_le()? as usize;
+    ~count = buf.get_u32_le()? as u64;
     ~vec = Vec.with_capacity(count);
-    for _ in 0..count {
+    L _: 0..count {
         vec.push(buf.get_u32_le()?);
     }
     Ok(vec)
@@ -97,24 +97,24 @@ F read_vec_u32(buf: &ByteBuffer) -> Result<Vec<u32>, VaisError> {
 # Write a Vec<u64> with length prefix
 F write_vec_u64(buf: &~ByteBuffer, vec: &Vec<u64>) {
     buf.put_u32_le(vec.len() as u32);
-    for val in vec {
+    L val: vec {
         buf.put_u64_le(val);
     }
 }
 
 # Read a Vec<u64> with length prefix
 F read_vec_u64(buf: &ByteBuffer) -> Result<Vec<u64>, VaisError> {
-    ~count = buf.get_u32_le()? as usize;
+    ~count = buf.get_u32_le()? as u64;
     ~vec = Vec.with_capacity(count);
-    for _ in 0..count {
+    L _: 0..count {
         vec.push(buf.get_u64_le()?);
     }
     Ok(vec)
 }
 
 # Zero a range in a byte slice (used for checksum computation)
-F zero_range(data: &~[u8], offset: usize, len: usize) {
-    for i in offset..(offset + len) {
+F zero_range(data: &~[u8], offset: u64, len: u64) {
+    L i: offset..(offset + len) {
         data[i] = 0;
     }
 }

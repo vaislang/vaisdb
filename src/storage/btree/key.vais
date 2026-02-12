@@ -7,7 +7,7 @@ U storage/btree/entry.{compare_keys, key_less_than, key_equal, KeyCmp};
 U std/bytes.{ByteBuffer};
 
 # Key types for type-aware comparison
-L KeyType = Integer | Float | String | Bytes | Composite;
+L KeyType = Integer | Float | Str | Bytes | Composite;
 
 # Encode an integer key (i64) as big-endian bytes for correct lexicographic order
 # Flip the sign bit so negative sorts before positive
@@ -76,7 +76,7 @@ F decode_u64_key(data: &[u8]) -> u64 {
 # Strings sort lexicographically as raw bytes (UTF-8 preserves order for ASCII)
 F encode_string_key(value: &str) -> Vec<u8> {
     ~encoded = Vec.with_capacity(value.len());
-    for b in value.as_bytes() {
+    L b: value.as_bytes() {
         encoded.push(b);
     }
     encoded
@@ -85,17 +85,17 @@ F encode_string_key(value: &str) -> Vec<u8> {
 # Encode a composite key (multiple columns)
 # Each component is length-prefixed: [u16 len][key bytes]
 F encode_composite_key(components: &[&[u8]]) -> Vec<u8> {
-    ~total_len: usize = 0;
-    for comp in components {
+    ~total_len: u64 = 0;
+    L comp: components {
         total_len += 2 + comp.len();
     }
 
     ~encoded = Vec.with_capacity(total_len);
-    for comp in components {
+    L comp: components {
         ~len = comp.len() as u16;
         encoded.push((len >> 8) as u8);
         encoded.push((len & 0xFF) as u8);
-        for b in *comp {
+        L b: *comp {
             encoded.push(b);
         }
     }
@@ -105,29 +105,29 @@ F encode_composite_key(components: &[&[u8]]) -> Vec<u8> {
 # Decode a composite key into its components
 F decode_composite_key(data: &[u8]) -> Vec<Vec<u8>> {
     ~components = Vec.new();
-    ~pos: usize = 0;
+    ~pos: u64 = 0;
 
-    while pos + 2 <= data.len() {
+    L while pos + 2 <= data.len() {
         ~len = ((data[pos] as u16) << 8) | (data[pos + 1] as u16);
         pos += 2;
-        if pos + len as usize > data.len() {
-            break;
+        I pos + len as u64 > data.len() {
+            B;
         }
-        ~comp = data[pos..pos + len as usize].to_vec();
+        ~comp = data[pos..pos + len as u64].to_vec();
         components.push(comp);
-        pos += len as usize;
+        pos += len as u64;
     }
 
     components
 }
 
 # Calculate common prefix length between two keys
-F common_prefix_length(a: &[u8], b: &[u8]) -> usize {
-    ~min_len = if a.len() < b.len() { a.len() } else { b.len() };
-    ~prefix_len: usize = 0;
-    for i in 0..min_len {
-        if a[i] != b[i] {
-            break;
+F common_prefix_length(a: &[u8], b: &[u8]) -> u64 {
+    ~min_len = I a.len() < b.len() { a.len() } E { b.len() };
+    ~prefix_len: u64 = 0;
+    L i: 0..min_len {
+        I a[i] != b[i] {
+            B;
         }
         prefix_len += 1;
     }
@@ -144,11 +144,11 @@ F strip_prefix(key: &[u8], prev_key: &[u8]) -> (u16, Vec<u8>) {
 
 # Reconstruct a key from prefix length and suffix
 F reconstruct_key(prev_key: &[u8], prefix_len: u16, suffix: &[u8]) -> Vec<u8> {
-    ~key = Vec.with_capacity(prefix_len as usize + suffix.len());
-    for i in 0..prefix_len as usize {
+    ~key = Vec.with_capacity(prefix_len as u64 + suffix.len());
+    L i: 0..prefix_len as u64 {
         key.push(prev_key[i]);
     }
-    for b in suffix {
+    L b: suffix {
         key.push(b);
     }
     key
@@ -199,9 +199,9 @@ X KeyRange {
         M &self.start {
             Some(ref start_key) => {
                 M compare_keys(key, start_key) {
-                    KeyCmp.Less => { return false; },
+                    KeyCmp.Less => { R false; },
                     KeyCmp.Equal => {
-                        if !self.start_inclusive { return false; }
+                        I !self.start_inclusive { R false; }
                     },
                     KeyCmp.Greater => {},
                 }
@@ -213,9 +213,9 @@ X KeyRange {
         M &self.end {
             Some(ref end_key) => {
                 M compare_keys(key, end_key) {
-                    KeyCmp.Greater => { return false; },
+                    KeyCmp.Greater => { R false; },
                     KeyCmp.Equal => {
-                        if !self.end_inclusive { return false; }
+                        I !self.end_inclusive { R false; }
                     },
                     KeyCmp.Less => {},
                 }

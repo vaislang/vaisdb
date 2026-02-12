@@ -122,7 +122,7 @@ X CatalogManager {
         ~max_table_id: u32 = FIRST_USER_TABLE_ID;
         ~max_index_id: u32 = 0;
 
-        for (key, tid) in &entries {
+        L (key, tid): &entries {
             # Decode TID to locate the tuple in the heap
             ~(page_id, slot_id) = decode_tid(*tid);
 
@@ -135,8 +135,8 @@ X CatalogManager {
 
             # Determine entry type from the first byte of user data (catalog tag)
             ~user_data = tuple.get_data();
-            if user_data.len() == 0 {
-                continue;
+            I user_data.len() == 0 {
+                C;
             }
 
             ~tag = user_data[0];
@@ -146,7 +146,7 @@ X CatalogManager {
                 CATALOG_TAG_TABLE => {
                     ~info = TableInfo.deserialize(&buf)?;
                     # Track highest table_id for next_table_id allocation
-                    if info.table_id >= max_table_id {
+                    I info.table_id >= max_table_id {
                         max_table_id = info.table_id + 1;
                     }
                     self.tables.insert(info.name.clone(), info);
@@ -155,16 +155,16 @@ X CatalogManager {
                     ~info = ColumnInfo.deserialize(&buf)?;
                     ~table_id = info.table_id;
                     # Add to columns cache, creating the Vec if needed
-                    if !self.columns.contains_key(&table_id) {
+                    I !self.columns.contains_key(&table_id) {
                         self.columns.insert(table_id, Vec.new());
                     }
-                    ~col_vec = self.columns.get_mut(&table_id).unwrap();
+                    ~col_vec = self.columns.get_mut(&table_id)!;
                     col_vec.push(info);
                 },
                 CATALOG_TAG_INDEX => {
                     ~info = IndexInfo.deserialize(&buf)?;
                     # Track highest index_id for next_index_id allocation
-                    if info.index_id >= max_index_id {
+                    I info.index_id >= max_index_id {
                         max_index_id = info.index_id + 1;
                     }
                     self.indexes.insert(info.name.clone(), info);
@@ -179,7 +179,7 @@ X CatalogManager {
         self.next_index_id = max_index_id + 1;
 
         # Sort column lists by column_index for consistent ordering
-        for (_, col_vec) in self.columns.iter_mut() {
+        L (_, col_vec): self.columns.iter_mut() {
             col_vec.sort_by(|a, b| a.column_index.cmp(&b.column_index));
         }
 
@@ -202,8 +202,8 @@ X CatalogManager {
         txn_id: u64,
     ) -> Result<u32, VaisError> {
         # Check that the table does not already exist
-        if self.tables.contains_key(&name) {
-            return Err(err_table_exists(name));
+        I self.tables.contains_key(&name) {
+            R Err(err_table_exists(name));
         }
 
         # Allocate a new table_id
@@ -234,7 +234,7 @@ X CatalogManager {
         ~pk_columns = Vec.new();
         ~col_infos = Vec.with_capacity(columns.len());
 
-        for i in 0..columns.len() {
+        L i: 0..columns.len() {
             ~col = &columns[i];
 
             # Create ColumnInfo with the assigned table_id
@@ -252,7 +252,7 @@ X CatalogManager {
             };
 
             # Track primary key columns for auto-index creation
-            if col_info.is_primary_key {
+            I col_info.is_primary_key {
                 pk_columns.push(col_info.name.clone());
             }
 
@@ -271,7 +271,7 @@ X CatalogManager {
         self.columns.insert(table_id, col_infos);
 
         # Auto-create primary key index if any column is marked as primary key
-        if pk_columns.len() > 0 {
+        I pk_columns.len() > 0 {
             ~pk_index_name = "pk_{name}";
             ~pk_root_page = pool.allocate_page(FILE_ID_DATA)?;
 
@@ -315,7 +315,7 @@ X CatalogManager {
         # Look up the table
         ~table_info = M self.tables.get(&name) {
             Some(info) => info.clone(),
-            None => { return Err(err_table_not_found(name)); },
+            None => { R Err(err_table_not_found(name)); },
         };
 
         ~table_id = table_info.table_id;
@@ -329,20 +329,20 @@ X CatalogManager {
         ~col_end = columns_key_end(table_id);
         ~col_range = KeyRange.half_open(col_start, col_end);
         ~col_entries = range_scan_bounded(&self.catalog_tree, &col_range, pool)?;
-        for (col_key, _) in &col_entries {
+        L (col_key, _): &col_entries {
             self.delete_catalog_entry(col_key, pool, gcm, txn_id)?;
         }
 
         # Remove all index entries for this table
         # First, find indexes via cache
         ~index_names_to_drop = Vec.new();
-        for (idx_name, idx_info) in self.indexes.iter() {
-            if idx_info.table_id == table_id {
+        L (idx_name, idx_info): self.indexes.iter() {
+            I idx_info.table_id == table_id {
                 index_names_to_drop.push(idx_name.clone());
             }
         }
 
-        for idx_name in &index_names_to_drop {
+        L idx_name: &index_names_to_drop {
             # Remove the "I:" key
             ~idx_key = index_key(idx_name);
             self.delete_catalog_entry(&idx_key, pool, gcm, txn_id)?;
@@ -376,7 +376,7 @@ X CatalogManager {
         ~result = Vec.new();
         M self.columns.get(&table_id) {
             Some(col_vec) => {
-                for col in col_vec {
+                L col: col_vec {
                     result.push(col);
                 }
             },
@@ -389,9 +389,9 @@ X CatalogManager {
     F get_column(self, table_id: u32, name: &Str) -> Option<&ColumnInfo> {
         M self.columns.get(&table_id) {
             Some(col_vec) => {
-                for col in col_vec {
-                    if &col.name == name {
-                        return Some(col);
+                L col: col_vec {
+                    I &col.name == name {
+                        R Some(col);
                     }
                 }
                 None
@@ -405,13 +405,13 @@ X CatalogManager {
     F get_table_schema(self, name: &Str) -> Result<(TableInfo, Vec<ColumnInfo>), VaisError> {
         ~table = M self.tables.get(name) {
             Some(info) => info.clone(),
-            None => { return Err(err_table_not_found(name.clone())); },
+            None => { R Err(err_table_not_found(name.clone())); },
         };
 
         ~cols = Vec.new();
         M self.columns.get(&table.table_id) {
             Some(col_vec) => {
-                for col in col_vec {
+                L col: col_vec {
                     cols.push(col.clone());
                 }
             },
@@ -429,7 +429,7 @@ X CatalogManager {
     # List all tables
     F all_tables(self) -> Vec<&TableInfo> {
         ~result = Vec.new();
-        for (_, info) in self.tables.iter() {
+        L (_, info): self.tables.iter() {
             result.push(info);
         }
         result
@@ -449,8 +449,8 @@ X CatalogManager {
         txn_id: u64,
     ) -> Result<(), VaisError> {
         # Check that the index does not already exist
-        if self.indexes.contains_key(&info.name) {
-            return Err(err_index_exists(info.name.clone()));
+        I self.indexes.contains_key(&info.name) {
+            R Err(err_index_exists(info.name.clone()));
         }
 
         # Serialize and insert into catalog B+Tree
@@ -484,7 +484,7 @@ X CatalogManager {
         # Look up the index
         ~idx_info = M self.indexes.get(&name) {
             Some(info) => info.clone(),
-            None => { return Err(err_index_not_found(name)); },
+            None => { R Err(err_index_not_found(name)); },
         };
 
         # Remove from catalog B+Tree
@@ -509,8 +509,8 @@ X CatalogManager {
     # Get all indexes for a given table
     F get_indexes_for_table(self, table_id: u32) -> Vec<&IndexInfo> {
         ~result = Vec.new();
-        for (_, info) in self.indexes.iter() {
-            if info.table_id == table_id {
+        L (_, info): self.indexes.iter() {
+            I info.table_id == table_id {
                 result.push(info);
             }
         }

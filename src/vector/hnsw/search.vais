@@ -11,7 +11,7 @@
 U std/result.{Result, Ok, Err};
 U std/vec.Vec;
 U std/hashset.HashSet;
-U std/string.String;
+# U std/string.String;  # Removed: Str is builtin
 U src/common/error.{VaisError, ErrorCategory};
 U src/vector/hnsw/types.{
     HnswMeta,
@@ -55,7 +55,7 @@ X SearchResult {
         }
     }
 
-    F with_capacity(k: usize) -> SearchResult {
+    F with_capacity(k: u64) -> SearchResult {
         SearchResult {
             results: Vec::with_capacity(k),
             nodes_visited: 0,
@@ -78,18 +78,18 @@ X SearchResult {
     F sort_by_distance(~self) {
         # Sort results by distance in ascending order (closest first)
         self.results.sort_by(|a, b| {
-            if a.distance < b.distance {
+            I a.distance < b.distance {
                 -1
-            } else if a.distance > b.distance {
+            } E I a.distance > b.distance {
                 1
-            } else {
+            } E {
                 0
             }
         });
     }
 
-    F truncate(~self, k: usize) {
-        if self.results.len() > k {
+    F truncate(~self, k: u64) {
+        I self.results.len() > k {
             self.results.truncate(k);
         }
     }
@@ -120,7 +120,7 @@ X MinHeap {
         }
     }
 
-    F with_capacity(capacity: usize) -> MinHeap {
+    F with_capacity(capacity: u64) -> MinHeap {
         MinHeap {
             candidates: Vec::with_capacity(capacity),
         }
@@ -129,24 +129,23 @@ X MinHeap {
     F push(~self, candidate: SearchCandidate) {
         # Insert in sorted order (ascending by distance)
         ~inserted = false;
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < self.candidates.len() {
-            if candidate.distance < self.candidates[i].distance {
+            I candidate.distance < self.candidates[i].distance {
                 self.candidates.insert(i, candidate);
                 inserted = true;
-                break;
-            }
+                B            }
             i = i + 1;
         }
-        if !inserted {
+        I !inserted {
             self.candidates.push(candidate);
         }
     }
 
     F pop_min(~self) -> Option<SearchCandidate> {
-        if self.candidates.is_empty() {
+        I self.candidates.is_empty() {
             Option::None
-        } else {
+        } E {
             Option::Some(self.candidates.remove(0))
         }
     }
@@ -155,7 +154,7 @@ X MinHeap {
         self.candidates.is_empty()
     }
 
-    F len(&self) -> usize {
+    F len(&self) -> u64 {
         self.candidates.len()
     }
 }
@@ -173,7 +172,7 @@ X MaxHeap {
         }
     }
 
-    F with_capacity(capacity: usize) -> MaxHeap {
+    F with_capacity(capacity: u64) -> MaxHeap {
         MaxHeap {
             candidates: Vec::with_capacity(capacity),
         }
@@ -182,32 +181,31 @@ X MaxHeap {
     F push(~self, candidate: SearchCandidate) {
         # Insert in sorted order (descending by distance)
         ~inserted = false;
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < self.candidates.len() {
-            if candidate.distance > self.candidates[i].distance {
+            I candidate.distance > self.candidates[i].distance {
                 self.candidates.insert(i, candidate);
                 inserted = true;
-                break;
-            }
+                B            }
             i = i + 1;
         }
-        if !inserted {
+        I !inserted {
             self.candidates.push(candidate);
         }
     }
 
     F pop_max(~self) -> Option<SearchCandidate> {
-        if self.candidates.is_empty() {
+        I self.candidates.is_empty() {
             Option::None
-        } else {
+        } E {
             Option::Some(self.candidates.remove(0))
         }
     }
 
     F peek_max(&self) -> Option<&SearchCandidate> {
-        if self.candidates.is_empty() {
+        I self.candidates.is_empty() {
             Option::None
-        } else {
+        } E {
             Option::Some(&self.candidates[0])
         }
     }
@@ -216,7 +214,7 @@ X MaxHeap {
         self.candidates.is_empty()
     }
 
-    F len(&self) -> usize {
+    F len(&self) -> u64 {
         self.candidates.len()
     }
 
@@ -254,11 +252,11 @@ F search_layer_ef(
     ~stats: &~SearchResult,
 ) -> Result<Vec<SearchCandidate>, VaisError> {
     ~visited: HashSet<u64> = HashSet::new();
-    ~candidates = MinHeap::with_capacity(ef as usize);
-    ~result = MaxHeap::with_capacity(ef as usize);
+    ~candidates = MinHeap::with_capacity(ef as u64);
+    ~result = MaxHeap::with_capacity(ef as u64);
 
     # Initialize with entry points
-    ~ep_idx: usize = 0;
+    ~ep_idx: u64 = 0;
     L while ep_idx < entry_points.len() {
         ~ep = &entry_points[ep_idx];
         visited.insert(ep.node_id);
@@ -277,9 +275,8 @@ F search_layer_ef(
                 ~f_opt = result.peek_max();
                 M f_opt {
                     Option::Some(f) => {
-                        if c.distance > f.distance {
-                            break;
-                        }
+                        I c.distance > f.distance {
+                            B                        }
                     },
                     Option::None => {},
                 }
@@ -292,25 +289,23 @@ F search_layer_ef(
                 ~neighbors = node.get_neighbors(layer)?;
 
                 # Explore each neighbor
-                ~n_idx: usize = 0;
+                ~n_idx: u64 = 0;
                 L while n_idx < neighbors.len() {
                     ~neighbor = &neighbors[n_idx];
                     ~n_id = neighbor.node_id;
 
                     # Skip if already visited
-                    if visited.contains(&n_id) {
+                    I visited.contains(&n_id) {
                         n_idx = n_idx + 1;
-                        continue;
-                    }
+                        C                    }
 
                     visited.insert(n_id);
 
                     # Get neighbor node and check if deleted
                     ~n_node = store.get_node(n_id)?;
-                    if n_node.is_deleted {
+                    I n_node.is_deleted {
                         n_idx = n_idx + 1;
-                        continue;
-                    }
+                        C                    }
 
                     # Compute distance to query
                     ~n_vec = store.get_vector(n_id)?;
@@ -322,7 +317,7 @@ F search_layer_ef(
                     ~f_dist_opt = result.peek_max();
                     M f_dist_opt {
                         Option::Some(f_dist) => {
-                            if dist_n < f_dist.distance || (result.len() as u32) < ef {
+                            I dist_n < f_dist.distance || (result.len() as u32) < ef {
                                 should_add = true;
                             }
                         },
@@ -331,13 +326,13 @@ F search_layer_ef(
                         },
                     }
 
-                    if should_add {
+                    I should_add {
                         ~new_candidate = SearchCandidate::new(n_id, dist_n);
                         candidates.push(SearchCandidate::new(n_id, dist_n));
                         result.push(new_candidate);
 
                         # Evict farthest if result set exceeds ef
-                        if (result.len() as u32) > ef {
+                        I (result.len() as u32) > ef {
                             result.pop_max();
                         }
                     }
@@ -371,25 +366,25 @@ F search_layer_ef(
 # Returns: SearchResult with up to K nearest neighbors, sorted by distance
 F knn_search(
     query: &[f32],
-    k: usize,
+    k: u64,
     ef_search: u32,
     meta: &HnswMeta,
     store: &dyn NodeStore,
     distance: &DistanceComputer,
 ) -> Result<SearchResult, VaisError> {
     # Validate parameters
-    if meta.is_empty() {
-        ~err_msg = String::from("Cannot search in empty HNSW index");
-        return Err(VaisError::new(
+    I meta.is_empty() {
+        ~err_msg = Str::from("Cannot search in empty HNSW index");
+        R Err(VaisError::new(
             ErrorCategory::Vector,
             "VE-02-03-001",
             err_msg,
         ));
     }
 
-    if k == 0 || (k as u64) > meta.total_nodes {
-        ~err_msg = String::from("Invalid K parameter: must be 0 < K <= total_nodes");
-        return Err(VaisError::new(
+    I k == 0 || (k as u64) > meta.total_nodes {
+        ~err_msg = Str::from("Invalid K parameter: must be 0 < K <= total_nodes");
+        R Err(VaisError::new(
             ErrorCategory::Vector,
             "VE-02-03-002",
             err_msg,
@@ -401,9 +396,9 @@ F knn_search(
 
     # Get entry point
     ~ep_id = meta.entry_point;
-    if ep_id == INVALID_NODE_ID {
-        ~err_msg = String::from("Invalid entry point in HNSW meta");
-        return Err(VaisError::new(
+    I ep_id == INVALID_NODE_ID {
+        ~err_msg = Str::from("Invalid entry point in HNSW meta");
+        R Err(VaisError::new(
             ErrorCategory::Vector,
             "VE-02-03-001",
             err_msg,
@@ -432,9 +427,9 @@ F knn_search(
             &~result,
         )?;
 
-        if layer_result.is_empty() {
-            ~err_msg = String::from("Search layer returned empty result during descent");
-            return Err(VaisError::new(
+        I layer_result.is_empty() {
+            ~err_msg = Str::from("Search layer returned empty result during descent");
+            R Err(VaisError::new(
                 ErrorCategory::Vector,
                 "VE-02-03-003",
                 err_msg,
@@ -445,9 +440,8 @@ F knn_search(
         current_candidates.clear();
         current_candidates.push(layer_result[0]);
 
-        if lc == 0 {
-            break;
-        }
+        I lc == 0 {
+            B        }
         lc = lc - 1;
     }
 
@@ -464,7 +458,7 @@ F knn_search(
 
     # Sort candidates by distance (ascending) and take top K
     # Convert SearchCandidate to SearchResultEntry
-    ~idx: usize = 0;
+    ~idx: u64 = 0;
     L while idx < final_candidates.len() {
         ~candidate = &final_candidates[idx];
         result.add_result(SearchResultEntry::new(
@@ -509,23 +503,22 @@ F greedy_search_single(
 
         ~neighbors = node.get_neighbors(layer)?;
 
-        ~n_idx: usize = 0;
+        ~n_idx: u64 = 0;
         L while n_idx < neighbors.len() {
             ~neighbor = &neighbors[n_idx];
             ~n_id = neighbor.node_id;
 
             # Skip deleted nodes
             ~n_node = store.get_node(n_id)?;
-            if n_node.is_deleted {
+            I n_node.is_deleted {
                 n_idx = n_idx + 1;
-                continue;
-            }
+                C            }
 
             ~n_vec = store.get_vector(n_id)?;
             ~n_dist = distance.compute(query, n_vec)?;
             stats.increment_computations();
 
-            if n_dist < current_dist {
+            I n_dist < current_dist {
                 current_dist = n_dist;
                 current_id = n_id;
                 improved = true;

@@ -202,7 +202,7 @@ describe("Conflict Detection") {
         ~detector = ConflictDetector.new();
 
         # txn 100 locks row
-        detector.check_and_lock(100, 1, 10, 0).unwrap();
+        detector.check_and_lock(100, 1, 10, 0)!;
 
         # txn 101 tries same row → conflict
         ~result = detector.check_and_lock(101, 1, 10, 0);
@@ -212,7 +212,7 @@ describe("Conflict Detection") {
     it("should release locks on commit/abort") {
         ~detector = ConflictDetector.new();
 
-        detector.check_and_lock(100, 1, 10, 0).unwrap();
+        detector.check_and_lock(100, 1, 10, 0)!;
         detector.release_locks(100);
 
         # Now txn 101 can lock the same row
@@ -265,7 +265,7 @@ describe("Undo Entry") {
         entry.serialize(&bb);
 
         ~read_bb = ByteBuffer.wrap_readonly(&buf);
-        ~restored = UndoEntry.deserialize(&read_bb).unwrap();
+        ~restored = UndoEntry.deserialize(&read_bb)!;
         assert_eq(restored.txn_id, 100);
         assert_eq(restored.undo_type, UndoType.Insert);
         assert_eq(restored.file_id, 1);
@@ -287,7 +287,7 @@ describe("Active Transaction Table") {
         ~att = ActiveTransactionTable.new();
 
         att.register(100, 0);
-        ~entry = att.get(100).unwrap();
+        ~entry = att.get(100)!;
         assert_eq(entry.txn_id, 100);
 
         M entry.state {
@@ -301,7 +301,7 @@ describe("Active Transaction Table") {
         att.register(100, 0);
 
         att.set_state(100, TxnState.Committing);
-        ~entry = att.get(100).unwrap();
+        ~entry = att.get(100)!;
         M entry.state {
             TxnState.Committing => {},
             _ => panic!("Expected Committing state"),

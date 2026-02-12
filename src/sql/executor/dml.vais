@@ -34,7 +34,7 @@ U sql/executor/scan.{TableScanExecutor, build_index_key, build_index_key_from_ro
 F err_insert_no_space(table: Str) -> VaisError {
     VaisError.new(
         "VAIS-0103001",
-        "INSERT failed: no free page found for table '{table}'"
+        "INSERT failed: no free page found L table '{table}'"
     )
 }
 
@@ -63,7 +63,7 @@ F err_column_not_found(column: Str, table: Str) -> VaisError {
 }
 
 # VAIS-0103005: Value count mismatch
-F err_value_count_mismatch(expected: usize, actual: usize) -> VaisError {
+F err_value_count_mismatch(expected: u64, actual: u64) -> VaisError {
     VaisError.new(
         "VAIS-0103005",
         "INSERT value count mismatch: expected {expected}, got {actual}"
@@ -119,18 +119,18 @@ F execute_insert(
 
     # Build schema types array
     ~schema = Vec.with_capacity(columns.len());
-    for col in &columns {
+    L col: &columns {
         schema.push(col.data_type);
     }
 
     # Determine column ordering for the INSERT
     # If columns are specified: map provided columns to table column positions
-    # If not specified: values must match all columns in order
-    ~column_names: Vec<Str> = if insert.columns.len() > 0 {
+    # If not specified: values must M all columns in order
+    ~column_names: Vec<Str> = I insert.columns.len() > 0 {
         insert.columns.clone()
-    } else {
+    } E {
         ~names = Vec.with_capacity(columns.len());
-        for col in &columns {
+        L col: &columns {
             names.push(col.name.clone());
         }
         names
@@ -149,22 +149,22 @@ F execute_insert(
 
     M &insert.source {
         InsertSource.Values { rows } => {
-            for row_exprs in rows {
+            L row_exprs: rows {
                 # Validate value count
-                if row_exprs.len() != column_names.len() {
-                    return Err(err_value_count_mismatch(column_names.len(), row_exprs.len()));
+                I row_exprs.len() != column_names.len() {
+                    R Err(err_value_count_mismatch(column_names.len(), row_exprs.len()));
                 }
 
                 # Evaluate expressions to get SqlValues
                 ~values = Vec.with_capacity(row_exprs.len());
                 ~dummy_row = Row.null_row(0);
                 ~dummy_eval = EvalContext.new();
-                for expr in row_exprs {
+                L expr: row_exprs {
                     ~val = eval_expr(expr, &dummy_row, &dummy_eval)?;
                     values.push(val);
                 }
 
-                # Build full row (reorder values to match table column order)
+                # Build full row (reorder values to M table column order)
                 ~full_values = build_full_row_values(&values, &column_indices, columns.len());
 
                 # Apply defaults for missing/NULL columns
@@ -203,7 +203,7 @@ F execute_insert(
             # and feeding results into the same insert pipeline
             # This requires the full query executor pipeline which will be
             # integrated when the query planner is complete (Task 13)
-            return Err(err_insert_source("INSERT ... SELECT not yet implemented"));
+            R Err(err_insert_source("INSERT ... SELECT not yet implemented"));
         },
     }
 
@@ -236,13 +236,13 @@ F execute_update(
 
     # Build schema
     ~schema = Vec.with_capacity(columns.len());
-    for col in &columns {
+    L col: &columns {
         schema.push(col.data_type);
     }
 
     # Resolve assignment column indices
     ~assignment_indices = Vec.with_capacity(update.assignments.len());
-    for assign in &update.assignments {
+    L assign: &update.assignments {
         ~col_idx = find_column_index(&assign.column, &columns, &table_info.name)?;
         assignment_indices.push(col_idx);
     }
@@ -273,7 +273,7 @@ F execute_update(
                     exec_row.get_row().clone(),
                 ));
             },
-            None => { break; },
+            None => { B; },
         }
     }
 
@@ -282,14 +282,14 @@ F execute_update(
     ~rows_affected: u64 = 0;
 
     # Process each matching row
-    for (old_page_id, old_slot_id, old_row) in &matching_rows {
+    L (old_page_id, old_slot_id, old_row): &matching_rows {
         # Build new row by applying assignments
         ~new_values = Vec.with_capacity(columns.len());
-        for i in 0..columns.len() {
+        L i: 0..columns.len() {
             new_values.push(old_row.get(i).clone());
         }
 
-        for j in 0..update.assignments.len() {
+        L j: 0..update.assignments.len() {
             ~col_idx = assignment_indices[j];
             ~new_val = eval_expr(&update.assignments[j].value, old_row, &eval_ctx)?;
             new_values[col_idx] = new_val;
@@ -358,7 +358,7 @@ F execute_delete(
 
     # Build schema
     ~schema = Vec.with_capacity(columns.len());
-    for col in &columns {
+    L col: &columns {
         schema.push(col.data_type);
     }
 
@@ -381,7 +381,7 @@ F execute_delete(
                     exec_row.get_row().clone(),
                 ));
             },
-            None => { break; },
+            None => { B; },
         }
     }
 
@@ -390,7 +390,7 @@ F execute_delete(
     ~rows_affected: u64 = 0;
 
     # Process each matching row
-    for (page_id, slot_id, row) in &matching_rows {
+    L (page_id, slot_id, row): &matching_rows {
         # WAL-first: write TUPLE_DELETE record
         ~row_bytes = row.encode(schema.as_slice());
         ~wal_payload = build_tuple_delete_wal(
@@ -428,18 +428,19 @@ F insert_tuple_into_heap(
     ~current_page_id = table_info.first_page_id;
 
     # Walk the heap page chain to find a page with space
-    while current_page_id != 0 && current_page_id != NULL_PAGE {
+    L {
+        I !(current_page_id != 0 && current_page_id != NULL_PAGE) { B }
         ~frame_id = ctx.pool.fetch_page(FILE_ID_DATA, current_page_id)?;
         ~page_data = ctx.pool.get_page(frame_id);
         ~heap = HeapPage.from_page_data(page_data, ctx.pool.page_size)?;
 
-        if heap.free_space_for_insert() >= tuple_size {
+        I heap.free_space_for_insert() >= tuple_size {
             # Found a page with space
             ~slot_id = heap.insert_tuple(tuple)?;
             ~flushed = heap.flush();
             ctx.pool.write_page(frame_id, flushed)?;
             ctx.pool.unpin_page(frame_id, true);
-            return Ok((current_page_id, slot_id));
+            R Ok((current_page_id, slot_id));
         }
 
         ~next = heap.get_header().next_page;
@@ -470,10 +471,10 @@ F link_new_page(
     new_page_id: u32,
     ctx: &ExecContext,
 ) -> Result<(), VaisError> {
-    if first_page_id == 0 || first_page_id == NULL_PAGE {
+    I first_page_id == 0 || first_page_id == NULL_PAGE {
         # Table has no pages yet — this is the first page
         # Table metadata would need updating; for now the caller handles this
-        return Ok(());
+        R Ok(());
     }
 
     # Walk to the last page in the chain
@@ -484,14 +485,14 @@ F link_new_page(
         ~heap = HeapPage.from_page_data(page_data, ctx.pool.page_size)?;
         ~next = heap.get_header().next_page;
 
-        if next == 0 || next == NULL_PAGE {
+        I next == 0 || next == NULL_PAGE {
             # This is the last page — link the new page here
             ~header = heap.get_header_mut();
             header.next_page = new_page_id;
             ~flushed = heap.flush();
             ctx.pool.write_page(frame_id, flushed)?;
             ctx.pool.unpin_page(frame_id, true);
-            return Ok(());
+            R Ok(());
         }
 
         ctx.pool.unpin_page(frame_id, false);
@@ -530,7 +531,7 @@ F insert_into_indexes(
     columns: &[ColumnInfo],
     ctx: &ExecContext,
 ) -> Result<(), VaisError> {
-    for idx in indexes {
+    L idx: indexes {
         ~col_indices = resolve_index_columns(&idx.columns, columns)?;
         ~key = build_index_key_from_row(row, col_indices.as_slice());
 
@@ -554,7 +555,7 @@ F delete_from_indexes(
     columns: &[ColumnInfo],
     ctx: &ExecContext,
 ) -> Result<(), VaisError> {
-    for idx in indexes {
+    L idx: indexes {
         ~col_indices = resolve_index_columns(&idx.columns, columns)?;
         ~key = build_index_key_from_row(row, col_indices.as_slice());
 
@@ -581,7 +582,7 @@ F update_indexes(
     columns: &[ColumnInfo],
     ctx: &ExecContext,
 ) -> Result<(), VaisError> {
-    for idx in indexes {
+    L idx: indexes {
         ~col_indices = resolve_index_columns(&idx.columns, columns)?;
 
         ~old_key = build_index_key_from_row(old_row, col_indices.as_slice());
@@ -595,11 +596,11 @@ F update_indexes(
         };
 
         # Only update if the indexed values changed
-        if old_key != new_key {
+        I old_key != new_key {
             # Remove old key, insert new key
             btree_delete(&tree, &old_key, ctx.txn_id, ctx.gcm, ctx.pool)?;
             btree_insert(&tree, &new_key, new_tid, ctx.txn_id, ctx.gcm, ctx.pool)?;
-        } else {
+        } E {
             # Key unchanged but TID changed — update the value
             btree_delete(&tree, &old_key, ctx.txn_id, ctx.gcm, ctx.pool)?;
             btree_insert(&tree, &new_key, new_tid, ctx.txn_id, ctx.gcm, ctx.pool)?;
@@ -618,20 +619,20 @@ F resolve_insert_columns(
     insert_columns: &[Str],
     table_columns: &[ColumnInfo],
     table_name: &Str,
-) -> Result<Vec<usize>, VaisError> {
+) -> Result<Vec<u64>, VaisError> {
     ~indices = Vec.with_capacity(insert_columns.len());
 
-    for col_name in insert_columns {
+    L col_name: insert_columns {
         ~found = false;
-        for i in 0..table_columns.len() {
-            if &table_columns[i].name == col_name {
+        L i: 0..table_columns.len() {
+            I &table_columns[i].name == col_name {
                 indices.push(i);
                 found = true;
-                break;
+                B;
             }
         }
-        if !found {
-            return Err(err_column_not_found(col_name.clone(), table_name.clone()));
+        I !found {
+            R Err(err_column_not_found(col_name.clone(), table_name.clone()));
         }
     }
 
@@ -643,16 +644,16 @@ F resolve_insert_columns(
 # Unspecified columns get SqlValue.Null (defaults applied by ConstraintChecker)
 F build_full_row_values(
     insert_values: &[SqlValue],
-    column_indices: &[usize],
-    total_columns: usize,
+    column_indices: &[u64],
+    total_columns: u64,
 ) -> Vec<SqlValue> {
     ~full = Vec.with_capacity(total_columns);
-    for _ in 0..total_columns {
+    L _: 0..total_columns {
         full.push(SqlValue.Null);
     }
 
-    for i in 0..insert_values.len() {
-        if i < column_indices.len() {
+    L i: 0..insert_values.len() {
+        I i < column_indices.len() {
             full[column_indices[i]] = insert_values[i].clone();
         }
     }
@@ -665,10 +666,10 @@ F find_column_index(
     col_name: &Str,
     columns: &[ColumnInfo],
     table_name: &Str,
-) -> Result<usize, VaisError> {
-    for i in 0..columns.len() {
-        if &columns[i].name == col_name {
-            return Ok(i);
+) -> Result<u64, VaisError> {
+    L i: 0..columns.len() {
+        I &columns[i].name == col_name {
+            R Ok(i);
         }
     }
     Err(err_column_not_found(col_name.clone(), table_name.clone()))

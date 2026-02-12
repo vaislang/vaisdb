@@ -26,7 +26,7 @@ F merge_leaf_nodes(
     pool: &~BufferPool,
 ) -> Result<(), VaisError> {
     # Move all entries from right to left
-    for i in 0..right.entry_count() as usize {
+    L i: 0..right.entry_count() as u64 {
         ~key = right.get_key(i).to_vec();
         ~tid = right.entries[i].tid;
         left.insert(&key, tid)?;
@@ -37,7 +37,7 @@ F merge_leaf_nodes(
     left.set_next_leaf(right_next);
 
     # Update the following leaf's prev pointer
-    if right_next != NULL_PAGE {
+    I right_next != NULL_PAGE {
         ~next_frame = pool.fetch_page(file_id, right_next)?;
         ~next_data = pool.get_page(next_frame);
         ~next_leaf = BTreeLeafNode.from_page_data(next_data, page_size)?;
@@ -61,7 +61,7 @@ F merge_internal_nodes(
     left.insert_entry(parent_separator, right.leftmost_child)?;
 
     # Move all entries from right to left
-    for i in 0..right.entry_count() as usize {
+    L i: 0..right.entry_count() as u64 {
         ~key = right.get_key(i).to_vec();
         ~child = right.entries[i].child_page;
         left.insert_entry(&key, child)?;
@@ -81,29 +81,29 @@ F redistribute_leaf_left_to_right(
     ~target_left = total / 2;
     ~move_count = left.entry_count() - target_left;
 
-    if move_count == 0 {
-        return Err(err_internal("Nothing to redistribute from left"));
+    I move_count == 0 {
+        R Err(err_internal("Nothing to redistribute from left"));
     }
 
     # Move entries from end of left to beginning of right
     # We need to insert in order, so collect first
     ~entries_to_move = Vec.new();
-    ~start = left.entry_count() as usize - move_count as usize;
-    for i in start..left.entry_count() as usize {
+    ~start = left.entry_count() as u64 - move_count as u64;
+    L i: start..left.entry_count() as u64 {
         ~key = left.get_key(i).to_vec();
         ~tid = left.entries[i].tid;
         entries_to_move.push((key, tid));
     }
 
     # Remove from left
-    for _ in 0..move_count {
-        ~last_idx = (left.entry_count() - 1) as usize;
+    L _: 0..move_count {
+        ~last_idx = (left.entry_count() - 1) as u64;
         ~key = left.get_key(last_idx).to_vec();
         left.delete(&key);
     }
 
     # Insert into right (at the beginning, they should sort correctly)
-    for (key, tid) in &entries_to_move {
+    L (key, tid): &entries_to_move {
         right.insert(key, *tid)?;
     }
 
@@ -122,12 +122,12 @@ F redistribute_leaf_right_to_left(
     ~target_left = total / 2;
     ~move_count = target_left - left.entry_count();
 
-    if move_count == 0 {
-        return Err(err_internal("Nothing to redistribute from right"));
+    I move_count == 0 {
+        R Err(err_internal("Nothing to redistribute from right"));
     }
 
     # Move entries from beginning of right to end of left
-    for _ in 0..move_count {
+    L _: 0..move_count {
         ~key = right.get_key(0).to_vec();
         ~tid = right.entries[0].tid;
         left.insert(&key, tid)?;
@@ -149,7 +149,7 @@ F redistribute_internal_left_to_right(
     # Move the parent separator and left's last child to right
     # Then the left's last key becomes the new parent separator
 
-    ~last_idx = (left.entry_count() - 1) as usize;
+    ~last_idx = (left.entry_count() - 1) as u64;
     ~new_parent_sep = left.get_key(last_idx).to_vec();
     ~moved_child = left.entries[last_idx].child_page;
 
@@ -195,12 +195,12 @@ F can_merge_leaves(
 ) -> bool {
     # Calculate total key data size + directory size
     ~left_key_size: u32 = 0;
-    for i in 0..left.entry_count() as usize {
+    L i: 0..left.entry_count() as u64 {
         left_key_size += left.entries[i].key_len as u32;
     }
 
     ~right_key_size: u32 = 0;
-    for i in 0..right.entry_count() as usize {
+    L i: 0..right.entry_count() as u64 {
         right_key_size += right.entries[i].key_len as u32;
     }
 
@@ -220,12 +220,12 @@ F can_merge_internals(
     page_size: u32,
 ) -> bool {
     ~left_key_size: u32 = 0;
-    for i in 0..left.entry_count() as usize {
+    L i: 0..left.entry_count() as u64 {
         left_key_size += left.entries[i].key_len as u32;
     }
 
     ~right_key_size: u32 = 0;
-    for i in 0..right.entry_count() as usize {
+    L i: 0..right.entry_count() as u64 {
         right_key_size += right.entries[i].key_len as u32;
     }
 

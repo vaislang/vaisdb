@@ -30,8 +30,8 @@ X HeapPage {
         header.free_space_offset = PAGE_HEADER_SIZE as u16;
         header.item_count = 0;
 
-        ~data = Vec.with_capacity(page_size as usize);
-        data.resize(page_size as usize, 0u8);
+        ~data = Vec.with_capacity(page_size as u64);
+        data.resize(page_size as u64, 0u8);
 
         HeapPage {
             page_size,
@@ -46,8 +46,8 @@ X HeapPage {
         ~header = PageHeader.read_from_page(page_data)?;
 
         # Read slot directory
-        ~slots = Vec.with_capacity(header.item_count as usize);
-        for i in 0..header.item_count {
+        ~slots = Vec.with_capacity(header.item_count as u64);
+        L i: 0..header.item_count {
             ~slot = HeapPageSlot.read_at_index(page_data, i)?;
             slots.push(slot);
         }
@@ -67,9 +67,9 @@ X HeapPage {
         ~slot_dir_end = PAGE_HEADER_SIZE + (self.header.item_count as u32) * SLOT_ENTRY_SIZE;
         ~lowest_tuple = self.find_lowest_tuple_offset();
 
-        if lowest_tuple <= slot_dir_end {
+        I lowest_tuple <= slot_dir_end {
             0
-        } else {
+        } E {
             lowest_tuple - slot_dir_end
         }
     }
@@ -79,9 +79,9 @@ X HeapPage {
         ~new_slot_dir_end = PAGE_HEADER_SIZE + ((self.header.item_count as u32) + 1) * SLOT_ENTRY_SIZE;
         ~lowest_tuple = self.find_lowest_tuple_offset();
 
-        if lowest_tuple <= new_slot_dir_end {
+        I lowest_tuple <= new_slot_dir_end {
             0
-        } else {
+        } E {
             lowest_tuple - new_slot_dir_end
         }
     }
@@ -93,16 +93,16 @@ X HeapPage {
 
         # Check if there's space (need slot entry + tuple data)
         ~available = self.free_space_for_insert();
-        if tuple_size > available {
+        I tuple_size > available {
             # Try compaction first if page has tombstones
-            if self.header.get_flags().has_tombstones() {
+            I self.header.get_flags().has_tombstones() {
                 self.compact()?;
                 ~available_after = self.free_space_for_insert();
-                if tuple_size > available_after {
-                    return Err(err_page_full(self.header.page_id, tuple_size));
+                I tuple_size > available_after {
+                    R Err(err_page_full(self.header.page_id, tuple_size));
                 }
-            } else {
-                return Err(err_page_full(self.header.page_id, tuple_size));
+            } E {
+                R Err(err_page_full(self.header.page_id, tuple_size));
             }
         }
 
@@ -111,7 +111,7 @@ X HeapPage {
         ~tuple_offset = lowest - tuple_size;
 
         # Write tuple data at the calculated offset
-        tuple.write_to(&self.data, tuple_offset as usize);
+        tuple.write_to(&self.data, tuple_offset as u64);
 
         # Create slot entry
         ~slot = HeapPageSlot.new(tuple_offset as u16, tuple_size as u16);
@@ -130,33 +130,33 @@ X HeapPage {
 
     # Read a tuple from a slot
     F read_tuple(self, slot_index: u16) -> Result<Tuple, VaisError> {
-        if slot_index >= self.header.item_count {
-            return Err(err_internal("Slot index out of range"));
+        I slot_index >= self.header.item_count {
+            R Err(err_internal("Slot index out of range"));
         }
 
-        ~slot = &self.slots[slot_index as usize];
-        if slot.is_dead() {
-            return Err(err_internal("Slot is dead/unused"));
+        ~slot = &self.slots[slot_index as u64];
+        I slot.is_dead() {
+            R Err(err_internal("Slot is dead/unused"));
         }
 
-        Tuple.read_from(&self.data, slot.tuple_off as usize, slot.tuple_len as usize)
+        Tuple.read_from(&self.data, slot.tuple_off as u64, slot.tuple_len as u64)
     }
 
     # Mark a tuple as deleted (set MVCC txn_id_expire)
     # Does NOT remove the tuple - just marks it for GC
     F delete_tuple(~self, slot_index: u16, txn_id: u64, cmd_id: u32) -> Result<(), VaisError> {
-        if slot_index >= self.header.item_count {
-            return Err(err_internal("Slot index out of range"));
+        I slot_index >= self.header.item_count {
+            R Err(err_internal("Slot index out of range"));
         }
 
-        ~slot = &self.slots[slot_index as usize];
-        if slot.is_dead() {
-            return Err(err_internal("Cannot delete dead slot"));
+        ~slot = &self.slots[slot_index as u64];
+        I slot.is_dead() {
+            R Err(err_internal("Cannot delete dead slot"));
         }
 
         # Read MVCC metadata, update txn_id_expire
-        ~mvcc_offset = slot.tuple_off as usize;
-        ~buf = ByteBuffer.wrap(&self.data[mvcc_offset..mvcc_offset + MVCC_TUPLE_META_SIZE as usize]);
+        ~mvcc_offset = slot.tuple_off as u64;
+        ~buf = ByteBuffer.wrap(&self.data[mvcc_offset..mvcc_offset + MVCC_TUPLE_META_SIZE as u64]);
         ~mvcc = MvccTupleMeta.deserialize(&ByteBuffer.wrap_readonly(&self.data[mvcc_offset..]))?;
         mvcc.set_expired(txn_id, cmd_id);
 
@@ -169,13 +169,13 @@ X HeapPage {
 
     # Mark a slot as dead after GC determines tuple is invisible to all snapshots
     F mark_slot_dead(~self, slot_index: u16) -> Result<(), VaisError> {
-        if slot_index >= self.header.item_count {
-            return Err(err_internal("Slot index out of range"));
+        I slot_index >= self.header.item_count {
+            R Err(err_internal("Slot index out of range"));
         }
 
         ~dead_slot = HeapPageSlot.dead();
         dead_slot.write_at_index(&self.data, slot_index);
-        self.slots[slot_index as usize] = dead_slot;
+        self.slots[slot_index as u64] = dead_slot;
 
         # Set HAS_TOMBSTONES flag
         ~flags = self.header.get_flags();
@@ -189,9 +189,9 @@ X HeapPage {
     F compact(~self) -> Result<(), VaisError> {
         # Collect live tuples with their slot indices
         ~live_entries: Vec<(u16, u16, u16)> = Vec.new();  # (slot_idx, tuple_off, tuple_len)
-        for i in 0..self.slots.len() {
+        L i: 0..self.slots.len() {
             ~slot = &self.slots[i];
-            if slot.is_live() {
+            I slot.is_live() {
                 live_entries.push((i as u16, slot.tuple_off, slot.tuple_len));
             }
         }
@@ -201,21 +201,21 @@ X HeapPage {
 
         # Rewrite tuples contiguously from page end
         ~write_pos = self.page_size;
-        for (slot_idx, old_off, tuple_len) in &live_entries {
+        L (slot_idx, old_off, tuple_len): &live_entries {
             write_pos -= *tuple_len as u32;
 
             # Copy tuple data to new position if it moved
-            if write_pos as u16 != *old_off {
-                ~tuple_data = self.data[*old_off as usize..(*old_off + *tuple_len) as usize].to_vec();
-                for j in 0..tuple_data.len() {
-                    self.data[write_pos as usize + j] = tuple_data[j];
+            I write_pos as u16 != *old_off {
+                ~tuple_data = self.data[*old_off as u64..(*old_off + *tuple_len) as u64].to_vec();
+                L j: 0..tuple_data.len() {
+                    self.data[write_pos as u64 + j] = tuple_data[j];
                 }
             }
 
             # Update slot directory
             ~new_slot = HeapPageSlot.new(write_pos as u16, *tuple_len);
             new_slot.write_at_index(&self.data, *slot_idx);
-            self.slots[*slot_idx as usize] = new_slot;
+            self.slots[*slot_idx as u64] = new_slot;
         }
 
         # Clear tombstone-related flags
@@ -254,8 +254,8 @@ X HeapPage {
     # Count live (non-dead) tuples
     F live_count(self) -> u16 {
         ~count: u16 = 0;
-        for slot in &self.slots {
-            if slot.is_live() {
+        L slot: &self.slots {
+            I slot.is_live() {
                 count += 1;
             }
         }
@@ -275,8 +275,8 @@ X HeapPage {
     # Helper: find the lowest tuple offset (closest to slot directory)
     F find_lowest_tuple_offset(self) -> u32 {
         ~lowest = self.page_size;
-        for slot in &self.slots {
-            if slot.is_live() && (slot.tuple_off as u32) < lowest {
+        L slot: &self.slots {
+            I slot.is_live() && (slot.tuple_off as u32) < lowest {
                 lowest = slot.tuple_off as u32;
             }
         }
@@ -285,16 +285,16 @@ X HeapPage {
 
     # Update MVCC metadata for a tuple (used during UPDATE operations)
     F update_mvcc(~self, slot_index: u16, mvcc: &MvccTupleMeta) -> Result<(), VaisError> {
-        if slot_index >= self.header.item_count {
-            return Err(err_internal("Slot index out of range"));
+        I slot_index >= self.header.item_count {
+            R Err(err_internal("Slot index out of range"));
         }
 
-        ~slot = &self.slots[slot_index as usize];
-        if slot.is_dead() {
-            return Err(err_internal("Cannot update dead slot MVCC"));
+        ~slot = &self.slots[slot_index as u64];
+        I slot.is_dead() {
+            R Err(err_internal("Cannot update dead slot MVCC"));
         }
 
-        ~mvcc_offset = slot.tuple_off as usize;
+        ~mvcc_offset = slot.tuple_off as u64;
         ~buf = ByteBuffer.wrap(&self.data[mvcc_offset..]);
         mvcc.serialize(&buf);
 
@@ -304,10 +304,10 @@ X HeapPage {
     # Iterate over all live tuples: yields (slot_index, tuple)
     F iter_live(self) -> Vec<(u16, Tuple)> {
         ~results = Vec.new();
-        for i in 0..self.slots.len() {
+        L i: 0..self.slots.len() {
             ~slot = &self.slots[i];
-            if slot.is_live() {
-                M Tuple.read_from(&self.data, slot.tuple_off as usize, slot.tuple_len as usize) {
+            I slot.is_live() {
+                M Tuple.read_from(&self.data, slot.tuple_off as u64, slot.tuple_len as u64) {
                     Ok(tuple) => results.push((i as u16, tuple)),
                     Err(_) => {},  # Skip corrupt tuples
                 }

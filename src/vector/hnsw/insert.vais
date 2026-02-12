@@ -90,7 +90,7 @@ X MinHeap {
         MinHeap { items: Vec.new() }
     }
 
-    F with_capacity(cap: usize) -> MinHeap {
+    F with_capacity(cap: u64) -> MinHeap {
         MinHeap { items: Vec.with_capacity(cap) }
     }
 
@@ -100,15 +100,14 @@ X MinHeap {
         ~i = self.items.len() - 1;
         L while i > 0 {
             ~parent_idx = i - 1;
-            if self.items[i].distance < self.items[parent_idx].distance {
+            I self.items[i].distance < self.items[parent_idx].distance {
                 # Swap
                 ~tmp = self.items[i];
                 self.items[i] = self.items[parent_idx];
                 self.items[parent_idx] = tmp;
                 i = parent_idx;
-            } else {
-                break;
-            }
+            } E {
+                B            }
         }
     }
 
@@ -120,7 +119,7 @@ X MinHeap {
         self.items.len() == 0
     }
 
-    F len(self) -> usize {
+    F len(self) -> u64 {
         self.items.len()
     }
 
@@ -140,7 +139,7 @@ X MaxHeap {
         MaxHeap { items: Vec.new() }
     }
 
-    F with_capacity(cap: usize) -> MaxHeap {
+    F with_capacity(cap: u64) -> MaxHeap {
         MaxHeap { items: Vec.with_capacity(cap) }
     }
 
@@ -150,15 +149,14 @@ X MaxHeap {
         ~i = self.items.len() - 1;
         L while i > 0 {
             ~parent_idx = i - 1;
-            if self.items[i].distance > self.items[parent_idx].distance {
+            I self.items[i].distance > self.items[parent_idx].distance {
                 # Swap
                 ~tmp = self.items[i];
                 self.items[i] = self.items[parent_idx];
                 self.items[parent_idx] = tmp;
                 i = parent_idx;
-            } else {
-                break;
-            }
+            } E {
+                B            }
         }
     }
 
@@ -170,7 +168,7 @@ X MaxHeap {
         self.items.len() == 0
     }
 
-    F len(self) -> usize {
+    F len(self) -> u64 {
         self.items.len()
     }
 
@@ -210,8 +208,8 @@ F search_layer<S: NodeStore>(
     distance_computer: &DistanceComputer
 ) -> Result<Vec<SearchCandidate>, VaisError> {
     # Handle invalid entry point
-    if entry_point == INVALID_NODE_ID {
-        return Ok(Vec.new());
+    I entry_point == INVALID_NODE_ID {
+        R Ok(Vec.new());
     }
 
     # Load entry point vector and compute distance
@@ -223,11 +221,11 @@ F search_layer<S: NodeStore>(
     visited.insert(entry_point);
 
     # Initialize candidates (min-heap: closest first)
-    ~candidates = MinHeap.with_capacity(ef as usize);
+    ~candidates = MinHeap.with_capacity(ef as u64);
     candidates.push(SearchCandidate.new(entry_point, ep_dist));
 
     # Initialize results (max-heap: farthest first, keep best ef)
-    ~results = MaxHeap.with_capacity(ef as usize);
+    ~results = MaxHeap.with_capacity(ef as u64);
     results.push(SearchCandidate.new(entry_point, ep_dist));
 
     # Beam search loop
@@ -237,11 +235,10 @@ F search_layer<S: NodeStore>(
         ~current_dist = current_candidate.distance;
 
         # Check stopping condition: current is farther than worst result
-        if results.len() >= ef as usize {
+        I results.len() >= ef as u64 {
             ~worst_result = results.peek();
-            if current_dist > worst_result.distance {
-                break;
-            }
+            I current_dist > worst_result.distance {
+                B            }
         }
 
         # Load current node to get neighbors
@@ -255,7 +252,7 @@ F search_layer<S: NodeStore>(
             ~neighbor_id = neighbor.node_id;
 
             # Skip if already visited
-            if !visited.contains(neighbor_id) {
+            I !visited.contains(neighbor_id) {
                 visited.insert(neighbor_id);
 
                 # Load neighbor vector and compute distance
@@ -263,14 +260,14 @@ F search_layer<S: NodeStore>(
                 ~neighbor_dist = distance_computer.compute(query_vec, &neighbor_vec)?;
 
                 # Check if neighbor should be added to results
-                if results.len() < ef as usize {
+                I results.len() < ef as u64 {
                     # Results not full yet, add unconditionally
                     candidates.push(SearchCandidate.new(neighbor_id, neighbor_dist));
                     results.push(SearchCandidate.new(neighbor_id, neighbor_dist));
-                } else {
+                } E {
                     # Results full, add only if better than worst
                     ~worst_result = results.peek();
-                    if neighbor_dist < worst_result.distance {
+                    I neighbor_dist < worst_result.distance {
                         candidates.push(SearchCandidate.new(neighbor_id, neighbor_dist));
                         results.push(SearchCandidate.new(neighbor_id, neighbor_dist));
                         # Remove worst result (maintain size ef)
@@ -328,11 +325,11 @@ F select_neighbors_heuristic<S: NodeStore>(
     distance_computer: &DistanceComputer
 ) -> Result<Vec<HnswNeighbor>, VaisError> {
     # Handle empty or small candidate sets
-    if candidates.len() == 0 {
-        return Ok(Vec.new());
+    I candidates.len() == 0 {
+        R Ok(Vec.new());
     }
 
-    if candidates.len() <= m as usize {
+    I candidates.len() <= m as u64 {
         # All candidates fit within M, return all
         ~result = Vec.with_capacity(candidates.len());
         ~i = 0;
@@ -343,7 +340,7 @@ F select_neighbors_heuristic<S: NodeStore>(
             ));
             i += 1;
         }
-        return Ok(result);
+        R Ok(result);
     }
 
     # Sort candidates by distance to query (ascending)
@@ -368,11 +365,11 @@ F select_neighbors_heuristic<S: NodeStore>(
     }
 
     # Phase 1: Select diverse neighbors
-    ~result = Vec.with_capacity(m as usize);
-    ~result_vecs = Vec.with_capacity(m as usize);
+    ~result = Vec.with_capacity(m as u64);
+    ~result_vecs = Vec.with_capacity(m as u64);
 
     ~idx = 0;
-    L while idx < sorted.len() && result.len() < m as usize {
+    L while idx < sorted.len() && result.len() < m as u64 {
         ~candidate = &sorted[idx];
         ~candidate_vec = store.load_vector(candidate.node_id)?;
         ~candidate_dist_to_query = candidate.distance;
@@ -386,15 +383,14 @@ F select_neighbors_heuristic<S: NodeStore>(
 
             # Diversity criterion: dist(candidate, selected) >= dist(candidate, query)
             # If candidate is closer to a selected neighbor than to query, reject
-            if dist_to_selected < candidate_dist_to_query {
+            I dist_to_selected < candidate_dist_to_query {
                 is_diverse = false;
-                break;
-            }
+                B            }
             r_idx += 1;
         }
 
         # If diverse, add to result
-        if is_diverse {
+        I is_diverse {
             result.push(HnswNeighbor.new(candidate.node_id, candidate.distance));
             result_vecs.push(candidate_vec);
         }
@@ -403,23 +399,22 @@ F select_neighbors_heuristic<S: NodeStore>(
     }
 
     # Phase 2: If result not full, fill remaining from sorted list (without diversity check)
-    if result.len() < m as usize {
+    I result.len() < m as u64 {
         ~idx2 = 0;
-        L while idx2 < sorted.len() && result.len() < m as usize {
+        L while idx2 < sorted.len() && result.len() < m as u64 {
             ~candidate2 = &sorted[idx2];
 
             # Check if already in result
             ~already_added = false;
             ~r_idx2 = 0;
             L while r_idx2 < result.len() {
-                if result[r_idx2].node_id == candidate2.node_id {
+                I result[r_idx2].node_id == candidate2.node_id {
                     already_added = true;
-                    break;
-                }
+                    B                }
                 r_idx2 += 1;
             }
 
-            if !already_added {
+            I !already_added {
                 result.push(HnswNeighbor.new(candidate2.node_id, candidate2.distance));
             }
 
@@ -456,7 +451,7 @@ F prune_connections<S: NodeStore>(
 ) -> Result<Vec<HnswNeighbor>, VaisError> {
     ~neighbors = node.get_neighbors(layer)?;
 
-    if neighbors.len() <= m_max as usize {
+    I neighbors.len() <= m_max as u64 {
         # Already within bounds, no pruning needed
         ~result = Vec.with_capacity(neighbors.len());
         ~i = 0;
@@ -464,7 +459,7 @@ F prune_connections<S: NodeStore>(
             result.push(neighbors[i]);
             i += 1;
         }
-        return Ok(result);
+        R Ok(result);
     }
 
     # Load node's vector
@@ -537,7 +532,7 @@ F hnsw_insert<S: NodeStore>(
     ~new_layer = new_node.max_layer;
 
     # Handle first insertion (empty index)
-    if meta.is_empty() {
+    I meta.is_empty() {
         # First node becomes entry point
         meta.update_entry_point(new_node_id, new_layer);
         meta.add_node();
@@ -557,7 +552,7 @@ F hnsw_insert<S: NodeStore>(
             txn_id
         )?;
 
-        return Ok(meta);
+        R Ok(meta);
     }
 
     # Phase 1: Search from entry point down to new_layer+1 (greedy, ef=1)
@@ -575,7 +570,7 @@ F hnsw_insert<S: NodeStore>(
             distance_computer
         )?;
 
-        if search_results.len() > 0 {
+        I search_results.len() > 0 {
             current_nearest = search_results[0].node_id;
         }
 
@@ -583,7 +578,7 @@ F hnsw_insert<S: NodeStore>(
     }
 
     # Phase 2: Insert into layers [min(new_layer, max_layer) .. 0]
-    ~insert_layer = if new_layer < meta.max_layer { new_layer } else { meta.max_layer };
+    ~insert_layer = I new_layer < meta.max_layer { new_layer } E { meta.max_layer };
 
     L while insert_layer >= 0 {
         # Beam search to find ef_construction neighbors
@@ -597,7 +592,7 @@ F hnsw_insert<S: NodeStore>(
         )?;
 
         # Select M neighbors using diversity heuristic
-        ~m_max = if insert_layer == 0 { config.m_max_0 } else { config.m };
+        ~m_max = I insert_layer == 0 { config.m_max_0 } E { config.m };
         ~selected_neighbors = select_neighbors_heuristic(
             query_vec,
             &candidates,
@@ -630,7 +625,7 @@ F hnsw_insert<S: NodeStore>(
 
             # Prune if exceeds M
             ~neighbor_neighbors = neighbor_node_mut.get_neighbors(insert_layer)?;
-            if neighbor_neighbors.len() > m_max as usize {
+            I neighbor_neighbors.len() > m_max as u64 {
                 ~pruned_neighbors = prune_connections(
                     &neighbor_node_mut,
                     insert_layer,
@@ -669,19 +664,18 @@ F hnsw_insert<S: NodeStore>(
         }
 
         # Update current_nearest for next layer
-        if candidates.len() > 0 {
+        I candidates.len() > 0 {
             current_nearest = candidates[0].node_id;
         }
 
         # Break at layer 0 (u8 underflow prevention)
-        if insert_layer == 0 {
-            break;
-        }
+        I insert_layer == 0 {
+            B        }
         insert_layer -= 1;
     }
 
     # Phase 3: Update entry point if new layer exceeds current max
-    if new_layer > meta.max_layer {
+    I new_layer > meta.max_layer {
         meta.update_entry_point(new_node_id, new_layer);
     }
 

@@ -89,17 +89,17 @@ X DocFreqTracker {
         M found_idx {
             Some(idx) -> {
                 # Decrement counters
-                if self.entries[idx].doc_freq > 0 {
+                I self.entries[idx].doc_freq > 0 {
                     self.entries[idx].doc_freq -= 1;
                 }
-                if self.entries[idx].total_term_freq >= term_freq as u64 {
+                I self.entries[idx].total_term_freq >= term_freq as u64 {
                     self.entries[idx].total_term_freq -= term_freq as u64;
-                } else {
+                } E {
                     self.entries[idx].total_term_freq = 0;
                 }
 
                 # Remove entry if no longer present in any document
-                if self.entries[idx].doc_freq == 0 {
+                I self.entries[idx].doc_freq == 0 {
                     self.entries.remove(idx);
                 }
             }
@@ -162,8 +162,8 @@ X DocFreqTracker {
         self.entries.clear();
 
         # Rebuild from dictionary
-        ~i: usize = 0;
-        L while i < entries.len() {
+        ~i: u64 = 0;
+        L W i < entries.len() {
             ~dict_entry = &entries[i];
             ~freq_entry = DocFreqEntry.with_stats(
                 dict_entry.term_hash,
@@ -180,11 +180,11 @@ X DocFreqTracker {
     #
     # Note: For production use, this should be replaced with a HashMap
     # when std/hashmap.vais is available (Phase 31)
-    F find_entry_index(self, term_hash: u64) -> Option<usize> {
-        ~i: usize = 0;
-        L while i < self.entries.len() {
-            if self.entries[i].term_hash == term_hash {
-                return Some(i);
+    F find_entry_index(self, term_hash: u64) -> Option<u64> {
+        ~i: u64 = 0;
+        L W i < self.entries.len() {
+            I self.entries[i].term_hash == term_hash {
+                R Some(i);
             }
             i += 1;
         }
@@ -195,8 +195,8 @@ X DocFreqTracker {
     # Useful for debugging and statistics
     F get_tracked_terms(self) -> Vec<u64> {
         ~result = Vec.with_capacity(self.entries.len());
-        ~i: usize = 0;
-        L while i < self.entries.len() {
+        ~i: u64 = 0;
+        L W i < self.entries.len() {
             result.push(self.entries[i].term_hash);
             i += 1;
         }
@@ -204,7 +204,7 @@ X DocFreqTracker {
     }
 
     # Get number of tracked terms
-    F get_term_count(self) -> usize {
+    F get_term_count(self) -> u64 {
         self.entries.len()
     }
 
@@ -345,11 +345,11 @@ F test_get_tracked_terms() {
     ~found_67890 = false;
     ~found_11111 = false;
 
-    ~i: usize = 0;
-    L while i < terms.len() {
-        if terms[i] == 12345 { found_12345 = true; }
-        if terms[i] == 67890 { found_67890 = true; }
-        if terms[i] == 11111 { found_11111 = true; }
+    ~i: u64 = 0;
+    L W i < terms.len() {
+        I terms[i] == 12345 { found_12345 = true; }
+        I terms[i] == 67890 { found_67890 = true; }
+        I terms[i] == 11111 { found_11111 = true; }
         i += 1;
     }
 

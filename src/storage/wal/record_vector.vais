@@ -26,7 +26,7 @@ X HnswInsertNodePayload {
 
         # Serialize neighbors
         buf.put_u32_le(self.neighbors.len() as u32);
-        for (neighbor_id, distance) in &self.neighbors {
+        L (neighbor_id, distance): &self.neighbors {
             buf.put_u64_le(neighbor_id);
             buf.put_f32_le(distance);
         }
@@ -36,7 +36,7 @@ X HnswInsertNodePayload {
 
         # Serialize affected_pages
         buf.put_u32_le(self.affected_pages.len() as u32);
-        for (fid, pid) in &self.affected_pages {
+        L (fid, pid): &self.affected_pages {
             buf.put_u8(fid);
             buf.put_u32_le(pid);
         }
@@ -47,9 +47,9 @@ X HnswInsertNodePayload {
         ~layer = buf.get_u8()?;
 
         # Deserialize neighbors
-        ~neighbors_count = buf.get_u32_le()? as usize;
+        ~neighbors_count = buf.get_u32_le()? as u64;
         ~neighbors = Vec.with_capacity(neighbors_count);
-        for _ in 0..neighbors_count {
+        L _: 0..neighbors_count {
             ~neighbor_id = buf.get_u64_le()?;
             ~distance = buf.get_f32_le()?;
             neighbors.push((neighbor_id, distance));
@@ -59,9 +59,9 @@ X HnswInsertNodePayload {
         ~page_id = buf.get_u32_le()?;
 
         # Deserialize affected_pages
-        ~affected_count = buf.get_u32_le()? as usize;
+        ~affected_count = buf.get_u32_le()? as u64;
         ~affected_pages = Vec.with_capacity(affected_count);
-        for _ in 0..affected_count {
+        L _: 0..affected_count {
             ~fid = buf.get_u8()?;
             ~pid = buf.get_u32_le()?;
             affected_pages.push((fid, pid));
@@ -95,7 +95,7 @@ X HnswDeleteNodePayload {
 
         # Serialize layers_affected
         buf.put_u32_le(self.layers_affected.len() as u32);
-        for layer in &self.layers_affected {
+        L layer: &self.layers_affected {
             buf.put_u8(layer);
         }
 
@@ -107,9 +107,9 @@ X HnswDeleteNodePayload {
         ~node_id = buf.get_u64_le()?;
 
         # Deserialize layers_affected
-        ~layers_count = buf.get_u32_le()? as usize;
+        ~layers_count = buf.get_u32_le()? as u64;
         ~layers_affected = Vec.with_capacity(layers_count);
-        for _ in 0..layers_count {
+        L _: 0..layers_count {
             layers_affected.push(buf.get_u8()?);
         }
 

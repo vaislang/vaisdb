@@ -148,23 +148,23 @@ X HybridStats {
     }
 
     F find_table_stats(self, table_name: &Str) -> Option<&TableStats> {
-        L stat in self.sql_stats.iter() {
-            if stat.name == *table_name {
-                return Some(stat);
+        L stat: self.sql_stats.iter() {
+            I stat.name == *table_name {
+                R Some(stat);
             }
         }
         None
     }
 
     F find_vector_stats(self, dimension: u32) -> Option<&VectorIndexStats> {
-        L stat in self.vector_stats.iter() {
-            if stat.dimension == dimension {
-                return Some(stat);
+        L stat: self.vector_stats.iter() {
+            I stat.dimension == dimension {
+                R Some(stat);
             }
         }
-        # Return first if dimension doesn't match exactly
-        if self.vector_stats.len() > 0 {
-            return Some(&self.vector_stats[0]);
+        # Return first I dimension doesn't M exactly
+        I self.vector_stats.len() > 0 {
+            R Some(&self.vector_stats[0]);
         }
         None
     }
@@ -186,16 +186,16 @@ F estimate_vector_scan_cost(
     stats: &VectorIndexStats,
 ) -> HybridCost {
     ~n = stats.vector_count as f64;
-    if n <= 0.0 { n = 1.0; }
+    I n <= 0.0 { n = 1.0; }
 
     ~dim = stats.dimension as f64;
-    ~ef = if params.ef_search.is_some() {
-        params.ef_search.unwrap() as f64
-    } else {
+    ~ef = I params.ef_search.is_some() {
+        params.ef_search! as f64
+    } E {
         stats.ef_search_default as f64
     };
     ~layers = stats.max_layer as f64;
-    if layers <= 0.0 { layers = (n.ln() / (stats.m as f64).ln()).ceil(); }
+    I layers <= 0.0 { layers = (n.ln() / (stats.m as f64).ln()).ceil(); }
     ~m = stats.m as f64;
 
     # I/O cost: layer traversal + candidate page reads
@@ -214,13 +214,13 @@ F estimate_vector_scan_cost(
     ~cpu_cost = cpu_upper + cpu_bottom + cpu_neighbor;
 
     # Quantization reduces CPU cost
-    if stats.is_quantized {
+    I stats.is_quantized {
         cpu_cost = cpu_cost * HNSW_QUANTIZED_SPEEDUP;
     }
 
-    # Pre-filter adds I/O if present (bitmap scan of filter column)
-    if params.pre_filter.is_some() {
-        ~sel = estimate_selectivity(params.pre_filter.as_ref().unwrap());
+    # Pre-filter adds I/O I present (bitmap scan of filter column)
+    I params.pre_filter.is_some() {
+        ~sel = estimate_selectivity(params.pre_filter.as_ref()!);
         io_cost += n * 0.01 * sel;  # Bitmap scan cost
         cpu_cost += n * sel * 0.01;  # Filter eval cost
     }
@@ -245,7 +245,7 @@ F estimate_vector_scan_cost(
         fulltext_io_cost: 0.0,
         fulltext_cpu_cost: 0.0,
         vector_dimension: stats.dimension,
-        vector_ef_search: if params.ef_search.is_some() { params.ef_search.unwrap() } else { stats.ef_search_default },
+        vector_ef_search: I params.ef_search.is_some() { params.ef_search! } E { stats.ef_search_default },
         graph_avg_degree: 0.0,
         graph_max_depth: 0,
         fulltext_posting_length: 0,
@@ -263,37 +263,37 @@ F estimate_graph_traverse_cost(
     stats: &GraphStats,
 ) -> HybridCost {
     ~depth = params.max_depth as f64;
-    if depth <= 0.0 { depth = 3.0; }  # Default max depth for cost estimation
+    I depth <= 0.0 { depth = 3.0; }  # Default max depth for cost estimation
 
-    ~avg_degree = if params.direction == 2 {
+    ~avg_degree = I params.direction == 2 {
         # BOTH: consider both in and out degrees
         stats.avg_out_degree + stats.avg_in_degree
-    } else if params.direction == 1 {
+    } E I params.direction == 1 {
         stats.avg_in_degree
-    } else {
+    } E {
         stats.avg_out_degree
     };
 
     # Edge type filter reduces effective degree
     ~effective_degree = avg_degree;
-    if params.edge_type_filter.is_some() {
-        ~filter_types = params.edge_type_filter.as_ref().unwrap().len() as f64;
+    I params.edge_type_filter.is_some() {
+        ~filter_types = params.edge_type_filter.as_ref()!.len() as f64;
         ~total_types = stats.edge_type_count as f64;
-        if total_types > 0.0 {
+        I total_types > 0.0 {
             effective_degree = avg_degree * (filter_types / total_types);
         }
     }
 
     # Estimated nodes visited: geometric series sum 1 + d + d^2 + ... + d^depth
-    ~nodes_visited = if effective_degree <= 1.0 {
+    ~nodes_visited = I effective_degree <= 1.0 {
         depth + 1.0
-    } else {
+    } E {
         (effective_degree.powf(depth + 1.0) - 1.0) / (effective_degree - 1.0)
     };
 
     # Cap at total node count
     ~max_nodes = stats.node_count as f64;
-    if max_nodes > 0.0 && nodes_visited > max_nodes {
+    I max_nodes > 0.0 && nodes_visited > max_nodes {
         nodes_visited = max_nodes;
     }
 
@@ -308,8 +308,8 @@ F estimate_graph_traverse_cost(
     ~cpu_visibility = edges_checked * GRAPH_VISIBILITY_CPU;
     ~cpu_cost = cpu_filter + cpu_visibility;
 
-    # Property reads if filter present
-    if params.filter.is_some() {
+    # Property reads I filter present
+    I params.filter.is_some() {
         io_cost += nodes_visited * GRAPH_PROPERTY_READ_IO;
         cpu_cost += nodes_visited * 0.1;  # Filter eval per node
     }
@@ -353,11 +353,11 @@ F estimate_fulltext_scan_cost(
     ~estimated_terms = 3u64;  # Default assumption: 3 query terms
 
     ~doc_count = stats.document_count as f64;
-    if doc_count <= 0.0 { doc_count = 1.0; }
+    I doc_count <= 0.0 { doc_count = 1.0; }
 
     ~avg_posting = stats.avg_posting_length as f64;
     ~dict_size = stats.dictionary_size as f64;
-    if dict_size <= 0.0 { dict_size = 1.0; }
+    I dict_size <= 0.0 { dict_size = 1.0; }
 
     # I/O cost: dictionary lookups + posting page reads
     ~dict_depth = (dict_size.ln() / 100.0f64.ln()).ceil();  # B+Tree depth (fanout ~100)
@@ -408,7 +408,7 @@ F estimate_fulltext_scan_cost(
     }
 }
 
-# Need FullTextSearchMode for the match above
+# Need FullTextSearchMode for the M above
 U planner/types.{FullTextSearchMode};
 
 # Estimate cost for score fusion of two result sets
@@ -456,8 +456,8 @@ F estimate_cross_engine_join_cost(
     ~right_rows = right_cost.row_estimate as f64;
 
     # Hash join: build on smaller side, probe with larger
-    ~build_rows = if left_rows < right_rows { left_rows } else { right_rows };
-    ~probe_rows = if left_rows < right_rows { right_rows } else { left_rows };
+    ~build_rows = I left_rows < right_rows { left_rows } E { right_rows };
+    ~probe_rows = I left_rows < right_rows { right_rows } E { left_rows };
 
     ~io_cost = left_cost.total_io_cost + right_cost.total_io_cost;
     ~cpu_build = build_rows * CROSS_JOIN_HASH_BUILD_CPU;
@@ -465,7 +465,7 @@ F estimate_cross_engine_join_cost(
     ~cpu_cost = left_cost.total_cpu_cost + right_cost.total_cpu_cost + cpu_build + cpu_probe;
 
     # Output cardinality: min of left/right (assuming PK-FK join)
-    ~row_estimate = if left_rows < right_rows { left_cost.row_estimate } else { right_cost.row_estimate };
+    ~row_estimate = I left_rows < right_rows { left_cost.row_estimate } E { right_cost.row_estimate };
 
     ~mem = left_cost.total_memory_bytes + right_cost.total_memory_bytes +
            (build_rows as u64 * 128);  # Hash table overhead
@@ -516,7 +516,7 @@ F estimate_hybrid_cost(node: &HybridPlanNode) -> HybridCost {
         HybridPlanNode.HybridSort { input, .. } => {
             ~child_cost = estimate_hybrid_cost(input);
             ~n = child_cost.row_estimate as f64;
-            if n > 1.0 {
+            I n > 1.0 {
                 child_cost.total_cpu_cost += n * n.log2() * 0.01;
             }
             child_cost.total_memory_bytes += child_cost.row_estimate * 128;  # Sort buffer
@@ -525,9 +525,9 @@ F estimate_hybrid_cost(node: &HybridPlanNode) -> HybridCost {
 
         HybridPlanNode.HybridLimit { input, limit, .. } => {
             ~child_cost = estimate_hybrid_cost(input);
-            if limit.is_some() {
-                ~lim = limit.unwrap();
-                if lim < child_cost.row_estimate {
+            I limit.is_some() {
+                ~lim = limit!;
+                I lim < child_cost.row_estimate {
                     child_cost.row_estimate = lim;
                 }
             }
@@ -539,8 +539,8 @@ F estimate_hybrid_cost(node: &HybridPlanNode) -> HybridCost {
             ~n = child_cost.row_estimate as f64;
             child_cost.total_cpu_cost += n * 0.05;  # Hashing + aggregation per row
             # Cardinality after GROUP BY: rough estimate
-            ~groups = if group_by.len() == 0 { 1u64 } else { (n * 0.1) as u64 };
-            if groups < 1 { groups = 1; }
+            ~groups = I group_by.len() == 0 { 1u64 } E { (n * 0.1) as u64 };
+            I groups < 1 { groups = 1; }
             child_cost.row_estimate = groups;
             child_cost.total_memory_bytes += groups * 128;  # Hash table for groups
             child_cost
@@ -553,7 +553,7 @@ F estimate_hybrid_cost(node: &HybridPlanNode) -> HybridCost {
 # ============================================================================
 
 # Compare two HybridCost values for plan selection
-# Returns true if `a` is cheaper than `b`
+# Returns true I `a` is cheaper than `b`
 F is_cheaper(a: &HybridCost, b: &HybridCost) -> bool {
     a.total() < b.total()
 }
@@ -564,11 +564,11 @@ F is_cheaper_memory_aware(a: &HybridCost, b: &HybridCost, memory_budget: u64) ->
     ~a_fits = a.total_memory_bytes <= memory_budget;
     ~b_fits = b.total_memory_bytes <= memory_budget;
 
-    if a_fits && !b_fits {
-        return true;
+    I a_fits && !b_fits {
+        R true;
     }
-    if !a_fits && b_fits {
-        return false;
+    I !a_fits && b_fits {
+        R false;
     }
 
     # Both fit or neither fits: compare by total cost

@@ -49,15 +49,15 @@ X HeapPageSlot {
 
     # Read slot at given index from page data
     F read_at_index(page_data: &[u8], index: u16) -> Result<HeapPageSlot, VaisError> {
-        ~offset = PAGE_HEADER_SIZE as usize + (index as usize) * (SLOT_ENTRY_SIZE as usize);
-        ~buf = ByteBuffer.wrap_readonly(&page_data[offset..offset + SLOT_ENTRY_SIZE as usize]);
+        ~offset = PAGE_HEADER_SIZE as u64 + (index as u64) * (SLOT_ENTRY_SIZE as u64);
+        ~buf = ByteBuffer.wrap_readonly(&page_data[offset..offset + SLOT_ENTRY_SIZE as u64]);
         HeapPageSlot.deserialize(&buf)
     }
 
     # Write slot at given index to page data
     F write_at_index(self, page_data: &~[u8], index: u16) {
-        ~offset = PAGE_HEADER_SIZE as usize + (index as usize) * (SLOT_ENTRY_SIZE as usize);
-        ~buf = ByteBuffer.wrap(&page_data[offset..offset + SLOT_ENTRY_SIZE as usize]);
+        ~offset = PAGE_HEADER_SIZE as u64 + (index as u64) * (SLOT_ENTRY_SIZE as u64);
+        ~buf = ByteBuffer.wrap(&page_data[offset..offset + SLOT_ENTRY_SIZE as u64]);
         self.serialize(&buf);
     }
 

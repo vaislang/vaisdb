@@ -73,8 +73,8 @@ X MemoryStore {
         session_id: u64,
         current_time: i64,
     ) -> Result<u64, VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed())
+        I !self.is_open {
+            R Err(err_rag_engine_closed())
         }
 
         ~memory_id = self.next_memory_id
@@ -89,11 +89,11 @@ X MemoryStore {
             Some(val) => {
                 M val.parse_f64() {
                     Ok(imp) => {
-                        if imp < 0.0 {
+                        I imp < 0.0 {
                             0.5
-                        } else if imp > 1.0 {
+                        } E I imp > 1.0 {
                             1.0
-                        } else {
+                        } E {
                             imp
                         }
                     }
@@ -123,18 +123,18 @@ X MemoryStore {
     ## Get memory by ID (immutable reference)
     F get_memory(&self, memory_id: u64) -> Option<&MemoryEntry> {
         E entry in &self.memories {
-            if entry.memory_id == memory_id {
-                return Some(entry)
+            I entry.memory_id == memory_id {
+                R Some(entry)
             }
         }
         None
     }
 
     ## Get memory by ID (mutable reference)
-    F get_memory_mut(~self, memory_id: u64) -> Option<&mut MemoryEntry> {
-        E entry in &mut self.memories {
-            if entry.memory_id == memory_id {
-                return Some(entry)
+    F get_memory_mut(~self, memory_id: u64) -> Option<&~MemoryEntry> {
+        E entry in &~self.memories {
+            I entry.memory_id == memory_id {
+                R Some(entry)
             }
         }
         None
@@ -146,17 +146,17 @@ X MemoryStore {
         memory_id: u64,
         new_importance: f64,
     ) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed())
+        I !self.is_open {
+            R Err(err_rag_engine_closed())
         }
 
         M self.get_memory_mut(memory_id) {
             Some(entry) => {
                 ~clamped = new_importance
-                if clamped < 0.0 {
+                I clamped < 0.0 {
                     clamped = 0.0
                 }
-                if clamped > 1.0 {
+                I clamped > 1.0 {
                     clamped = 1.0
                 }
                 entry.importance = clamped
@@ -172,8 +172,8 @@ X MemoryStore {
         memory_id: u64,
         current_time: i64,
     ) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed())
+        I !self.is_open {
+            R Err(err_rag_engine_closed())
         }
 
         M self.get_memory_mut(memory_id) {
@@ -187,26 +187,26 @@ X MemoryStore {
 
     ## Delete a memory by ID
     F delete_memory(~self, memory_id: u64) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed())
+        I !self.is_open {
+            R Err(err_rag_engine_closed())
         }
 
         ~found_index: i64 = -1
         ~i: u32 = 0
         W i < self.memories.len() as u32 {
-            ~entry = self.memories.get(i as usize)
-            if entry.memory_id == memory_id {
+            ~entry = self.memories.get(i as u64)
+            I entry.memory_id == memory_id {
                 found_index = i as i64
                 i = self.memories.len() as u32  # exit loop
-            } else {
+            } E {
                 i = i + 1
             }
         }
 
-        if found_index < 0 {
-            return Err(err_rag_memory_not_found())
+        I found_index < 0 {
+            R Err(err_rag_memory_not_found())
         }
-        self.memories.remove(found_index as usize)
+        self.memories.remove(found_index as u64)
         Ok(())
     }
 
@@ -214,16 +214,16 @@ X MemoryStore {
     ##
     ## Returns count of deleted memories.
     F delete_expired(~self, current_time: i64) -> u32 {
-        if !self.is_open {
-            return 0
+        I !self.is_open {
+            R 0
         }
 
         ~to_delete = Vec.new()
 
         ~i: u32 = 0
         W i < self.memories.len() as u32 {
-            ~entry = self.memories.get(i as usize)
-            if entry.is_expired(current_time) {
+            ~entry = self.memories.get(i as u64)
+            I entry.is_expired(current_time) {
                 to_delete.push(i)
             }
             i = i + 1
@@ -233,8 +233,8 @@ X MemoryStore {
         ~deleted_count = to_delete.len() as u32
         ~j: i64 = (to_delete.len() as i64) - 1
         W j >= 0 {
-            ~idx = to_delete.get(j as usize)
-            self.memories.remove(idx as usize)
+            ~idx = to_delete.get(j as u64)
+            self.memories.remove(idx as u64)
             j = j - 1
         }
 
@@ -246,7 +246,7 @@ X MemoryStore {
         ~result = Vec.new()
 
         E entry in &self.memories {
-            if entry.memory_type == memory_type {
+            I entry.memory_type == memory_type {
                 result.push(entry)
             }
         }
@@ -259,7 +259,7 @@ X MemoryStore {
         ~result = Vec.new()
 
         E entry in &self.memories {
-            if entry.session_id == session_id {
+            I entry.session_id == session_id {
                 result.push(entry)
             }
         }
@@ -272,15 +272,15 @@ X MemoryStore {
     ## Uses exponential decay based on time since last access.
     ## Decay half-life is taken from config.
     F apply_decay(~self, current_time: i64) {
-        if !self.is_open {
-            return
+        I !self.is_open {
+            R
         }
 
         ~half_life = self.config.decay_half_life
 
-        E entry in &mut self.memories {
+        E entry in &~self.memories {
             ~elapsed = (current_time - entry.last_accessed) as f64
-            if elapsed > 0.0 {
+            I elapsed > 0.0 {
                 entry.importance = self.scorer.decay_importance(
                     entry.importance,
                     elapsed,
@@ -300,7 +300,7 @@ X MemoryStore {
         ~count = 0u32
 
         E entry in &self.memories {
-            if entry.memory_type == memory_type {
+            I entry.memory_type == memory_type {
                 count = count + 1
             }
         }
@@ -317,7 +317,7 @@ X MemoryStore {
         ~scores = Vec.new()
         ~i: u32 = 0
         W i < self.memories.len() as u32 {
-            ~entry = self.memories.get(i as usize)
+            ~entry = self.memories.get(i as u64)
             ~importance = entry.importance_with_decay(
                 current_time,
                 self.config.decay_half_life,
@@ -330,32 +330,32 @@ X MemoryStore {
         # Insertion sort by importance (descending)
         ~si: u32 = 1
         W si < ids.len() as u32 {
-            ~key_id = ids.get(si as usize)
-            ~key_score = scores.get(si as usize)
+            ~key_id = ids.get(si as u64)
+            ~key_score = scores.get(si as u64)
             ~sj: i64 = (si as i64) - 1
             W sj >= 0 {
-                ~sj_score = scores.get(sj as usize)
-                if sj_score < key_score {
-                    ids.set((sj + 1) as usize, ids.get(sj as usize))
-                    scores.set((sj + 1) as usize, sj_score)
+                ~sj_score = scores.get(sj as u64)
+                I sj_score < key_score {
+                    ids.set((sj + 1) as u64, ids.get(sj as u64))
+                    scores.set((sj + 1) as u64, sj_score)
                     sj = sj - 1
-                } else {
+                } E {
                     sj = -1  # exit inner loop
                 }
             }
-            ids.set((sj + 1) as usize, key_id)
-            scores.set((sj + 1) as usize, key_score)
+            ids.set((sj + 1) as u64, key_id)
+            scores.set((sj + 1) as u64, key_score)
             si = si + 1
         }
 
         # Take top limit
         ~count = 0u32
         W count < limit {
-            if count >= ids.len() as u32 {
+            I count >= ids.len() as u32 {
                 count = limit  # exit loop
-            } else {
-                ~idx = ids.get(count as usize)
-                result.push(self.memories.get(idx as usize))
+            } E {
+                ~idx = ids.get(count as u64)
+                result.push(self.memories.get(idx as u64))
                 count = count + 1
             }
         }
@@ -376,7 +376,7 @@ X MemoryStore {
                 current_time,
                 self.config.decay_half_life,
             )
-            if importance >= threshold {
+            I importance >= threshold {
                 result.push(entry)
             }
         }
@@ -397,8 +397,8 @@ X MemoryStore {
         ~self,
         current_time: i64,
     ) -> Result<u32, VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed())
+        I !self.is_open {
+            R Err(err_rag_engine_closed())
         }
 
         ~threshold = self.config.consolidation_threshold
@@ -406,12 +406,12 @@ X MemoryStore {
         # Find high-importance working memories
         ~candidates = Vec.new()
         E entry in &self.memories {
-            if entry.memory_type == MEMORY_TYPE_WORKING {
+            I entry.memory_type == MEMORY_TYPE_WORKING {
                 ~importance = entry.importance_with_decay(
                     current_time,
                     self.config.decay_half_life,
                 )
-                if importance >= threshold {
+                I importance >= threshold {
                     candidates.push(entry.memory_id)
                 }
             }
@@ -433,11 +433,11 @@ X MemoryStore {
         ~self,
         current_time: i64,
     ) -> u32 {
-        if !self.is_open {
-            return 0
+        I !self.is_open {
+            R 0
         }
 
-        ~max_entries = self.config.max_working_memory_entries as usize
+        ~max_entries = self.config.max_working_memory_entries as u64
 
         # Count working memories
         ~wm_ids = Vec.new()
@@ -445,8 +445,8 @@ X MemoryStore {
 
         ~i: u32 = 0
         W i < self.memories.len() as u32 {
-            ~entry = self.memories.get(i as usize)
-            if entry.memory_type == MEMORY_TYPE_WORKING {
+            ~entry = self.memories.get(i as u64)
+            I entry.memory_type == MEMORY_TYPE_WORKING {
                 ~importance = entry.importance_with_decay(
                     current_time,
                     self.config.decay_half_life,
@@ -457,28 +457,28 @@ X MemoryStore {
             i = i + 1
         }
 
-        if wm_ids.len() <= max_entries {
-            return 0
+        I wm_ids.len() <= max_entries {
+            R 0
         }
 
         # Insertion sort by importance (ascending, least important first)
         ~si: u32 = 1
         W si < wm_ids.len() as u32 {
-            ~key_id = wm_ids.get(si as usize)
-            ~key_score = wm_scores.get(si as usize)
+            ~key_id = wm_ids.get(si as u64)
+            ~key_score = wm_scores.get(si as u64)
             ~sj: i64 = (si as i64) - 1
             W sj >= 0 {
-                ~sj_score = wm_scores.get(sj as usize)
-                if sj_score > key_score {
-                    wm_ids.set((sj + 1) as usize, wm_ids.get(sj as usize))
-                    wm_scores.set((sj + 1) as usize, sj_score)
+                ~sj_score = wm_scores.get(sj as u64)
+                I sj_score > key_score {
+                    wm_ids.set((sj + 1) as u64, wm_ids.get(sj as u64))
+                    wm_scores.set((sj + 1) as u64, sj_score)
                     sj = sj - 1
-                } else {
+                } E {
                     sj = -1  # exit inner loop
                 }
             }
-            wm_ids.set((sj + 1) as usize, key_id)
-            wm_scores.set((sj + 1) as usize, key_score)
+            wm_ids.set((sj + 1) as u64, key_id)
+            wm_scores.set((sj + 1) as u64, key_score)
             si = si + 1
         }
 
@@ -488,7 +488,7 @@ X MemoryStore {
 
         ~ei: u32 = 0
         W ei < to_evict as u32 {
-            ~mid = wm_ids.get(ei as usize)
+            ~mid = wm_ids.get(ei as u64)
             M self.delete_memory(mid) {
                 Ok(_) => { evicted = evicted + 1 },
                 Err(_) => {},

@@ -68,15 +68,15 @@ S LatchTable {
 
 X LatchTable {
     F new(capacity: u32) -> LatchTable {
-        ~latches = Vec.with_capacity(capacity as usize);
-        for i in 0..capacity {
+        ~latches = Vec.with_capacity(capacity as u64);
+        L i: 0..capacity {
             latches.push(PageLatch.new(i));
         }
         LatchTable { latches, capacity }
     }
 
     F get(self, page_id: u32) -> &PageLatch {
-        &self.latches[page_id as usize % self.capacity as usize]
+        &self.latches[page_id as u64 % self.capacity as u64]
     }
 }
 
@@ -112,7 +112,7 @@ X LatchGuard {
 
     # Release the latch early (before drop)
     F release(~self) {
-        if self.held {
+        I self.held {
             M self.mode {
                 LatchMode.Read => self.latch_table.get(self.page_id).read_unlock(),
                 LatchMode.Write => self.latch_table.get(self.page_id).write_unlock(),
@@ -125,16 +125,16 @@ X LatchGuard {
     # Upgrade from read to write latch
     # Returns false if upgrade fails (must restart)
     F try_upgrade(~self) -> bool {
-        if !self.held {
-            return false;
+        I !self.held {
+            R false;
         }
         M self.mode {
             LatchMode.Read => {
                 self.latch_table.get(self.page_id).read_unlock();
-                if self.latch_table.get(self.page_id).try_write_lock() {
+                I self.latch_table.get(self.page_id).try_write_lock() {
                     self.mode = LatchMode.Write;
                     true
-                } else {
+                } E {
                     self.held = false;
                     false
                 }
@@ -155,7 +155,7 @@ X Drop for LatchGuard {
 # Descent path entry with latch tracking
 S LatchedPathEntry {
     page_id: u32,
-    child_index: usize,     # Which child we descended to
+    child_index: u64,     # Which child we descended to
 }
 
 # Optimistic descent state
@@ -175,15 +175,15 @@ X OptimisticDescent {
     }
 
     # Record a descent step
-    F push(~self, page_id: u32, child_index: usize) {
+    F push(~self, page_id: u32, child_index: u64) {
         self.path.push(LatchedPathEntry { page_id, child_index });
     }
 
     # Get the parent of the current node
     F parent(self) -> Option<&LatchedPathEntry> {
-        if self.path.len() >= 2 {
+        I self.path.len() >= 2 {
             Some(&self.path[self.path.len() - 2])
-        } else {
+        } E {
             None
         }
     }
@@ -226,22 +226,22 @@ X PessimisticDescent {
     # Release all latches above a safe node
     # Keeps the latch on safe_page_id and below
     F release_above(~self, safe_page_id: u32, table: &LatchTable) {
-        ~keep_from: usize = 0;
-        for i in 0..self.held_latches.len() {
-            if self.held_latches[i] == safe_page_id {
+        ~keep_from: u64 = 0;
+        L i: 0..self.held_latches.len() {
+            I self.held_latches[i] == safe_page_id {
                 keep_from = i;
-                break;
+                B;
             }
         }
 
         # Release latches above the safe node
-        for i in 0..keep_from {
+        L i: 0..keep_from {
             table.get(self.held_latches[i]).write_unlock();
         }
 
         # Keep only latches from safe_page_id downward
         ~remaining = Vec.new();
-        for i in keep_from..self.held_latches.len() {
+        L i: keep_from..self.held_latches.len() {
             remaining.push(self.held_latches[i]);
         }
         self.held_latches = remaining;
@@ -249,7 +249,7 @@ X PessimisticDescent {
 
     # Release all held latches
     F release_all(~self, table: &LatchTable) {
-        for page_id in &self.held_latches {
+        L page_id: &self.held_latches {
             table.get(*page_id).write_unlock();
         }
         self.held_latches.clear();

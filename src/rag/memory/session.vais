@@ -115,13 +115,13 @@ X AgentSession {
 
     ## Get session duration in seconds
     F duration_seconds(&self, current_time: i64) -> u64 {
-        if self.closed_at > 0 {
+        I self.closed_at > 0 {
             ~diff = self.closed_at - self.created_at;
-            if diff < 0 { return 0 }
+            I diff < 0 { R 0 }
             diff as u64
-        } else {
+        } E {
             ~diff = current_time - self.created_at;
-            if diff < 0 { return 0 }
+            I diff < 0 { R 0 }
             diff as u64
         }
     }
@@ -185,23 +185,23 @@ X SessionManager {
     ## Create a new session for an agent
     F create_session(~self, agent_id: Str, token_budget: u32,
                      current_time: i64) -> Result<u64, VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
         # Check concurrent session limit for this agent
         ~active_count: u32 = 0;
         ~i: u32 = 0;
         W i < self.sessions.len() as u32 {
-            ~session = self.sessions.get(i as usize);
-            if session.agent_id == agent_id && session.is_active() {
+            ~session = self.sessions.get(i as u64);
+            I session.agent_id == agent_id && session.is_active() {
                 active_count = active_count + 1;
             }
             i = i + 1;
         }
 
-        if active_count >= MAX_CONCURRENT_SESSIONS {
-            return Err(VaisError.new(
+        I active_count >= MAX_CONCURRENT_SESSIONS {
+            R Err(VaisError.new(
                 "VAIS-0808010",
                 "Maximum concurrent sessions per agent exceeded"
             ));
@@ -222,8 +222,8 @@ X SessionManager {
     F get_session_for_agent(&self, session_id: u64, agent_id: &Str) -> Result<&AgentSession, VaisError> {
         M self.get_session(session_id) {
             Some(session) => {
-                if session.agent_id != *agent_id {
-                    return Err(VaisError.new(
+                I session.agent_id != *agent_id {
+                    R Err(VaisError.new(
                         "VAIS-0808011",
                         "Session {session_id} belongs to a different agent"
                     ));
@@ -238,9 +238,9 @@ X SessionManager {
     F get_session(&self, session_id: u64) -> Option<&AgentSession> {
         ~i: u32 = 0;
         W i < self.sessions.len() as u32 {
-            ~session = self.sessions.get(i as usize);
-            if session.session_id == session_id {
-                return Some(session);
+            ~session = self.sessions.get(i as u64);
+            I session.session_id == session_id {
+                R Some(session);
             }
             i = i + 1;
         }
@@ -251,9 +251,9 @@ X SessionManager {
     F get_session_mut(~self, session_id: u64) -> Option<&~AgentSession> {
         ~i: u32 = 0;
         W i < self.sessions.len() as u32 {
-            ~session = self.sessions.get_mut(i as usize);
-            if session.session_id == session_id {
-                return Some(session);
+            ~session = self.sessions.get_mut(i as u64);
+            I session.session_id == session_id {
+                R Some(session);
             }
             i = i + 1;
         }
@@ -265,8 +265,8 @@ X SessionManager {
         ~result = Vec.new();
         ~i: u32 = 0;
         W i < self.sessions.len() as u32 {
-            ~session = self.sessions.get(i as usize);
-            if session.agent_id == *agent_id && session.is_active() {
+            ~session = self.sessions.get(i as u64);
+            I session.agent_id == *agent_id && session.is_active() {
                 result.push(session);
             }
             i = i + 1;
@@ -277,14 +277,14 @@ X SessionManager {
     ## Close a session (validates agent ownership)
     F close_session(~self, session_id: u64, agent_id: &Str,
                     current_time: i64) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Err(err_rag_engine_closed());
+        I !self.is_open {
+            R Err(err_rag_engine_closed());
         }
 
         M self.get_session_mut(session_id) {
             Some(session) => {
-                if session.agent_id != *agent_id {
-                    return Err(VaisError.new(
+                I session.agent_id != *agent_id {
+                    R Err(VaisError.new(
                         "VAIS-0808011",
                         "Session {session_id} belongs to a different agent"
                     ));
@@ -300,8 +300,8 @@ X SessionManager {
     F close_agent_sessions(~self, agent_id: &Str, current_time: i64) {
         ~i: u32 = 0;
         W i < self.sessions.len() as u32 {
-            ~session = self.sessions.get_mut(i as usize);
-            if session.agent_id == *agent_id && !session.is_closed() {
+            ~session = self.sessions.get_mut(i as u64);
+            I session.agent_id == *agent_id && !session.is_closed() {
                 session.close(current_time);
             }
             i = i + 1;
@@ -315,7 +315,7 @@ X SessionManager {
                 ~result = Vec.new();
                 ~i: u32 = 0;
                 W i < session.memory_ids.len() as u32 {
-                    ~mem_id = session.memory_ids.get(i as usize);
+                    ~mem_id = session.memory_ids.get(i as u64);
                     result.push(*mem_id);
                     i = i + 1;
                 }
@@ -337,14 +337,14 @@ X SessionManager {
                 # Create edges from session node to each memory's graph node
                 ~i: u32 = 0;
                 W i < session.memory_ids.len() as u32 {
-                    ~mem_id = session.memory_ids.get(i as usize);
+                    ~mem_id = session.memory_ids.get(i as u64);
 
                     # Find graph node for this memory
                     ~j: u32 = 0;
                     ~found = false;
                     W j < memory_to_graph.len() as u32 && !found {
-                        ~pair = memory_to_graph.get(j as usize);
-                        if pair.0 == *mem_id {
+                        ~pair = memory_to_graph.get(j as u64);
+                        I pair.0 == *mem_id {
                             edges.push((session_graph_node, pair.1));
                             found = true;
                         }
@@ -365,8 +365,8 @@ X SessionManager {
         ~count: u32 = 0;
         ~i: u32 = 0;
         W i < self.sessions.len() as u32 {
-            ~session = self.sessions.get(i as usize);
-            if session.status == status {
+            ~session = self.sessions.get(i as u64);
+            I session.status == status {
                 count = count + 1;
             }
             i = i + 1;
@@ -396,19 +396,19 @@ X SessionManager {
 
         ~i: u32 = 0;
         W i < self.sessions.len() as u32 {
-            ~session = self.sessions.get(i as usize);
+            ~session = self.sessions.get(i as u64);
             ~should_keep = true;
 
-            if session.is_closed() {
+            I session.is_closed() {
                 ~age_diff = current_time - session.closed_at;
-                ~age: u64 = if age_diff > 0 { age_diff as u64 } else { 0 };
-                if age > threshold_seconds {
+                ~age: u64 = I age_diff > 0 { age_diff as u64 } E { 0 };
+                I age > threshold_seconds {
                     should_keep = false;
                     removed_count = removed_count + 1;
                 }
             }
 
-            if should_keep {
+            I should_keep {
                 # Reconstruct session (AgentSession has Str/Vec/HashMap fields)
                 ~copy = AgentSession.new(
                     session.session_id, session.agent_id.clone(), session.created_at
@@ -417,7 +417,7 @@ X SessionManager {
                 # Copy memory_ids
                 ~mi: u32 = 0;
                 W mi < session.memory_ids.len() as u32 {
-                    copy.memory_ids.push(*session.memory_ids.get(mi as usize));
+                    copy.memory_ids.push(*session.memory_ids.get(mi as u64));
                     mi = mi + 1;
                 }
                 copy.graph_node_id = session.graph_node_id;

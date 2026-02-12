@@ -23,46 +23,46 @@ F is_chunk_visible(
     clog: &Clog,
 ) -> bool {
     # Fast path: aborted creator means invisible
-    if clog.is_aborted(txn_id_create) {
-        return false;
+    I clog.is_aborted(txn_id_create) {
+        R false;
     }
 
     # Case 1: Created by current transaction
-    if txn_id_create == snapshot.txn_id {
-        if cmd_id_create > snapshot.cmd_id {
-            return false;  # Created after our command
+    I txn_id_create == snapshot.txn_id {
+        I cmd_id_create > snapshot.cmd_id {
+            R false;  # Created after our command
         }
         # Check if expired by ourselves
-        if txn_id_expire == snapshot.txn_id {
-            return cmd_id_expire > snapshot.cmd_id;
+        I txn_id_expire == snapshot.txn_id {
+            R cmd_id_expire > snapshot.cmd_id;
         }
-        return txn_id_expire == 0;  # Not expired = visible
+        R txn_id_expire == 0;  # Not expired = visible
     }
 
     # Case 2: Created by another transaction
-    if !clog.is_committed(txn_id_create) {
-        return false;  # Creator not committed
+    I !clog.is_committed(txn_id_create) {
+        R false;  # Creator not committed
     }
-    if !snapshot.can_see(txn_id_create) {
-        return false;  # Created after our snapshot
+    I !snapshot.can_see(txn_id_create) {
+        R false;  # Created after our snapshot
     }
 
     # Check expiration
-    if txn_id_expire == 0 {
-        return true;  # Not expired
+    I txn_id_expire == 0 {
+        R true;  # Not expired
     }
 
     # Case 3: Expired by current transaction
-    if txn_id_expire == snapshot.txn_id {
-        return cmd_id_expire > snapshot.cmd_id;
+    I txn_id_expire == snapshot.txn_id {
+        R cmd_id_expire > snapshot.cmd_id;
     }
 
     # Expired by another transaction
-    if clog.is_aborted(txn_id_expire) {
-        return true;  # Expirer aborted, so still visible
+    I clog.is_aborted(txn_id_expire) {
+        R true;  # Expirer aborted, so still visible
     }
-    if !clog.is_committed(txn_id_expire) {
-        return true;  # Expirer not committed yet
+    I !clog.is_committed(txn_id_expire) {
+        R true;  # Expirer not committed yet
     }
     !snapshot.can_see(txn_id_expire)
 }
@@ -78,46 +78,46 @@ F is_document_visible(
     clog: &Clog,
 ) -> bool {
     # Fast path: aborted creator means invisible
-    if clog.is_aborted(txn_id_create) {
-        return false;
+    I clog.is_aborted(txn_id_create) {
+        R false;
     }
 
     # Case 1: Created by current transaction
-    if txn_id_create == snapshot.txn_id {
-        if cmd_id_create > snapshot.cmd_id {
-            return false;  # Created after our command
+    I txn_id_create == snapshot.txn_id {
+        I cmd_id_create > snapshot.cmd_id {
+            R false;  # Created after our command
         }
         # Check if expired by ourselves
-        if txn_id_expire == snapshot.txn_id {
-            return cmd_id_expire > snapshot.cmd_id;
+        I txn_id_expire == snapshot.txn_id {
+            R cmd_id_expire > snapshot.cmd_id;
         }
-        return txn_id_expire == 0;  # Not expired = visible
+        R txn_id_expire == 0;  # Not expired = visible
     }
 
     # Case 2: Created by another transaction
-    if !clog.is_committed(txn_id_create) {
-        return false;  # Creator not committed
+    I !clog.is_committed(txn_id_create) {
+        R false;  # Creator not committed
     }
-    if !snapshot.can_see(txn_id_create) {
-        return false;  # Created after our snapshot
+    I !snapshot.can_see(txn_id_create) {
+        R false;  # Created after our snapshot
     }
 
     # Check expiration
-    if txn_id_expire == 0 {
-        return true;  # Not expired
+    I txn_id_expire == 0 {
+        R true;  # Not expired
     }
 
     # Case 3: Expired by current transaction
-    if txn_id_expire == snapshot.txn_id {
-        return cmd_id_expire > snapshot.cmd_id;
+    I txn_id_expire == snapshot.txn_id {
+        R cmd_id_expire > snapshot.cmd_id;
     }
 
     # Expired by another transaction
-    if clog.is_aborted(txn_id_expire) {
-        return true;  # Expirer aborted, so still visible
+    I clog.is_aborted(txn_id_expire) {
+        R true;  # Expirer aborted, so still visible
     }
-    if !clog.is_committed(txn_id_expire) {
-        return true;  # Expirer not committed yet
+    I !clog.is_committed(txn_id_expire) {
+        R true;  # Expirer not committed yet
     }
     !snapshot.can_see(txn_id_expire)
 }
@@ -133,46 +133,46 @@ F is_memory_visible(
     clog: &Clog,
 ) -> bool {
     # Fast path: aborted creator means invisible
-    if clog.is_aborted(txn_id_create) {
-        return false;
+    I clog.is_aborted(txn_id_create) {
+        R false;
     }
 
     # Case 1: Created by current transaction
-    if txn_id_create == snapshot.txn_id {
-        if cmd_id_create > snapshot.cmd_id {
-            return false;  # Created after our command
+    I txn_id_create == snapshot.txn_id {
+        I cmd_id_create > snapshot.cmd_id {
+            R false;  # Created after our command
         }
         # Check if expired by ourselves
-        if txn_id_expire == snapshot.txn_id {
-            return cmd_id_expire > snapshot.cmd_id;
+        I txn_id_expire == snapshot.txn_id {
+            R cmd_id_expire > snapshot.cmd_id;
         }
-        return txn_id_expire == 0;  # Not expired = visible
+        R txn_id_expire == 0;  # Not expired = visible
     }
 
     # Case 2: Created by another transaction
-    if !clog.is_committed(txn_id_create) {
-        return false;  # Creator not committed
+    I !clog.is_committed(txn_id_create) {
+        R false;  # Creator not committed
     }
-    if !snapshot.can_see(txn_id_create) {
-        return false;  # Created after our snapshot
+    I !snapshot.can_see(txn_id_create) {
+        R false;  # Created after our snapshot
     }
 
     # Check expiration
-    if txn_id_expire == 0 {
-        return true;  # Not expired
+    I txn_id_expire == 0 {
+        R true;  # Not expired
     }
 
     # Case 3: Expired by current transaction
-    if txn_id_expire == snapshot.txn_id {
-        return cmd_id_expire > snapshot.cmd_id;
+    I txn_id_expire == snapshot.txn_id {
+        R cmd_id_expire > snapshot.cmd_id;
     }
 
     # Expired by another transaction
-    if clog.is_aborted(txn_id_expire) {
-        return true;  # Expirer aborted, so still visible
+    I clog.is_aborted(txn_id_expire) {
+        R true;  # Expirer aborted, so still visible
     }
-    if !clog.is_committed(txn_id_expire) {
-        return true;  # Expirer not committed yet
+    I !clog.is_committed(txn_id_expire) {
+        R true;  # Expirer not committed yet
     }
     !snapshot.can_see(txn_id_expire)
 }
@@ -185,7 +185,7 @@ F filter_visible_chunks(
 ) -> Vec<ChunkMeta> {
     ~visible = Vec.new();
     E chunk in chunks {
-        if is_chunk_visible(
+        I is_chunk_visible(
             chunk.txn_id_create,
             chunk.txn_id_expire,
             chunk.cmd_id_create,
@@ -207,7 +207,7 @@ F filter_visible_documents(
 ) -> Vec<DocumentMeta> {
     ~visible = Vec.new();
     E doc in documents {
-        if is_document_visible(
+        I is_document_visible(
             doc.txn_id_create,
             doc.txn_id_expire,
             doc.cmd_id_create,
@@ -229,7 +229,7 @@ F filter_visible_memories(
 ) -> Vec<MemoryEntry> {
     ~visible = Vec.new();
     E mem in memories {
-        if is_memory_visible(
+        I is_memory_visible(
             mem.txn_id_create,
             mem.txn_id_expire,
             mem.cmd_id_create,
@@ -254,24 +254,24 @@ F is_chunk_gc_candidate(
     clog: &Clog,
 ) -> bool {
     # Must be expired
-    if chunk.txn_id_expire == 0 {
-        return false;
+    I chunk.txn_id_expire == 0 {
+        R false;
     }
 
     # Creator must be committed and old
-    if !clog.is_committed(chunk.txn_id_create) {
-        return false;
+    I !clog.is_committed(chunk.txn_id_create) {
+        R false;
     }
-    if chunk.txn_id_create >= gc_horizon {
-        return false;
+    I chunk.txn_id_create >= gc_horizon {
+        R false;
     }
 
     # Expirer must be committed and old
-    if !clog.is_committed(chunk.txn_id_expire) {
-        return false;
+    I !clog.is_committed(chunk.txn_id_expire) {
+        R false;
     }
-    if chunk.txn_id_expire >= gc_horizon {
-        return false;
+    I chunk.txn_id_expire >= gc_horizon {
+        R false;
     }
 
     true
@@ -284,24 +284,24 @@ F is_document_gc_candidate(
     clog: &Clog,
 ) -> bool {
     # Must be expired
-    if doc.txn_id_expire == 0 {
-        return false;
+    I doc.txn_id_expire == 0 {
+        R false;
     }
 
     # Creator must be committed and old
-    if !clog.is_committed(doc.txn_id_create) {
-        return false;
+    I !clog.is_committed(doc.txn_id_create) {
+        R false;
     }
-    if doc.txn_id_create >= gc_horizon {
-        return false;
+    I doc.txn_id_create >= gc_horizon {
+        R false;
     }
 
     # Expirer must be committed and old
-    if !clog.is_committed(doc.txn_id_expire) {
-        return false;
+    I !clog.is_committed(doc.txn_id_expire) {
+        R false;
     }
-    if doc.txn_id_expire >= gc_horizon {
-        return false;
+    I doc.txn_id_expire >= gc_horizon {
+        R false;
     }
 
     true
@@ -314,24 +314,24 @@ F is_memory_gc_candidate(
     clog: &Clog,
 ) -> bool {
     # Must be expired
-    if mem.txn_id_expire == 0 {
-        return false;
+    I mem.txn_id_expire == 0 {
+        R false;
     }
 
     # Creator must be committed and old
-    if !clog.is_committed(mem.txn_id_create) {
-        return false;
+    I !clog.is_committed(mem.txn_id_create) {
+        R false;
     }
-    if mem.txn_id_create >= gc_horizon {
-        return false;
+    I mem.txn_id_create >= gc_horizon {
+        R false;
     }
 
     # Expirer must be committed and old
-    if !clog.is_committed(mem.txn_id_expire) {
-        return false;
+    I !clog.is_committed(mem.txn_id_expire) {
+        R false;
     }
-    if mem.txn_id_expire >= gc_horizon {
-        return false;
+    I mem.txn_id_expire >= gc_horizon {
+        R false;
     }
 
     true
@@ -345,7 +345,7 @@ F collect_chunk_gc_candidates(
 ) -> Vec<u64> {
     ~candidates = Vec.new();
     E chunk in chunks {
-        if is_chunk_gc_candidate(chunk, gc_horizon, clog) {
+        I is_chunk_gc_candidate(chunk, gc_horizon, clog) {
             candidates.push(chunk.chunk_id);
         }
     }
@@ -360,7 +360,7 @@ F collect_document_gc_candidates(
 ) -> Vec<u64> {
     ~candidates = Vec.new();
     E doc in documents {
-        if is_document_gc_candidate(doc, gc_horizon, clog) {
+        I is_document_gc_candidate(doc, gc_horizon, clog) {
             candidates.push(doc.doc_id);
         }
     }
@@ -375,7 +375,7 @@ F collect_memory_gc_candidates(
 ) -> Vec<u64> {
     ~candidates = Vec.new();
     E mem in memories {
-        if is_memory_gc_candidate(mem, gc_horizon, clog) {
+        I is_memory_gc_candidate(mem, gc_horizon, clog) {
             candidates.push(mem.memory_id);
         }
     }

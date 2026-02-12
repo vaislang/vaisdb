@@ -32,7 +32,7 @@ F btree_insert(
 ) -> Result<bool, VaisError> {
     # Check for duplicate key first
     M tree.search(key, pool)? {
-        Some(_) => { return Ok(false); },
+        Some(_) => { R Ok(false); },
         None => {},
     }
 
@@ -48,13 +48,13 @@ F btree_insert(
     # Acquire write latch on the leaf before modification
     ~leaf_latch = LatchGuard.new_write(tree.get_latch_table(), leaf_info.page_id);
 
-    if leaf.can_fit(key.len() as u32) {
+    I leaf.can_fit(key.len() as u32) {
         # Simple case: leaf has space
         # WAL-first: write WAL record before modifying page
         ~tid_bytes = tid.to_le_bytes();
         wal_btree_insert(gcm, txn_id, tree.file_id, leaf_info.page_id, key, &tid_bytes)?;
         # FPI: capture page image before first modification after checkpoint
-        if pool.needs_fpi(leaf_frame) {
+        I pool.needs_fpi(leaf_frame) {
             ~fpi_data = pool.get_page(leaf_frame);
             write_fpi(gcm.writer(), txn_id, tree.file_id, leaf_info.page_id, fpi_data)?;
             pool.clear_fpi(leaf_frame);
@@ -65,7 +65,7 @@ F btree_insert(
         leaf_latch.release();
         pool.unpin_page(leaf_frame, true);
         tree.inc_entries();
-        return Ok(true);
+        R Ok(true);
     }
 
     # Leaf is full, need to split
@@ -89,7 +89,7 @@ F btree_insert(
 # Path entry recording the descent through the tree
 S PathEntry {
     page_id: u32,
-    index: usize,     # Which child slot was followed (for internal nodes)
+    index: u64,     # Which child slot was followed (for internal nodes)
 }
 
 # Collect the path from root to the target leaf
@@ -99,11 +99,11 @@ F collect_insert_path(
     key: &[u8],
     pool: &~BufferPool,
 ) -> Result<Vec<PathEntry>, VaisError> {
-    ~path = Vec.with_capacity(tree.height as usize);
+    ~path = Vec.with_capacity(tree.height as u64);
     ~current_page = tree.root_page_id;
     ~parent_guard: Option<LatchGuard> = None;
 
-    for level in 0..(tree.height - 1) {
+    L level: 0..(tree.height - 1) {
         # Acquire read latch on current internal node
         ~guard = LatchGuard.new_read(tree.get_latch_table(), current_page);
 
@@ -113,9 +113,9 @@ F collect_insert_path(
 
         # Find which child to descend to and record the child index
         ~child_index = find_child_index(&internal, key);
-        ~next_page = if child_index == 0 {
+        ~next_page = I child_index == 0 {
             internal.leftmost_child
-        } else {
+        } E {
             internal.entries[child_index - 1].child_page
         };
 
@@ -145,11 +145,11 @@ F collect_insert_path(
 }
 
 # Find the child index for descent (0 = leftmost_child, N = entries[N-1].child_page)
-F find_child_index(internal: &BTreeInternalNode, key: &[u8]) -> usize {
-    ~lo: usize = 0;
-    ~hi: usize = internal.entries.len();
+F find_child_index(internal: &BTreeInternalNode, key: &[u8]) -> u64 {
+    ~lo: u64 = 0;
+    ~hi: u64 = internal.entries.len();
 
-    while lo < hi {
+    L while lo < hi {
         ~mid = lo + (hi - lo) / 2;
         ~mid_key = internal.get_key(mid);
         M compare_keys(key, mid_key) {
@@ -198,15 +198,15 @@ F split_leaf(
     ~all_keys = Vec.new();
     ~all_tids = Vec.new();
 
-    for i in 0..leaf.entry_count() as usize {
-        if i == insert_pos {
+    L i: 0..leaf.entry_count() as u64 {
+        I i == insert_pos {
             all_keys.push(key.to_vec());
             all_tids.push(tid);
         }
         all_keys.push(leaf.get_key(i).to_vec());
         all_tids.push(leaf.entries[i].tid);
     }
-    if insert_pos >= leaf.entry_count() as usize {
+    I insert_pos >= leaf.entry_count() as u64 {
         all_keys.push(key.to_vec());
         all_tids.push(tid);
     }
@@ -217,12 +217,12 @@ F split_leaf(
 
     # Rebuild left leaf (reuse original)
     ~left_leaf = BTreeLeafNode.new(leaf.header.page_id, tree.page_size, leaf.is_root());
-    for i in 0..split_at {
+    L i: 0..split_at {
         left_leaf.insert(&all_keys[i], all_tids[i])?;
     }
 
     # Build right leaf
-    for i in split_at..total {
+    L i: split_at..total {
         new_leaf.insert(&all_keys[i], all_tids[i])?;
     }
 
@@ -233,10 +233,10 @@ F split_leaf(
     new_leaf.set_next_leaf(old_next);
 
     # Update the next leaf's prev pointer
-    if old_next != NULL_PAGE {
+    I old_next != NULL_PAGE {
         ~next_frame = pool.fetch_page(tree.file_id, old_next)?;
         # FPI: next leaf is an existing page being modified
-        if pool.needs_fpi(next_frame) {
+        I pool.needs_fpi(next_frame) {
             ~fpi_data = pool.get_page(next_frame);
             write_fpi(gcm.writer(), txn_id, tree.file_id, old_next, fpi_data)?;
             pool.clear_fpi(next_frame);
@@ -250,7 +250,7 @@ F split_leaf(
     }
 
     # FPI: original leaf page is being rewritten with left half
-    if pool.needs_fpi(leaf_frame) {
+    I pool.needs_fpi(leaf_frame) {
         ~fpi_data = pool.get_page(leaf_frame);
         write_fpi(gcm.writer(), txn_id, tree.file_id, leaf.header.page_id, fpi_data)?;
         pool.clear_fpi(leaf_frame);
@@ -287,8 +287,8 @@ F propagate_split(
     # Walk up from the parent of the leaf (path[len-2]) to root
     ~level = path.len() as i32 - 2;  # Start at parent of leaf
 
-    while level >= 0 {
-        ~parent_info = &path[level as usize];
+    L while level >= 0 {
+        ~parent_info = &path[level as u64];
         ~parent_frame = pool.fetch_page(tree.file_id, parent_info.page_id)?;
         ~parent_data = pool.get_page(parent_frame);
         ~internal = BTreeInternalNode.from_page_data(parent_data, tree.page_size)?;
@@ -296,10 +296,10 @@ F propagate_split(
         # Acquire write latch on parent before modification
         ~parent_latch = LatchGuard.new_write(tree.get_latch_table(), parent_info.page_id);
 
-        if internal.can_fit(current_sep.len() as u32) {
+        I internal.can_fit(current_sep.len() as u32) {
             # Parent has space, insert separator
             # FPI: parent page being modified
-            if pool.needs_fpi(parent_frame) {
+            I pool.needs_fpi(parent_frame) {
                 ~fpi_data = pool.get_page(parent_frame);
                 write_fpi(gcm.writer(), txn_id, tree.file_id, parent_info.page_id, fpi_data)?;
                 pool.clear_fpi(parent_frame);
@@ -309,7 +309,7 @@ F propagate_split(
             pool.write_page(parent_frame, flushed)?;
             parent_latch.release();
             pool.unpin_page(parent_frame, true);
-            return Ok(());
+            R Ok(());
         }
 
         # Parent is full, need to split internal node
@@ -350,9 +350,9 @@ F split_internal(
     all_children.push(internal.leftmost_child);
 
     ~inserted = false;
-    for i in 0..internal.entry_count() as usize {
+    L i: 0..internal.entry_count() as u64 {
         ~entry_key = internal.get_key(i).to_vec();
-        if !inserted && compare_keys(new_key, &entry_key) == KeyCmp.Less {
+        I !inserted && compare_keys(new_key, &entry_key) == KeyCmp.Less {
             all_keys.push(new_key.to_vec());
             all_children.push(new_child);
             inserted = true;
@@ -360,7 +360,7 @@ F split_internal(
         all_keys.push(entry_key);
         all_children.push(internal.entries[i].child_page);
     }
-    if !inserted {
+    I !inserted {
         all_keys.push(new_key.to_vec());
         all_children.push(new_child);
     }
@@ -383,19 +383,19 @@ F split_internal(
     # Left internal: keys [0..mid], children [0..mid+1]
     ~left = BTreeInternalNode.new(internal.header.page_id, tree.page_size, internal.is_root());
     left.set_leftmost_child(all_children[0]);
-    for i in 0..mid {
+    L i: 0..mid {
         left.insert_entry(&all_keys[i], all_children[i + 1])?;
     }
 
     # Right internal: keys [mid+1..], children [mid+1..]
     ~right = BTreeInternalNode.new(new_page_id, tree.page_size, false);
     right.set_leftmost_child(all_children[mid + 1]);
-    for i in (mid + 1)..all_keys.len() {
+    L i: (mid + 1)..all_keys.len() {
         right.insert_entry(&all_keys[i], all_children[i + 1])?;
     }
 
     # FPI: original internal page is being rewritten with left half
-    if pool.needs_fpi(internal_frame) {
+    I pool.needs_fpi(internal_frame) {
         ~fpi_data = pool.get_page(internal_frame);
         write_fpi(gcm.writer(), txn_id, tree.file_id, internal.header.page_id, fpi_data)?;
         pool.clear_fpi(internal_frame);
@@ -444,7 +444,7 @@ F create_new_root(
     # Clear IS_ROOT flag on the old root node
     ~old_root_frame = pool.fetch_page(tree.file_id, left_child)?;
     # FPI: old root page is being modified (flag change)
-    if pool.needs_fpi(old_root_frame) {
+    I pool.needs_fpi(old_root_frame) {
         ~fpi_data = pool.get_page(old_root_frame);
         write_fpi(gcm.writer(), txn_id, tree.file_id, left_child, fpi_data)?;
         pool.clear_fpi(old_root_frame);

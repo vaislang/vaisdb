@@ -63,9 +63,9 @@ S VectorSearchHit {
 X VectorSearchHit {
     F new(row_id: u64, node_id: u64, distance: f32) -> VectorSearchHit {
         # Convert distance to similarity (inverse, clamped to [0, 1])
-        ~sim = if distance <= 0.0 {
+        ~sim = I distance <= 0.0 {
             1.0f32
-        } else {
+        } E {
             1.0f32 / (1.0f32 + distance)
         };
 
@@ -153,8 +153,8 @@ X VectorGraphPipeline {
         alpha: f32,
         max_graph_depth: u32,
     ) -> Result<VectorGraphPipeline, VaisError> {
-        if alpha < 0.0 || alpha > 1.0 {
-            return Err(err_vector_graph_invalid_alpha(alpha as f64));
+        I alpha < 0.0 || alpha > 1.0 {
+            R Err(err_vector_graph_invalid_alpha(alpha as f64));
         }
 
         Ok(VectorGraphPipeline {
@@ -187,20 +187,19 @@ X VectorGraphPipeline {
     ) -> Result<Vec<GraphExpandedResult>, VaisError> {
         ~all_results = Vec.new();
 
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < hits.len() {
             ~hit = &hits[i];
 
-            if hit.node_id == INVALID_NODE_ID {
+            I hit.node_id == INVALID_NODE_ID {
                 i += 1;
-                continue;
-            }
+                C            }
 
             # Add the origin node itself
             all_results.push(GraphExpandedResult.origin(hit.node_id, hit.similarity));
 
             # Expand through graph if depth > 0
-            if self.max_graph_depth > 0 {
+            I self.max_graph_depth > 0 {
                 ~params = GraphTraverseParams.default(hit.node_id);
                 params.max_depth = self.max_graph_depth;
                 params.direction = self.direction;
@@ -210,11 +209,11 @@ X VectorGraphPipeline {
                 ~traverse_result = self.traverse_fn.execute(&params, snapshot, clog)?;
 
                 # Convert traversal results to expanded results with scoring
-                ~j: usize = 0;
+                ~j: u64 = 0;
                 L while j < traverse_result.rows.len() {
                     ~trow = &traverse_result.rows[j];
                     # Skip depth 0 (already added as origin)
-                    if trow.depth > 0 {
+                    I trow.depth > 0 {
                         all_results.push(GraphExpandedResult.new(
                             hit.node_id,
                             hit.similarity,
@@ -241,7 +240,7 @@ X VectorGraphPipeline {
 
     # Sort results by combined_score descending (insertion sort for simplicity)
     F sort_by_score_desc(results: &~Vec<GraphExpandedResult>) {
-        ~i: usize = 1;
+        ~i: u64 = 1;
         L while i < results.len() {
             ~j = i;
             L while j > 0 && results[j].combined_score > results[j - 1].combined_score {
@@ -258,20 +257,19 @@ X VectorGraphPipeline {
         ~deduped = Vec.new();
         ~seen_nodes = Vec.new();
 
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < results.len() {
             ~node_id = results[i].neighbor_node_id;
             ~found = false;
-            ~j: usize = 0;
+            ~j: u64 = 0;
             L while j < seen_nodes.len() {
-                if seen_nodes[j] == node_id {
+                I seen_nodes[j] == node_id {
                     found = true;
-                    break;
-                }
+                    B                }
                 j += 1;
             }
 
-            if !found {
+            I !found {
                 seen_nodes.push(node_id);
                 deduped.push(results[i]);
             }
@@ -290,7 +288,7 @@ X VectorGraphPipeline {
 
 S VectorGraphResultSource {
     results: Vec<GraphExpandedResult>,
-    cursor: usize,
+    cursor: u64,
     is_open: bool,
     stats: ExecStats,
 }
@@ -335,8 +333,8 @@ X VectorGraphResultSource {
     }
 
     F next(~self) -> Result<Option<ExecutorRow>, VaisError> {
-        if !self.is_open || self.cursor >= self.results.len() {
-            return Ok(None);
+        I !self.is_open || self.cursor >= self.results.len() {
+            R Ok(None);
         }
 
         ~row = VectorGraphResultSource.to_executor_row(&self.results[self.cursor]);
@@ -359,11 +357,11 @@ X VectorGraphResultSource {
 # ============================================================================
 
 S VectorToGraphMapper {
-    join_column_idx: usize,   # Column index in vector result rows that contains node_id
+    join_column_idx: u64,   # Column index in vector result rows that contains node_id
 }
 
 X VectorToGraphMapper {
-    F new(join_column_idx: usize) -> VectorToGraphMapper {
+    F new(join_column_idx: u64) -> VectorToGraphMapper {
         VectorToGraphMapper { join_column_idx }
     }
 
@@ -374,14 +372,14 @@ X VectorToGraphMapper {
         distances: &Vec<f32>,
         node_ids: &Vec<u64>,
     ) -> Result<Vec<VectorSearchHit>, VaisError> {
-        if row_ids.len() != distances.len() || row_ids.len() != node_ids.len() {
-            return Err(err_vector_graph_mapping_failed(
+        I row_ids.len() != distances.len() || row_ids.len() != node_ids.len() {
+            R Err(err_vector_graph_mapping_failed(
                 "Mismatched vector result array lengths".to_string()
             ));
         }
 
         ~hits = Vec.with_capacity(row_ids.len());
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < row_ids.len() {
             hits.push(VectorSearchHit.new(row_ids[i], node_ids[i], distances[i]));
             i += 1;

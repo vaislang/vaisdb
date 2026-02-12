@@ -81,7 +81,7 @@ X NodePage {
             next_free_offset: start_offset,
             flags: 0,
             slots: Vec.new(),
-            page_data: vec![0u8; page_size as usize],
+            page_data: vec![0u8; page_size as u64],
             page_size,
         }
     }
@@ -89,20 +89,20 @@ X NodePage {
     # Load from page buffer
     F load(page_id: u32, page_data: &[u8], page_size: u32) -> Result<NodePage, VaisError> {
         ~header = PageHeader.read_from_page(page_data)?;
-        if header.page_type != PAGE_TYPE_GRAPH_NODE {
-            return Err(err_graph_node_corrupt(0));
+        I header.page_type != PAGE_TYPE_GRAPH_NODE {
+            R Err(err_graph_node_corrupt(0));
         }
 
-        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as usize..]);
+        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as u64..]);
         ~node_count = buf.get_u16_le()?;
         ~next_free_offset = buf.get_u16_le()?;
         ~flags = buf.get_u16_le()?;
         buf.get_u16_le()?;  # reserved
 
         # Read slot directory
-        ~slots = Vec.with_capacity(node_count as usize);
-        ~i: usize = 0;
-        L while i < node_count as usize {
+        ~slots = Vec.with_capacity(node_count as u64);
+        ~i: u64 = 0;
+        L while i < node_count as u64 {
             slots.push(NodeSlot.deserialize(&buf)?);
             i += 1;
         }
@@ -124,9 +124,9 @@ X NodePage {
         ~slot_dir_end = PAGE_HEADER_SIZE + NODE_PAGE_BODY_HEADER_SIZE +
                         (self.node_count as u32 * NODE_SLOT_SIZE);
         ~data_start = self.find_lowest_data_offset();
-        if data_start > slot_dir_end + NODE_SLOT_SIZE {
+        I data_start > slot_dir_end + NODE_SLOT_SIZE {
             data_start - slot_dir_end - NODE_SLOT_SIZE
-        } else {
+        } E {
             0
         }
     }
@@ -134,9 +134,9 @@ X NodePage {
     # Find lowest offset of existing node data (bottom-up growth)
     F find_lowest_data_offset(self) -> u32 {
         ~lowest = self.page_size;
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < self.slots.len() {
-            if !self.slots[i].is_deleted() && (self.slots[i].offset as u32) < lowest {
+            I !self.slots[i].is_deleted() && (self.slots[i].offset as u32) < lowest {
                 lowest = self.slots[i].offset as u32;
             }
             i += 1;
@@ -147,21 +147,21 @@ X NodePage {
     # Add node to page (returns slot index)
     F add_node(~self, node: &GraphNode) -> Result<u16, VaisError> {
         # Serialize node to temp buffer
-        ~temp_buf = ByteBuffer.new(node.serialized_size() as usize);
+        ~temp_buf = ByteBuffer.new(node.serialized_size() as u64);
         node.serialize(&temp_buf);
         ~node_bytes = temp_buf.to_vec();
         ~node_size = node_bytes.len() as u32;
 
         # Check space
-        if self.available_space() < node_size {
-            return Err(err_graph_page_full(self.page_id));
+        I self.available_space() < node_size {
+            R Err(err_graph_page_full(self.page_id));
         }
 
         # Write node data bottom-up
         ~data_offset = self.find_lowest_data_offset() - node_size;
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < node_bytes.len() {
-            self.page_data[(data_offset as usize) + i] = node_bytes[i];
+            self.page_data[(data_offset as u64) + i] = node_bytes[i];
             i += 1;
         }
 
@@ -178,40 +178,40 @@ X NodePage {
 
     # Read node at slot index
     F read_node(self, slot_index: u16) -> Result<GraphNode, VaisError> {
-        if slot_index >= self.node_count {
-            return Err(err_graph_node_not_found(0));
+        I slot_index >= self.node_count {
+            R Err(err_graph_node_not_found(0));
         }
 
-        ~slot = &self.slots[slot_index as usize];
-        if slot.is_deleted() {
-            return Err(err_graph_node_not_found(0));
+        ~slot = &self.slots[slot_index as u64];
+        I slot.is_deleted() {
+            R Err(err_graph_node_not_found(0));
         }
 
         ~buf = ByteBuffer.wrap_readonly(
-            &self.page_data[slot.offset as usize..(slot.offset + slot.length) as usize]
+            &self.page_data[slot.offset as u64..(slot.offset + slot.length) as u64]
         );
         GraphNode.deserialize(&buf)
     }
 
     # Update node at slot index (must fit in same or smaller space)
     F update_node(~self, slot_index: u16, node: &GraphNode) -> Result<(), VaisError> {
-        if slot_index >= self.node_count {
-            return Err(err_graph_node_not_found(0));
+        I slot_index >= self.node_count {
+            R Err(err_graph_node_not_found(0));
         }
 
-        ~slot = &self.slots[slot_index as usize];
-        ~temp_buf = ByteBuffer.new(node.serialized_size() as usize);
+        ~slot = &self.slots[slot_index as u64];
+        ~temp_buf = ByteBuffer.new(node.serialized_size() as u64);
         node.serialize(&temp_buf);
         ~node_bytes = temp_buf.to_vec();
 
-        if node_bytes.len() > slot.length as usize {
-            return Err(err_graph_page_full(self.page_id));
+        I node_bytes.len() > slot.length as u64 {
+            R Err(err_graph_page_full(self.page_id));
         }
 
         # Overwrite existing data
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < node_bytes.len() {
-            self.page_data[(slot.offset as usize) + i] = node_bytes[i];
+            self.page_data[(slot.offset as u64) + i] = node_bytes[i];
             i += 1;
         }
 
@@ -220,7 +220,7 @@ X NodePage {
 
     # Write page to buffer (for flushing to buffer pool)
     F write_to_buffer(self, page_lsn: u64, txn_id: u64) -> Vec<u8> {
-        ~out = vec![0u8; self.page_size as usize];
+        ~out = vec![0u8; self.page_size as u64];
 
         # Write page header
         ~header = PageHeader.new(self.page_id, PAGE_TYPE_GRAPH_NODE, ENGINE_TAG_GRAPH);
@@ -231,23 +231,23 @@ X NodePage {
 
         # Write node page body header
         ~buf = ByteBuffer.wrap(&out);
-        buf.set_position(PAGE_HEADER_SIZE as usize);
+        buf.set_position(PAGE_HEADER_SIZE as u64);
         buf.put_u16_le(self.node_count);
         buf.put_u16_le(self.next_free_offset);
         buf.put_u16_le(self.flags);
         buf.put_u16_le(0);  # reserved
 
         # Write slot directory
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < self.slots.len() {
             self.slots[i].serialize(&buf);
             i += 1;
         }
 
         # Copy node data area (bottom-up region)
-        ~lowest = self.find_lowest_data_offset() as usize;
-        ~j: usize = lowest;
-        L while j < self.page_size as usize {
+        ~lowest = self.find_lowest_data_offset() as u64;
+        ~j: u64 = lowest;
+        L while j < self.page_size as u64 {
             out[j] = self.page_data[j];
             j += 1;
         }
@@ -292,7 +292,7 @@ X NodeStore {
         ~page_buffer = npage.write_to_buffer(0, txn_id);
         ~frame_id = self.pool.fetch_page(FILE_ID_GRAPH, page_id)?;
         ~frame_data = self.pool.get_page_mut(frame_id);
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < page_buffer.len() {
             frame_data[i] = page_buffer[i];
             i += 1;
@@ -321,7 +321,7 @@ X NodeStore {
 
         # Write back
         ~page_buffer = npage.write_to_buffer(0, txn_id);
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < page_buffer.len() {
             page_data[i] = page_buffer[i];
             i += 1;

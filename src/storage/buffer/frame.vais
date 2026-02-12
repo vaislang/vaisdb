@@ -44,8 +44,8 @@ S BufferFrame {
 X BufferFrame {
     # Create a new empty frame
     F new(frame_id: u32, page_size: u32) -> BufferFrame {
-        ~data = Vec.with_capacity(page_size as usize);
-        data.resize(page_size as usize, 0u8);
+        ~data = Vec.with_capacity(page_size as u64);
+        data.resize(page_size as u64, 0u8);
 
         BufferFrame {
             frame_id,
@@ -63,7 +63,7 @@ X BufferFrame {
     # Load a page into this frame
     F load(~self, location: PageLocation, page_data: &[u8]) {
         self.location = location;
-        for i in 0..page_data.len() {
+        L i: 0..page_data.len() {
             self.data[i] = page_data[i];
         }
         self.state = FrameState.Clean;
@@ -82,7 +82,7 @@ X BufferFrame {
 
     # Unpin the frame (decrement pin count)
     F unpin(~self) {
-        if self.pin_count > 0 {
+        I self.pin_count > 0 {
             self.pin_count -= 1;
         }
     }
@@ -164,7 +164,7 @@ X BufferFrame {
 }
 
 # Helper: read u64 little-endian from byte slice
-F read_u64_le(data: &[u8], offset: usize) -> u64 {
+F read_u64_le(data: &[u8], offset: u64) -> u64 {
     (data[offset] as u64) |
     ((data[offset + 1] as u64) << 8) |
     ((data[offset + 2] as u64) << 16) |
@@ -176,7 +176,7 @@ F read_u64_le(data: &[u8], offset: usize) -> u64 {
 }
 
 # Helper: write u64 little-endian to byte slice
-F write_u64_le(data: &~[u8], offset: usize, val: u64) {
+F write_u64_le(data: &~[u8], offset: u64, val: u64) {
     data[offset] = (val & 0xFF) as u8;
     data[offset + 1] = ((val >> 8) & 0xFF) as u8;
     data[offset + 2] = ((val >> 16) & 0xFF) as u8;

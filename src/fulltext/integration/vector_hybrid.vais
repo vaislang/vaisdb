@@ -60,14 +60,14 @@ X HybridSearchPipeline {
         ~fused = fuse_results(&self.fusion_method, bm25_results, vector_results);
 
         # Return top_k results
-        ~limit = top_k as usize;
-        if limit >= fused.len() {
-            return fused;
+        ~limit = top_k as u64;
+        I limit >= fused.len() {
+            R fused;
         }
 
         # Take only top_k
         ~top_results: Vec<ScoredDoc> = Vec::new();
-        L i in 0..limit {
+        L i: 0..limit {
             top_results.push(fused[i]);
         }
 
@@ -110,11 +110,11 @@ X HybridSearchConfig {
     }
 }
 
-# Convert full-text match results to ScoredDoc format
+# Convert full-text M results to ScoredDoc format
 F fulltext_to_scored_docs(results: &Vec<(u64, f64)>) -> Vec<ScoredDoc> {
     ~scored: Vec<ScoredDoc> = Vec::new();
 
-    L i in 0..results.len() {
+    L i: 0..results.len() {
         ~doc_id = results[i].0;
         ~score = results[i].1;
         scored.push(ScoredDoc::new(doc_id, score));
@@ -127,7 +127,7 @@ F fulltext_to_scored_docs(results: &Vec<(u64, f64)>) -> Vec<ScoredDoc> {
 F vector_to_scored_docs(results: &Vec<(u64, f64)>) -> Vec<ScoredDoc> {
     ~scored: Vec<ScoredDoc> = Vec::new();
 
-    L i in 0..results.len() {
+    L i: 0..results.len() {
         ~doc_id = results[i].0;
         ~score = results[i].1;
         scored.push(ScoredDoc::new(doc_id, score));

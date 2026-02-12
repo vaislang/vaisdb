@@ -51,10 +51,10 @@ X Tuple {
 
     # Calculate on-page size of this tuple
     F on_page_size(self) -> u32 {
-        if self.is_overflow {
+        I self.is_overflow {
             # MVCC (32B) + flag (1B) + inline prefix + overflow pointer (8B)
             MVCC_TUPLE_META_SIZE + 1 + self.user_data.len() as u32 + OVERFLOW_POINTER_SIZE
-        } else {
+        } E {
             # MVCC (32B) + flag (1B) + user data
             MVCC_TUPLE_META_SIZE + 1 + self.user_data.len() as u32
         }
@@ -74,35 +74,35 @@ X Tuple {
     }
 
     # Write tuple to a byte slice at the given offset
-    F write_to(self, page_data: &~[u8], offset: usize) {
+    F write_to(self, page_data: &~[u8], offset: u64) {
         ~buf = ByteBuffer.wrap(&page_data[offset..]);
         self.mvcc.serialize(&buf);
 
-        if self.is_overflow {
+        I self.is_overflow {
             buf.put_u8(TUPLE_FLAG_OVERFLOW);
             buf.put_bytes(&self.user_data);
             buf.put_u32_le(self.overflow_page_id);
             buf.put_u32_le(self.overflow_total_len);
-        } else {
+        } E {
             buf.put_u8(TUPLE_FLAG_NORMAL);
             buf.put_bytes(&self.user_data);
         }
     }
 
     # Read tuple from a byte slice at the given offset with known length
-    F read_from(page_data: &[u8], offset: usize, len: usize) -> Result<Tuple, VaisError> {
+    F read_from(page_data: &[u8], offset: u64, len: u64) -> Result<Tuple, VaisError> {
         ~buf = ByteBuffer.wrap_readonly(&page_data[offset..offset + len]);
         ~mvcc = MvccTupleMeta.deserialize(&buf)?;
         ~flag = buf.get_u8()?;
 
-        if flag == TUPLE_FLAG_OVERFLOW {
-            ~remaining = len - MVCC_TUPLE_META_SIZE as usize - 1 - OVERFLOW_POINTER_SIZE as usize;
+        I flag == TUPLE_FLAG_OVERFLOW {
+            ~remaining = len - MVCC_TUPLE_META_SIZE as u64 - 1 - OVERFLOW_POINTER_SIZE as u64;
             ~inline_data = buf.get_bytes(remaining)?;
             ~overflow_page_id = buf.get_u32_le()?;
             ~overflow_total_len = buf.get_u32_le()?;
             Ok(Tuple.new_overflow(mvcc, inline_data, overflow_page_id, overflow_total_len))
-        } else {
-            ~remaining = len - MVCC_TUPLE_META_SIZE as usize - 1;
+        } E {
+            ~remaining = len - MVCC_TUPLE_META_SIZE as u64 - 1;
             ~user_data = buf.get_bytes(remaining)?;
             Ok(Tuple.new(mvcc, user_data))
         }

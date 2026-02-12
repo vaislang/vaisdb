@@ -31,8 +31,8 @@ X DirtyTracker {
         ~guard = self.lock.lock();
 
         # Check if already tracked
-        for entry in &self.entries {
-            if entry.frame_id == frame_id {
+        L entry: &self.entries {
+            I entry.frame_id == frame_id {
                 # Already dirty, keep the earlier first_dirty_lsn
                 drop(guard);
                 return;
@@ -52,11 +52,11 @@ X DirtyTracker {
     F mark_clean(~self, frame_id: u32) {
         ~guard = self.lock.lock();
 
-        ~i: usize = 0;
-        while i < self.entries.len() {
-            if self.entries[i].frame_id == frame_id {
+        ~i: u64 = 0;
+        L while i < self.entries.len() {
+            I self.entries[i].frame_id == frame_id {
                 self.entries.swap_remove(i);
-                break;
+                B;
             }
             i += 1;
         }
@@ -84,8 +84,8 @@ X DirtyTracker {
     F min_dirty_lsn(self) -> u64 {
         ~guard = self.lock.lock();
         ~min_lsn: u64 = u64::MAX;
-        for entry in &self.entries {
-            if entry.first_dirty_lsn < min_lsn {
+        L entry: &self.entries {
+            I entry.first_dirty_lsn < min_lsn {
                 min_lsn = entry.first_dirty_lsn;
             }
         }
@@ -103,10 +103,10 @@ X DirtyTracker {
     # Check if a specific page is dirty
     F is_dirty(self, file_id: u8, page_id: u32) -> bool {
         ~guard = self.lock.lock();
-        for entry in &self.entries {
-            if entry.location.file_id == file_id && entry.location.page_id == page_id {
+        L entry: &self.entries {
+            I entry.location.file_id == file_id && entry.location.page_id == page_id {
                 drop(guard);
-                return true;
+                R true;
             }
         }
         drop(guard);

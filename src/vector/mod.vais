@@ -122,26 +122,26 @@ X VectorEngine {
         gcm: &GroupCommitManager,
     ) -> Result<VectorEngine, VaisError> {
         # Validate configuration
-        if config.m == 0 || config.m_max_0 == 0 {
-            return Err(err_hnsw_invalid_config("M and M_max_0 must be > 0"));
+        I config.m == 0 || config.m_max_0 == 0 {
+            R Err(err_hnsw_invalid_config("M and M_max_0 must be > 0"));
         }
-        if config.ef_construction < config.m {
-            return Err(err_hnsw_invalid_config("ef_construction must be >= M"));
+        I config.ef_construction < config.m {
+            R Err(err_hnsw_invalid_config("ef_construction must be >= M"));
         }
-        if config.dim == 0 {
-            return Err(err_hnsw_invalid_config("dimension must be > 0"));
+        I config.dim == 0 {
+            R Err(err_hnsw_invalid_config("dimension must be > 0"));
         }
 
         # Initialize metadata (empty index)
-        let meta = HnswMeta.new(config.dim, config.metric);
+        meta := HnswMeta.new(config.dim, config.metric);
 
         # Initialize components
-        let store = VectorStore.new(pool, allocator, FILE_ID_VECTORS)?;
-        let layer_mgr = LayerManager.new(pool, allocator)?;
-        let wal_mgr = HnswWalManager.new(gcm)?;
-        let cow_store = CowNeighborStore.new()?;
-        let quantization = QuantizationManager.new(config.quantization_strategy)?;
-        let lock = HnswLock.new();
+        store := VectorStore.new(pool, allocator, FILE_ID_VECTORS)?;
+        layer_mgr := LayerManager.new(pool, allocator)?;
+        wal_mgr := HnswWalManager.new(gcm)?;
+        cow_store := CowNeighborStore.new()?;
+        quantization := QuantizationManager.new(config.quantization_strategy)?;
+        lock := HnswLock.new();
 
         Ok(VectorEngine {
             config,
@@ -166,22 +166,22 @@ X VectorEngine {
 
     # Open engine: load meta page and upper layers from disk
     F open(~self) -> Result<(), VaisError> {
-        if self.is_open {
-            return Ok(());
+        I self.is_open {
+            R Ok(());
         }
 
         # Load metadata page
-        let meta_page_id = self.index_id;  # Meta page is first page of index
-        let meta_data = self.pool.read_page(FILE_ID_VECTORS, meta_page_id)?;
+        meta_page_id := self.index_id;  # Meta page is first page of index
+        meta_data := self.pool.read_page(FILE_ID_VECTORS, meta_page_id)?;
         self.meta = HnswMeta.deserialize(&meta_data)?;
 
         # Validate meta matches config
-        if self.meta.dim != self.config.dim {
-            return Err(err_vector_dim_mismatch(self.config.dim, self.meta.dim));
+        I self.meta.dim != self.config.dim {
+            R Err(err_vector_dim_mismatch(self.config.dim, self.meta.dim));
         }
 
         # Load upper layers (layer 1+) into memory
-        for layer in 1..(self.meta.max_layer + 1) {
+        L layer: 1..(self.meta.max_layer + 1) {
             self.layer_mgr.pin_layer(layer, &self.meta, self.pool)?;
         }
 
@@ -194,17 +194,17 @@ X VectorEngine {
 
     # Close engine: flush dirty pages, release resources
     F close(~self) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Ok(());
+        I !self.is_open {
+            R Ok(());
         }
 
         # Flush metadata page
-        let ~meta_buf = ByteBuffer.new();
+        ~meta_buf = ByteBuffer.new();
         self.meta.serialize(&~meta_buf)?;
         self.pool.write_page(FILE_ID_VECTORS, self.index_id, &meta_buf.to_vec())?;
 
         # Unpin all upper layers
-        for layer in 1..(self.meta.max_layer + 1) {
+        L layer: 1..(self.meta.max_layer + 1) {
             self.layer_mgr.unpin_layer(layer)?;
         }
 
@@ -232,10 +232,10 @@ X VectorEngine {
         column_id: u32,
     ) -> Result<VectorEngine, VaisError> {
         # Allocate metadata page
-        let meta_page_id = allocator.allocate_page(FILE_ID_VECTORS)?;
+        meta_page_id := allocator.allocate_page(FILE_ID_VECTORS)?;
 
         # Register index in catalog
-        let index_info = IndexInfo {
+        index_info := IndexInfo {
             index_id: meta_page_id,
             index_name: index_name.clone(),
             table_id,
@@ -248,10 +248,10 @@ X VectorEngine {
         catalog.create_index(index_info, txn_id)?;
 
         # Create engine instance
-        let ~engine = VectorEngine.new(config, meta_page_id, pool, allocator, gcm)?;
+        ~engine = VectorEngine.new(config, meta_page_id, pool, allocator, gcm)?;
 
         # Initialize metadata page
-        let ~meta_buf = ByteBuffer.new();
+        ~meta_buf = ByteBuffer.new();
         engine.meta.serialize(&~meta_buf)?;
         pool.write_page(FILE_ID_VECTORS, meta_page_id, &meta_buf.to_vec())?;
 
@@ -271,8 +271,8 @@ X VectorEngine {
 
     # Drop index: mark as deleted, release pages
     F drop_index(~self, catalog: &~CatalogManager, txn_id: u64) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Err(err_vector_engine_closed());
+        I !self.is_open {
+            R Err(err_vector_engine_closed());
         }
 
         # WAL-log drop operation
@@ -286,14 +286,14 @@ X VectorEngine {
         self.allocator.free_page(FILE_ID_VECTORS, self.index_id)?;
 
         # Vector pages
-        for page_id in self.store.get_all_page_ids() {
+        L page_id: self.store.get_all_page_ids() {
             self.allocator.free_page(FILE_ID_VECTORS, page_id)?;
         }
 
         # Layer pages
-        for layer in 1..(self.meta.max_layer + 1) {
-            let layer_page_ids = self.layer_mgr.get_page_ids_for_layer(layer)?;
-            for page_id in layer_page_ids {
+        L layer: 1..(self.meta.max_layer + 1) {
+            layer_page_ids := self.layer_mgr.get_page_ids_for_layer(layer)?;
+            L page_id: layer_page_ids {
                 self.allocator.free_page(FILE_ID_VECTORS, page_id)?;
             }
         }
@@ -316,23 +316,23 @@ X VectorEngine {
         txn_id: u64,
         cmd_id: u32,
     ) -> Result<u64, VaisError> {
-        if !self.is_open {
-            return Err(err_vector_engine_closed());
+        I !self.is_open {
+            R Err(err_vector_engine_closed());
         }
 
         # Validate dimension
-        if vector.len() != self.config.dim as usize {
-            return Err(err_vector_dim_mismatch(
+        I vector.len() != self.config.dim as u64 {
+            R Err(err_vector_dim_mismatch(
                 self.config.dim,
                 vector.len() as u32,
             ));
         }
 
         # Acquire write lock
-        let ~write_guard = self.lock.write_lock(txn_id)?;
+        ~write_guard = self.lock.write_lock(txn_id)?;
 
         # 1. Write vector to storage (allocate page space)
-        let node_id = self.store.write_vector(vector, txn_id, cmd_id)?;
+        node_id := self.store.write_vector(vector, txn_id, cmd_id)?;
 
         # 2. Insert into HNSW graph
         hnsw_insert(
@@ -370,12 +370,12 @@ X VectorEngine {
         txn_id: u64,
         cmd_id: u32,
     ) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Err(err_vector_engine_closed());
+        I !self.is_open {
+            R Err(err_vector_engine_closed());
         }
 
         # Acquire write lock
-        let ~write_guard = self.lock.write_lock(txn_id)?;
+        ~write_guard = self.lock.write_lock(txn_id)?;
 
         # Soft-delete in storage (set txn_id_expire)
         self.store.delete_vector(node_id, txn_id, cmd_id)?;
@@ -411,33 +411,33 @@ X VectorEngine {
     F search(
         self,
         query: &[f32],
-        k: usize,
+        k: u64,
         ef_search: Option<u32>,
         snapshot: &Snapshot,
     ) -> Result<SearchResult, VaisError> {
-        if !self.is_open {
-            return Err(err_vector_engine_closed());
+        I !self.is_open {
+            R Err(err_vector_engine_closed());
         }
 
         # Validate dimension
-        if query.len() != self.config.dim as usize {
-            return Err(err_vector_dim_mismatch(
+        I query.len() != self.config.dim as u64 {
+            R Err(err_vector_dim_mismatch(
                 self.config.dim,
                 query.len() as u32,
             ));
         }
 
         # Acquire read lock
-        let ~read_guard = self.lock.read_lock()?;
+        ~read_guard = self.lock.read_lock()?;
 
         # Use provided ef_search or default
-        let ef = M ef_search {
+        ef := M ef_search {
             Some(val) => val,
             None => self.config.ef_search,
         };
 
         # MVCC-filtered search
-        let result = mvcc_filtered_search(
+        result := mvcc_filtered_search(
             query,
             k,
             ef,
@@ -458,17 +458,17 @@ X VectorEngine {
     F filtered_search(
         self,
         query: &[f32],
-        k: usize,
+        k: u64,
         predicate: Option<Expr>,
         ctx: &ExecContext,
     ) -> Result<Vec<VectorSearchRow>, VaisError> {
-        if !self.is_open {
-            return Err(err_vector_engine_closed());
+        I !self.is_open {
+            R Err(err_vector_engine_closed());
         }
 
         # Validate dimension
-        if query.len() != self.config.dim as usize {
-            return Err(err_vector_dim_mismatch(
+        I query.len() != self.config.dim as u64 {
+            R Err(err_vector_dim_mismatch(
                 self.config.dim,
                 query.len() as u32,
             ));
@@ -477,19 +477,19 @@ X VectorEngine {
         # If no predicate, use regular search
         M predicate {
             None => {
-                let result = self.search(query, k, None, ctx.snapshot)?;
+                result := self.search(query, k, None, ctx.snapshot)?;
                 # Convert SearchResult to VectorSearchRow
-                return self.materialize_search_result(result, ctx);
+                R self.materialize_search_result(result, ctx);
             },
             Some(expr) => {
                 # Use filtered search
-                let filter_config = FilterConfig.default();
-                let filtered_search = FilteredVectorSearch.new(
+                filter_config := FilterConfig.default();
+                filtered_search := FilteredVectorSearch.new(
                     self,
                     filter_config,
                     ctx,
                 )?;
-                return filtered_search.execute(query, k, expr);
+                R filtered_search.execute(query, k, expr);
             },
         }
     }
@@ -506,14 +506,14 @@ X VectorEngine {
         config: BulkLoadConfig,
         txn_id: u64,
     ) -> Result<BulkLoadResult, VaisError> {
-        if !self.is_open {
-            return Err(err_vector_engine_closed());
+        I !self.is_open {
+            R Err(err_vector_engine_closed());
         }
 
         # Validate all vectors have same dimension
-        for vec in vectors {
-            if vec.len() != self.config.dim as usize {
-                return Err(err_vector_dim_mismatch(
+        L vec: vectors {
+            I vec.len() != self.config.dim as u64 {
+                R Err(err_vector_dim_mismatch(
                     self.config.dim,
                     vec.len() as u32,
                 ));
@@ -521,10 +521,10 @@ X VectorEngine {
         }
 
         # Acquire write lock
-        let ~write_guard = self.lock.write_lock(txn_id)?;
+        ~write_guard = self.lock.write_lock(txn_id)?;
 
         # Create bulk loader
-        let ~loader = BulkLoader.new(
+        ~loader = BulkLoader.new(
             &~self.meta,
             &self.config,
             &~self.store,
@@ -535,10 +535,10 @@ X VectorEngine {
         )?;
 
         # Execute bulk load
-        let result = loader.load(vectors, txn_id)?;
+        result := loader.load(vectors, txn_id)?;
 
         # WAL-log bulk load (if not bypassed)
-        if !config.bypass_wal {
+        I !config.bypass_wal {
             self.wal_mgr.log_bulk_load(
                 self.index_id,
                 vectors,
@@ -579,12 +579,12 @@ X VectorEngine {
         result: SearchResult,
         ctx: &ExecContext,
     ) -> Result<Vec<VectorSearchRow>, VaisError> {
-        let ~rows = Vec.new();
+        ~rows = Vec.new();
 
-        for entry in result.entries {
+        L entry: result.entries {
             # Fetch original row from heap page
             # node_id maps to TID (table row ID)
-            let row = ctx.fetch_row_by_tid(entry.node_id)?;
+            row := ctx.fetch_row_by_tid(entry.node_id)?;
 
             rows.push(VectorSearchRow {
                 node_id: entry.node_id,

@@ -40,14 +40,14 @@ X ConflictDetector {
         M self.locks.get(&lock_key) {
             Some(holder_txn_id) => {
                 # If locked by the same transaction, it's OK
-                if *holder_txn_id == txn_id {
+                I *holder_txn_id == txn_id {
                     drop(guard);
-                    return Ok(());
+                    R Ok(());
                 }
 
                 # Locked by another transaction - conflict!
                 drop(guard);
-                return Err(err_write_conflict(
+                R Err(err_write_conflict(
                     "table",  # TODO: table name when available
                     *holder_txn_id
                 ));
@@ -67,14 +67,14 @@ X ConflictDetector {
 
         # Collect keys to remove
         ~keys_to_remove = Vec.new();
-        for (key, holder) in self.locks.iter() {
-            if *holder == txn_id {
+        L (key, holder): self.locks.iter() {
+            I *holder == txn_id {
                 keys_to_remove.push(*key);
             }
         }
 
         # Remove them
-        for key in keys_to_remove {
+        L key: keys_to_remove {
             self.locks.remove(&key);
         }
 
@@ -99,11 +99,11 @@ X ConflictDetector {
     }
 
     # Get number of locks held by a transaction
-    F count_locks_for_txn(self, txn_id: u64) -> usize {
+    F count_locks_for_txn(self, txn_id: u64) -> u64 {
         ~guard = self.lock.lock();
-        ~count = 0usize;
-        for (_, holder) in self.locks.iter() {
-            if *holder == txn_id {
+        ~count = 0u64;
+        L (_, holder): self.locks.iter() {
+            I *holder == txn_id {
                 count += 1;
             }
         }
@@ -112,7 +112,7 @@ X ConflictDetector {
     }
 
     # Get total number of locks
-    F count_total_locks(self) -> usize {
+    F count_total_locks(self) -> u64 {
         ~guard = self.lock.lock();
         ~count = self.locks.len();
         drop(guard);
@@ -135,8 +135,8 @@ X ConflictDetector {
     F get_locks_for_txn(self, txn_id: u64) -> Vec<(u8, u32, u16)> {
         ~guard = self.lock.lock();
         ~locks = Vec.new();
-        for (key, holder) in self.locks.iter() {
-            if *holder == txn_id {
+        L (key, holder): self.locks.iter() {
+            I *holder == txn_id {
                 locks.push(Self.decode_lock_key(*key));
             }
         }

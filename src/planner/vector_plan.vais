@@ -53,10 +53,10 @@ F classify_predicates(
     where_clause: &Expr,
     table_name: &Str,
 ) -> (Option<Expr>, Option<Expr>) {
-    # Simplified implementation: treat all predicates as pre-filter if they don't reference joins
+    # Simplified implementation: treat all predicates as pre-filter I they don't reference joins
     # In a full implementation, would analyze column references to determine table membership
 
-    # For now, if the predicate is simple (doesn't contain subqueries or complex expressions),
+    # For now, I the predicate is simple (doesn't contain subqueries or complex expressions),
     # classify it as pre-filter; otherwise, post-filter
     M where_clause {
         Expr.BinaryOp { .. } => {
@@ -98,13 +98,13 @@ E FilterStrategy {
 }
 
 F select_filter_strategy(selectivity: f64) -> FilterStrategy {
-    if selectivity < THRESHOLD_PRE_FILTER {
+    I selectivity < THRESHOLD_PRE_FILTER {
         # Very selective: pre-filter is cheap
         FilterStrategy.PreFilter
-    } else if selectivity > THRESHOLD_POST_FILTER {
+    } E I selectivity > THRESHOLD_POST_FILTER {
         # Not selective: pre-filter is expensive, skip it
         FilterStrategy.PostFilter
-    } else {
+    } E {
         # Moderately selective: hybrid approach with oversampling
         # Oversample more for lower selectivity
         ~oversample = OVERSAMPLE_FACTOR_BASE / selectivity.sqrt();
@@ -135,9 +135,9 @@ F adjust_ef_search(
             ~adjusted = (default_ef_search as f64 * oversample_factor) as u32;
             # Cap at reasonable maximum (4x default)
             ~max_ef = default_ef_search * 4;
-            if adjusted > max_ef {
+            I adjusted > max_ef {
                 max_ef
-            } else {
+            } E {
                 adjusted
             }
         },

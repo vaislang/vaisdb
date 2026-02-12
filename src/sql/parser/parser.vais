@@ -23,7 +23,7 @@ U sql/parser/ast.{
 # SQL Parser
 S Parser {
     tokens: Vec<Token>,
-    pos: usize,
+    pos: u64,
 }
 
 X Parser {
@@ -34,7 +34,7 @@ X Parser {
 
     # Parse a single SQL statement
     F parse(~self) -> Result<Statement, VaisError> {
-        let stmt = self.parse_statement()?;
+        stmt := self.parse_statement()?;
         # Consume optional trailing semicolon
         self.match_token(TokenKind.Semicolon);
         Ok(stmt)
@@ -42,17 +42,20 @@ X Parser {
 
     # Parse multiple SQL statements separated by semicolons
     F parse_all(~self) -> Result<Vec<Statement>, VaisError> {
-        ~let stmts = Vec.new();
+        ~stmts := Vec.new();
 
-        while !self.is_at_end() {
+        L {
+
+            I self.is_at_end() { B }
             # Skip stray semicolons between statements
-            while self.match_token(TokenKind.Semicolon) {}
+            L {
+                I !(self.match_token(TokenKind.Semicolon)) { B }}
 
-            if self.is_at_end() {
-                break;
+            I self.is_at_end() {
+                B;
             }
 
-            let stmt = self.parse_statement()?;
+            stmt := self.parse_statement()?;
             stmts.push(stmt);
 
             # Consume optional semicolon after statement
@@ -70,27 +73,27 @@ X Parser {
     F parse_statement(~self) -> Result<Statement, VaisError> {
         M self.peek() {
             TokenKind.Select => {
-                let query = self.parse_select()?;
+                query := self.parse_select()?;
                 Ok(Statement.Select { query })
             },
             TokenKind.With => {
                 # WITH ... SELECT (CTE)
-                let query = self.parse_select()?;
+                query := self.parse_select()?;
                 Ok(Statement.Select { query })
             },
             TokenKind.Insert => {
                 self.advance();
-                let insert = self.parse_insert()?;
+                insert := self.parse_insert()?;
                 Ok(Statement.Insert { insert })
             },
             TokenKind.Update => {
                 self.advance();
-                let update = self.parse_update()?;
+                update := self.parse_update()?;
                 Ok(Statement.Update { update })
             },
             TokenKind.Delete => {
                 self.advance();
-                let delete = self.parse_delete()?;
+                delete := self.parse_delete()?;
                 Ok(Statement.Delete { delete })
             },
             TokenKind.Create => {
@@ -104,16 +107,16 @@ X Parser {
             TokenKind.Alter => {
                 self.advance();
                 self.expect(TokenKind.Table)?;
-                let alter = self.parse_alter_table()?;
+                alter := self.parse_alter_table()?;
                 Ok(Statement.AlterTable { alter })
             },
             TokenKind.Explain => {
                 self.advance();
-                ~let analyze = false;
-                if self.match_token(TokenKind.Analyze) {
+                ~analyze := false;
+                I self.match_token(TokenKind.Analyze) {
                     analyze = true;
                 }
-                let stmt = self.parse_statement()?;
+                stmt := self.parse_statement()?;
                 Ok(Statement.Explain { stmt: Box.new(stmt), analyze })
             },
             TokenKind.Begin => {
@@ -121,18 +124,18 @@ X Parser {
                 # Optional TRANSACTION keyword
                 self.match_token(TokenKind.Transaction);
                 # Optional isolation level (parsed as identifier)
-                ~let isolation = Option.None;
-                if self.check_identifier("ISOLATION") {
+                ~isolation := Option.None;
+                I self.check_identifier("ISOLATION") {
                     self.advance();
                     # Expect "LEVEL"
-                    if self.check_identifier("LEVEL") {
+                    I self.check_identifier("LEVEL") {
                         self.advance();
                     }
                     # Read isolation level name (e.g., "SERIALIZABLE", "READ COMMITTED")
-                    ~let level_str = self.expect_identifier()?;
+                    ~level_str := self.expect_identifier()?;
                     # Handle two-word levels like "READ COMMITTED" or "REPEATABLE READ"
-                    if self.check_identifier("COMMITTED") || self.check_identifier("UNCOMMITTED") || self.check_identifier("READ") {
-                        let second = self.expect_identifier()?;
+                    I self.check_identifier("COMMITTED") || self.check_identifier("UNCOMMITTED") || self.check_identifier("READ") {
+                        second := self.expect_identifier()?;
                         level_str = "{level_str} {second}";
                     }
                     isolation = Option.Some(level_str);
@@ -155,13 +158,13 @@ X Parser {
             },
             _ => {
                 # Check for contextual keywords that are identifiers
-                if self.check_identifier("PREPARE") {
+                I self.check_identifier("PREPARE") {
                     self.advance();
-                    return self.parse_prepare();
+                    R self.parse_prepare();
                 }
-                if self.check_identifier("EXECUTE") || self.check_identifier("EXEC") {
+                I self.check_identifier("EXECUTE") || self.check_identifier("EXEC") {
                     self.advance();
-                    return self.parse_execute();
+                    R self.parse_execute();
                 }
                 Err(self.parse_error("expected statement (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, EXPLAIN, BEGIN, COMMIT, ROLLBACK, SET, PREPARE, or EXECUTE)"))
             },
@@ -175,46 +178,46 @@ X Parser {
     # Parse a full SELECT query including CTEs and set operations
     F parse_select(~self) -> Result<SelectQuery, VaisError> {
         # Parse optional WITH clause (CTEs)
-        ~let ctes = Vec.new();
-        if self.match_token(TokenKind.With) {
+        ~ctes := Vec.new();
+        I self.match_token(TokenKind.With) {
             ctes = self.parse_cte()?;
         }
 
         self.expect(TokenKind.Select)?;
 
         # Parse optional DISTINCT
-        ~let distinct = false;
-        if self.match_token(TokenKind.Distinct) {
+        ~distinct := false;
+        I self.match_token(TokenKind.Distinct) {
             distinct = true;
         }
 
         # Parse select list
-        let select_list = self.parse_select_list()?;
+        select_list := self.parse_select_list()?;
 
         # Parse optional FROM clause
-        ~let from = Option.None;
-        if self.match_token(TokenKind.From) {
-            let refs = self.parse_from_clause()?;
+        ~from := Option.None;
+        I self.match_token(TokenKind.From) {
+            refs := self.parse_from_clause()?;
             from = Option.Some(refs);
         }
 
         # Parse optional WHERE clause
-        let where_clause = self.parse_where_clause()?;
+        where_clause := self.parse_where_clause()?;
 
         # Parse optional GROUP BY clause
-        let group_by = self.parse_group_by()?;
+        group_by := self.parse_group_by()?;
 
         # Parse optional HAVING clause
-        let having = self.parse_having()?;
+        having := self.parse_having()?;
 
         # Parse optional ORDER BY clause
-        let order_by = self.parse_order_by()?;
+        order_by := self.parse_order_by()?;
 
         # Parse optional LIMIT/OFFSET
-        let (limit, offset) = self.parse_limit_offset()?;
+        (limit, offset) := self.parse_limit_offset()?;
 
         # Build the query
-        ~let query = SelectQuery {
+        ~query := SelectQuery {
             ctes,
             select_list,
             from,
@@ -236,24 +239,24 @@ X Parser {
 
     # Parse WITH clause containing one or more CTEs
     F parse_cte(~self) -> Result<Vec<Cte>, VaisError> {
-        ~let ctes = Vec.new();
+        ~ctes := Vec.new();
 
-        loop {
-            ~let recursive = false;
-            if self.match_token(TokenKind.Recursive) {
+        L {
+            ~recursive := false;
+            I self.match_token(TokenKind.Recursive) {
                 recursive = true;
             }
 
-            let name = self.expect_identifier()?;
+            name := self.expect_identifier()?;
 
             # Optional column alias list
-            ~let columns = Vec.new();
-            if self.match_token(TokenKind.LParen) {
-                loop {
-                    let col = self.expect_identifier()?;
+            ~columns := Vec.new();
+            I self.match_token(TokenKind.LParen) {
+                L {
+                    col := self.expect_identifier()?;
                     columns.push(col);
-                    if !self.match_token(TokenKind.Comma) {
-                        break;
+                    I !self.match_token(TokenKind.Comma) {
+                        B;
                     }
                 }
                 self.expect(TokenKind.RParen)?;
@@ -261,13 +264,13 @@ X Parser {
 
             self.expect(TokenKind.As)?;
             self.expect(TokenKind.LParen)?;
-            let query = self.parse_select()?;
+            query := self.parse_select()?;
             self.expect(TokenKind.RParen)?;
 
             ctes.push(Cte { name, columns, query, recursive });
 
-            if !self.match_token(TokenKind.Comma) {
-                break;
+            I !self.match_token(TokenKind.Comma) {
+                B;
             }
         }
 
@@ -276,13 +279,13 @@ X Parser {
 
     # Parse the select list (between SELECT and FROM)
     F parse_select_list(~self) -> Result<Vec<SelectItem>, VaisError> {
-        ~let items = Vec.new();
+        ~items := Vec.new();
 
-        loop {
-            let item = self.parse_select_item()?;
+        L {
+            item := self.parse_select_item()?;
             items.push(item);
-            if !self.match_token(TokenKind.Comma) {
-                break;
+            I !self.match_token(TokenKind.Comma) {
+                B;
             }
         }
 
@@ -292,36 +295,36 @@ X Parser {
     # Parse a single select item
     F parse_select_item(~self) -> Result<SelectItem, VaisError> {
         # Check for * (all columns)
-        if self.match_token(TokenKind.Star) {
-            return Ok(SelectItem.AllColumns);
+        I self.match_token(TokenKind.Star) {
+            R Ok(SelectItem.AllColumns);
         }
 
         # Check for table.* (all columns from table)
         # Peek: identifier DOT STAR
-        if self.is_identifier() {
-            let saved_pos = self.pos;
-            let table_name = self.expect_identifier()?;
-            if self.match_token(TokenKind.Dot) {
-                if self.match_token(TokenKind.Star) {
-                    return Ok(SelectItem.AllColumnsFrom { table: table_name });
+        I self.is_identifier() {
+            saved_pos := self.pos;
+            table_name := self.expect_identifier()?;
+            I self.match_token(TokenKind.Dot) {
+                I self.match_token(TokenKind.Star) {
+                    R Ok(SelectItem.AllColumnsFrom { table: table_name });
                 }
                 # Not table.*, backtrack
                 self.pos = saved_pos;
-            } else {
+            } E {
                 # No dot, backtrack and parse as expression
                 self.pos = saved_pos;
             }
         }
 
         # Parse expression with optional alias
-        let expr = self.parse_expr()?;
-        ~let alias = Option.None;
-        if self.match_token(TokenKind.As) {
-            let a = self.expect_identifier()?;
+        expr := self.parse_expr()?;
+        ~alias := Option.None;
+        I self.match_token(TokenKind.As) {
+            a := self.expect_identifier()?;
             alias = Option.Some(a);
-        } else if self.is_identifier() {
+        } E I self.is_identifier() {
             # Alias without AS keyword
-            let a = self.expect_identifier()?;
+            a := self.expect_identifier()?;
             alias = Option.Some(a);
         }
 
@@ -330,15 +333,15 @@ X Parser {
 
     # Parse FROM clause (comma-separated table references with joins)
     F parse_from_clause(~self) -> Result<Vec<TableRef>, VaisError> {
-        ~let refs = Vec.new();
+        ~refs := Vec.new();
 
-        loop {
-            let table_ref = self.parse_table_ref()?;
+        L {
+            table_ref := self.parse_table_ref()?;
             # Check for joins attached to this table reference
-            let joined = self.parse_joins(table_ref)?;
+            joined := self.parse_joins(table_ref)?;
             refs.push(joined);
-            if !self.match_token(TokenKind.Comma) {
-                break;
+            I !self.match_token(TokenKind.Comma) {
+                B;
             }
         }
 
@@ -348,52 +351,52 @@ X Parser {
     # Parse a single table reference (table name, subquery, or parenthesized ref)
     F parse_table_ref(~self) -> Result<TableRef, VaisError> {
         # Subquery: (SELECT ...)
-        if self.match_token(TokenKind.LParen) {
-            let query = self.parse_select()?;
+        I self.match_token(TokenKind.LParen) {
+            query := self.parse_select()?;
             self.expect(TokenKind.RParen)?;
             # Subquery in FROM requires an alias
             self.match_token(TokenKind.As);
-            let alias = self.expect_identifier()?;
-            return Ok(TableRef.Subquery { query: Box.new(query), alias });
+            alias := self.expect_identifier()?;
+            R Ok(TableRef.Subquery { query: Box.new(query), alias });
         }
 
         # Check for table-valued function: VECTOR_SEARCH(...), GRAPH_TRAVERSE(...), FULLTEXT_MATCH(...)
-        if self.is_identifier() {
-            let saved_pos = self.pos;
-            let name = self.expect_identifier()?;
-            let name_upper = name.to_uppercase();
+        I self.is_identifier() {
+            saved_pos := self.pos;
+            name := self.expect_identifier()?;
+            name_upper := name.to_uppercase();
 
             # Check if this is a known table-valued function followed by LParen
-            if (name_upper == "VECTOR_SEARCH" || name_upper == "GRAPH_TRAVERSE" || name_upper == "FULLTEXT_MATCH")
+            I (name_upper == "VECTOR_SEARCH" || name_upper == "GRAPH_TRAVERSE" || name_upper == "FULLTEXT_MATCH")
                 && self.check(TokenKind.LParen) {
                 # Parse table function: name(args...) AS alias
                 self.expect(TokenKind.LParen)?;
 
                 # Parse comma-separated argument expressions
-                ~let args = Vec.new();
-                if !self.check(TokenKind.RParen) {
-                    loop {
-                        let arg = self.parse_expr()?;
+                ~args := Vec.new();
+                I !self.check(TokenKind.RParen) {
+                    L {
+                        arg := self.parse_expr()?;
                         args.push(arg);
-                        if !self.match_token(TokenKind.Comma) {
-                            break;
+                        I !self.match_token(TokenKind.Comma) {
+                            B;
                         }
                     }
                 }
                 self.expect(TokenKind.RParen)?;
 
                 # Parse optional alias
-                ~let alias = Option.None;
-                if self.match_token(TokenKind.As) {
-                    let a = self.expect_identifier()?;
+                ~alias := Option.None;
+                I self.match_token(TokenKind.As) {
+                    a := self.expect_identifier()?;
                     alias = Option.Some(a);
-                } else if self.is_identifier() && !self.is_join_keyword() {
+                } E I self.is_identifier() && !self.is_join_keyword() {
                     # Implicit alias (without AS) -- but not if it looks like a JOIN keyword
-                    let a = self.expect_identifier()?;
+                    a := self.expect_identifier()?;
                     alias = Option.Some(a);
                 }
 
-                return Ok(TableRef.TableFunction { name, args, alias });
+                R Ok(TableRef.TableFunction { name, args, alias });
             }
 
             # Not a table function, backtrack and parse as regular table name
@@ -401,14 +404,14 @@ X Parser {
         }
 
         # Table name with optional alias
-        let name = self.expect_identifier()?;
-        ~let alias = Option.None;
-        if self.match_token(TokenKind.As) {
-            let a = self.expect_identifier()?;
+        name := self.expect_identifier()?;
+        ~alias := Option.None;
+        I self.match_token(TokenKind.As) {
+            a := self.expect_identifier()?;
             alias = Option.Some(a);
-        } else if self.is_identifier() && !self.is_join_keyword() {
+        } E I self.is_identifier() && !self.is_join_keyword() {
             # Implicit alias (without AS) -- but not if it looks like a JOIN keyword
-            let a = self.expect_identifier()?;
+            a := self.expect_identifier()?;
             alias = Option.Some(a);
         }
 
@@ -417,13 +420,13 @@ X Parser {
 
     # Parse zero or more joins following a table reference
     F parse_joins(~self, left: TableRef) -> Result<TableRef, VaisError> {
-        ~let current = left;
+        ~current := left;
 
-        loop {
-            if self.is_join_keyword() {
+        L {
+            I self.is_join_keyword() {
                 current = self.parse_join(current)?;
-            } else {
-                break;
+            } E {
+                B;
             }
         }
 
@@ -433,11 +436,11 @@ X Parser {
     # Parse a single JOIN clause
     F parse_join(~self, left: TableRef) -> Result<TableRef, VaisError> {
         # Determine join type
-        ~let join_type = JoinType.Inner;
-        ~let is_natural = false;
+        ~join_type := JoinType.Inner;
+        ~is_natural := false;
 
         # NATURAL keyword
-        if self.check_identifier("NATURAL") {
+        I self.check_identifier("NATURAL") {
             is_natural = true;
             self.advance();
         }
@@ -451,7 +454,7 @@ X Parser {
                 self.advance();
                 join_type = JoinType.Left;
                 # Optional OUTER keyword
-                if self.check_identifier("OUTER") {
+                I self.check_identifier("OUTER") {
                     self.advance();
                 }
             },
@@ -459,7 +462,7 @@ X Parser {
                 self.advance();
                 join_type = JoinType.Right;
                 # Optional OUTER keyword
-                if self.check_identifier("OUTER") {
+                I self.check_identifier("OUTER") {
                     self.advance();
                 }
             },
@@ -472,47 +475,47 @@ X Parser {
                 join_type = JoinType.Inner;
             },
             _ => {
-                return Err(self.parse_error("expected JOIN keyword"));
+                R Err(self.parse_error("expected JOIN keyword"));
             },
         }
 
         self.expect(TokenKind.Join)?;
 
         # Parse the right side table reference
-        let right = self.parse_table_ref()?;
+        right := self.parse_table_ref()?;
 
         # Parse join condition
-        ~let condition = JoinCondition.Natural;
+        ~condition := JoinCondition.Natural;
 
-        if is_natural {
+        I is_natural {
             condition = JoinCondition.Natural;
-        } else {
+        } E {
             M join_type {
                 JoinType.Cross => {
                     # CROSS JOIN has no condition; use Natural as placeholder
-                    return Ok(TableRef.CrossJoin {
+                    R Ok(TableRef.CrossJoin {
                         left: Box.new(left),
                         right: Box.new(right),
                     });
                 },
                 _ => {
-                    if self.match_token(TokenKind.On) {
-                        let expr = self.parse_expr()?;
+                    I self.match_token(TokenKind.On) {
+                        expr := self.parse_expr()?;
                         condition = JoinCondition.On { expr };
-                    } else if self.match_token(TokenKind.Using) {
+                    } E I self.match_token(TokenKind.Using) {
                         self.expect(TokenKind.LParen)?;
-                        ~let columns = Vec.new();
-                        loop {
-                            let col = self.expect_identifier()?;
+                        ~columns := Vec.new();
+                        L {
+                            col := self.expect_identifier()?;
                             columns.push(col);
-                            if !self.match_token(TokenKind.Comma) {
-                                break;
+                            I !self.match_token(TokenKind.Comma) {
+                                B;
                             }
                         }
                         self.expect(TokenKind.RParen)?;
                         condition = JoinCondition.Using { columns };
-                    } else {
-                        return Err(self.parse_error("expected ON or USING after JOIN"));
+                    } E {
+                        R Err(self.parse_error("expected ON or USING after JOIN"));
                     }
                 },
             }
@@ -530,97 +533,97 @@ X Parser {
 
     # Parse optional WHERE clause
     F parse_where_clause(~self) -> Result<Option<Expr>, VaisError> {
-        if self.match_token(TokenKind.Where) {
-            let expr = self.parse_expr()?;
+        I self.match_token(TokenKind.Where) {
+            expr := self.parse_expr()?;
             Ok(Option.Some(expr))
-        } else {
+        } E {
             Ok(Option.None)
         }
     }
 
     # Parse optional GROUP BY clause
     F parse_group_by(~self) -> Result<Vec<Expr>, VaisError> {
-        if self.match_token(TokenKind.Group) {
+        I self.match_token(TokenKind.Group) {
             self.expect(TokenKind.By)?;
-            ~let exprs = Vec.new();
-            loop {
-                let expr = self.parse_expr()?;
+            ~exprs := Vec.new();
+            L {
+                expr := self.parse_expr()?;
                 exprs.push(expr);
-                if !self.match_token(TokenKind.Comma) {
-                    break;
+                I !self.match_token(TokenKind.Comma) {
+                    B;
                 }
             }
             Ok(exprs)
-        } else {
+        } E {
             Ok(Vec.new())
         }
     }
 
     # Parse optional HAVING clause
     F parse_having(~self) -> Result<Option<Expr>, VaisError> {
-        if self.match_token(TokenKind.Having) {
-            let expr = self.parse_expr()?;
+        I self.match_token(TokenKind.Having) {
+            expr := self.parse_expr()?;
             Ok(Option.Some(expr))
-        } else {
+        } E {
             Ok(Option.None)
         }
     }
 
     # Parse optional ORDER BY clause
     F parse_order_by(~self) -> Result<Vec<OrderByItem>, VaisError> {
-        if self.match_token(TokenKind.Order) {
+        I self.match_token(TokenKind.Order) {
             self.expect(TokenKind.By)?;
-            ~let items = Vec.new();
-            loop {
-                let expr = self.parse_expr()?;
-                ~let asc = true;
-                if self.match_token(TokenKind.Asc) {
+            ~items := Vec.new();
+            L {
+                expr := self.parse_expr()?;
+                ~asc := true;
+                I self.match_token(TokenKind.Asc) {
                     asc = true;
-                } else if self.match_token(TokenKind.Desc) {
+                } E I self.match_token(TokenKind.Desc) {
                     asc = false;
                 }
 
                 # Optional NULLS FIRST / NULLS LAST
-                ~let nulls_first = Option.None;
-                if self.match_token(TokenKind.Nulls) {
-                    if self.match_token(TokenKind.First) {
+                ~nulls_first := Option.None;
+                I self.match_token(TokenKind.Nulls) {
+                    I self.match_token(TokenKind.First) {
                         nulls_first = Option.Some(true);
-                    } else if self.match_token(TokenKind.Last) {
+                    } E I self.match_token(TokenKind.Last) {
                         nulls_first = Option.Some(false);
-                    } else {
-                        return Err(self.parse_error("expected FIRST or LAST after NULLS"));
+                    } E {
+                        R Err(self.parse_error("expected FIRST or LAST after NULLS"));
                     }
                 }
 
                 items.push(OrderByItem { expr, asc, nulls_first });
-                if !self.match_token(TokenKind.Comma) {
-                    break;
+                I !self.match_token(TokenKind.Comma) {
+                    B;
                 }
             }
             Ok(items)
-        } else {
+        } E {
             Ok(Vec.new())
         }
     }
 
     # Parse optional LIMIT and OFFSET clauses
     F parse_limit_offset(~self) -> Result<(Option<Expr>, Option<Expr>), VaisError> {
-        ~let limit = Option.None;
-        ~let offset = Option.None;
+        ~limit := Option.None;
+        ~offset := Option.None;
 
-        if self.match_token(TokenKind.Limit) {
-            let expr = self.parse_expr()?;
+        I self.match_token(TokenKind.Limit) {
+            expr := self.parse_expr()?;
             limit = Option.Some(expr);
         }
 
-        if self.match_token(TokenKind.Offset) {
-            let expr = self.parse_expr()?;
+        I self.match_token(TokenKind.Offset) {
+            expr := self.parse_expr()?;
             offset = Option.Some(expr);
         }
 
         # Also allow LIMIT after OFFSET if LIMIT was not yet parsed
-        if limit.is_none() && self.match_token(TokenKind.Limit) {
-            let expr = self.parse_expr()?;
+        I limit.is_none() && self.match_token(TokenKind.Limit) {
+            expr := self.parse_expr()?;
             limit = Option.Some(expr);
         }
 
@@ -629,7 +632,7 @@ X Parser {
 
     # Parse optional set operation (UNION/INTERSECT/EXCEPT)
     F parse_set_operation(~self) -> Result<Option<SetOperation>, VaisError> {
-        ~let op_kind = Option.None;
+        ~op_kind := Option.None;
 
         M self.peek() {
             TokenKind.Union => {
@@ -645,18 +648,18 @@ X Parser {
                 op_kind = Option.Some(SetOpKind.Except);
             },
             _ => {
-                return Ok(Option.None);
+                R Ok(Option.None);
             },
         }
 
         # Check for ALL
-        ~let all = false;
-        if self.match_token(TokenKind.All) {
+        ~all := false;
+        I self.match_token(TokenKind.All) {
             all = true;
         }
 
         # Parse the right side query
-        let right = self.parse_select()?;
+        right := self.parse_select()?;
 
         M op_kind {
             Option.Some(op) => {
@@ -677,44 +680,44 @@ X Parser {
     # Parse INSERT INTO table [(columns)] VALUES (...) | SELECT ...
     F parse_insert(~self) -> Result<InsertStmt, VaisError> {
         self.expect(TokenKind.Into)?;
-        let table_name = self.expect_identifier()?;
+        table_name := self.expect_identifier()?;
 
         # Optional column list
-        ~let columns = Vec.new();
-        if self.match_token(TokenKind.LParen) {
-            loop {
-                let col = self.expect_identifier()?;
+        ~columns := Vec.new();
+        I self.match_token(TokenKind.LParen) {
+            L {
+                col := self.expect_identifier()?;
                 columns.push(col);
-                if !self.match_token(TokenKind.Comma) {
-                    break;
+                I !self.match_token(TokenKind.Comma) {
+                    B;
                 }
             }
             self.expect(TokenKind.RParen)?;
         }
 
         # VALUES (...) or SELECT ...
-        let source = if self.match_token(TokenKind.Values) {
-            ~let rows = Vec.new();
-            loop {
+        source := I self.match_token(TokenKind.Values) {
+            ~rows := Vec.new();
+            L {
                 self.expect(TokenKind.LParen)?;
-                ~let row = Vec.new();
-                loop {
-                    let expr = self.parse_expr()?;
+                ~row := Vec.new();
+                L {
+                    expr := self.parse_expr()?;
                     row.push(expr);
-                    if !self.match_token(TokenKind.Comma) {
-                        break;
+                    I !self.match_token(TokenKind.Comma) {
+                        B;
                     }
                 }
                 self.expect(TokenKind.RParen)?;
                 rows.push(row);
-                if !self.match_token(TokenKind.Comma) {
-                    break;
+                I !self.match_token(TokenKind.Comma) {
+                    B;
                 }
             }
             InsertSource.Values { rows }
-        } else {
+        } E {
             # INSERT ... SELECT
-            let query = self.parse_select()?;
+            query := self.parse_select()?;
             InsertSource.Query { query }
         };
 
@@ -727,21 +730,21 @@ X Parser {
 
     # Parse UPDATE table SET col=val, ... [WHERE ...]
     F parse_update(~self) -> Result<UpdateStmt, VaisError> {
-        let table_name = self.expect_identifier()?;
+        table_name := self.expect_identifier()?;
         self.expect(TokenKind.Set)?;
 
-        ~let assignments = Vec.new();
-        loop {
-            let column = self.expect_identifier()?;
+        ~assignments := Vec.new();
+        L {
+            column := self.expect_identifier()?;
             self.expect(TokenKind.Eq)?;
-            let value = self.parse_expr()?;
+            value := self.parse_expr()?;
             assignments.push(Assignment { column, value });
-            if !self.match_token(TokenKind.Comma) {
-                break;
+            I !self.match_token(TokenKind.Comma) {
+                B;
             }
         }
 
-        let where_clause = self.parse_where_clause()?;
+        where_clause := self.parse_where_clause()?;
 
         Ok(UpdateStmt { table_name, assignments, where_clause })
     }
@@ -753,8 +756,8 @@ X Parser {
     # Parse DELETE FROM table [WHERE ...]
     F parse_delete(~self) -> Result<DeleteStmt, VaisError> {
         self.expect(TokenKind.From)?;
-        let table_name = self.expect_identifier()?;
-        let where_clause = self.parse_where_clause()?;
+        table_name := self.expect_identifier()?;
+        where_clause := self.parse_where_clause()?;
 
         Ok(DeleteStmt { table_name, where_clause })
     }
@@ -766,21 +769,21 @@ X Parser {
     # Dispatch CREATE TABLE or CREATE [UNIQUE] INDEX
     F parse_create(~self) -> Result<Statement, VaisError> {
         # CREATE UNIQUE INDEX ...
-        if self.match_token(TokenKind.Unique) {
+        I self.match_token(TokenKind.Unique) {
             self.expect(TokenKind.Index)?;
-            let create = self.parse_create_index_body(true)?;
-            return Ok(Statement.CreateIndex { create });
+            create := self.parse_create_index_body(true)?;
+            R Ok(Statement.CreateIndex { create });
         }
 
         M self.peek() {
             TokenKind.Table => {
                 self.advance();
-                let create = self.parse_create_table()?;
+                create := self.parse_create_table()?;
                 Ok(Statement.CreateTable { create })
             },
             TokenKind.Index => {
                 self.advance();
-                let create = self.parse_create_index_body(false)?;
+                create := self.parse_create_index_body(false)?;
                 Ok(Statement.CreateIndex { create })
             },
             _ => {
@@ -791,29 +794,29 @@ X Parser {
 
     # Parse CREATE TABLE [IF NOT EXISTS] name (column_defs...)
     F parse_create_table(~self) -> Result<CreateTableStmt, VaisError> {
-        ~let if_not_exists = false;
+        ~if_not_exists := false;
 
         # Check for IF NOT EXISTS (IF is not a keyword, it is an identifier)
-        if self.check_identifier("IF") {
+        I self.check_identifier("IF") {
             self.advance();
             self.expect(TokenKind.Not)?;
-            if self.check_identifier("EXISTS") {
+            I self.check_identifier("EXISTS") {
                 self.advance();
-            } else {
-                return Err(self.parse_error("expected EXISTS after NOT"));
+            } E {
+                R Err(self.parse_error("expected EXISTS after NOT"));
             }
             if_not_exists = true;
         }
 
-        let name = self.expect_identifier()?;
+        name := self.expect_identifier()?;
         self.expect(TokenKind.LParen)?;
 
-        ~let columns = Vec.new();
-        loop {
-            let col = self.parse_column_def()?;
+        ~columns := Vec.new();
+        L {
+            col := self.parse_column_def()?;
             columns.push(col);
-            if !self.match_token(TokenKind.Comma) {
-                break;
+            I !self.match_token(TokenKind.Comma) {
+                B;
             }
         }
         self.expect(TokenKind.RParen)?;
@@ -823,45 +826,45 @@ X Parser {
 
     # Parse a single column definition: name TYPE [constraints...]
     F parse_column_def(~self) -> Result<ColumnDef, VaisError> {
-        let name = self.expect_identifier()?;
-        let data_type = self.parse_data_type()?;
+        name := self.expect_identifier()?;
+        data_type := self.parse_data_type()?;
 
-        ~let nullable = true;
-        ~let default_value = Option.None;
-        ~let is_primary_key = false;
-        ~let is_unique = false;
-        ~let check_expr = Option.None;
+        ~nullable := true;
+        ~default_value := Option.None;
+        ~is_primary_key := false;
+        ~is_unique := false;
+        ~check_expr := Option.None;
 
         # Parse column constraints (can appear in any order, multiple times)
-        loop {
-            if self.match_token(TokenKind.Not) {
+        L {
+            I self.match_token(TokenKind.Not) {
                 self.expect(TokenKind.Null)?;
                 nullable = false;
-            } else if self.match_token(TokenKind.Null) {
+            } E I self.match_token(TokenKind.Null) {
                 nullable = true;
-            } else if self.match_token(TokenKind.Primary) {
+            } E I self.match_token(TokenKind.Primary) {
                 self.expect(TokenKind.Key)?;
                 is_primary_key = true;
                 nullable = false;  # PRIMARY KEY implies NOT NULL
-            } else if self.match_token(TokenKind.Unique) {
+            } E I self.match_token(TokenKind.Unique) {
                 is_unique = true;
-            } else if self.match_token(TokenKind.Default) {
-                let expr = self.parse_primary()?;
+            } E I self.match_token(TokenKind.Default) {
+                expr := self.parse_primary()?;
                 default_value = Option.Some(expr);
-            } else if self.match_token(TokenKind.Check) {
+            } E I self.match_token(TokenKind.Check) {
                 self.expect(TokenKind.LParen)?;
-                let expr = self.parse_expr()?;
+                expr := self.parse_expr()?;
                 self.expect(TokenKind.RParen)?;
                 check_expr = Option.Some(expr);
-            } else if self.match_token(TokenKind.References) {
+            } E I self.match_token(TokenKind.References) {
                 # REFERENCES table(column) -- parse but ignore for now
-                let _ref_table = self.expect_identifier()?;
-                if self.match_token(TokenKind.LParen) {
-                    let _ref_col = self.expect_identifier()?;
+                _ref_table := self.expect_identifier()?;
+                I self.match_token(TokenKind.LParen) {
+                    _ref_col := self.expect_identifier()?;
                     self.expect(TokenKind.RParen)?;
                 }
-            } else {
-                break;
+            } E {
+                B;
             }
         }
 
@@ -896,7 +899,7 @@ X Parser {
                 self.advance();
                 # VARCHAR requires (max_len)
                 self.expect(TokenKind.LParen)?;
-                let max_len = self.expect_int_literal()? as u32;
+                max_len := self.expect_int_literal()? as u32;
                 self.expect(TokenKind.RParen)?;
                 Ok(SqlType.Varchar { max_len })
             },
@@ -920,7 +923,7 @@ X Parser {
                 self.advance();
                 # VECTOR requires (dim)
                 self.expect(TokenKind.LParen)?;
-                let dim = self.expect_int_literal()? as u32;
+                dim := self.expect_int_literal()? as u32;
                 self.expect(TokenKind.RParen)?;
                 Ok(SqlType.Vector { dim })
             },
@@ -937,31 +940,31 @@ X Parser {
 
     # Parse CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (columns...)
     F parse_create_index_body(~self, unique: bool) -> Result<CreateIndexStmt, VaisError> {
-        ~let if_not_exists = false;
+        ~if_not_exists := false;
 
         # Check for IF NOT EXISTS
-        if self.check_identifier("IF") {
+        I self.check_identifier("IF") {
             self.advance();
             self.expect(TokenKind.Not)?;
-            if self.check_identifier("EXISTS") {
+            I self.check_identifier("EXISTS") {
                 self.advance();
-            } else {
-                return Err(self.parse_error("expected EXISTS after NOT"));
+            } E {
+                R Err(self.parse_error("expected EXISTS after NOT"));
             }
             if_not_exists = true;
         }
 
-        let name = self.expect_identifier()?;
+        name := self.expect_identifier()?;
         self.expect(TokenKind.On)?;
-        let table_name = self.expect_identifier()?;
+        table_name := self.expect_identifier()?;
 
         self.expect(TokenKind.LParen)?;
-        ~let columns = Vec.new();
-        loop {
-            let col = self.expect_identifier()?;
+        ~columns := Vec.new();
+        L {
+            col := self.expect_identifier()?;
             columns.push(col);
-            if !self.match_token(TokenKind.Comma) {
-                break;
+            I !self.match_token(TokenKind.Comma) {
+                B;
             }
         }
         self.expect(TokenKind.RParen)?;
@@ -978,32 +981,32 @@ X Parser {
         M self.peek() {
             TokenKind.Table => {
                 self.advance();
-                ~let if_exists = false;
-                if self.check_identifier("IF") {
+                ~if_exists := false;
+                I self.check_identifier("IF") {
                     self.advance();
-                    if self.check_identifier("EXISTS") {
+                    I self.check_identifier("EXISTS") {
                         self.advance();
-                    } else {
-                        return Err(self.parse_error("expected EXISTS after IF"));
+                    } E {
+                        R Err(self.parse_error("expected EXISTS after IF"));
                     }
                     if_exists = true;
                 }
-                let name = self.expect_identifier()?;
+                name := self.expect_identifier()?;
                 Ok(Statement.DropTable { name, if_exists })
             },
             TokenKind.Index => {
                 self.advance();
-                ~let if_exists = false;
-                if self.check_identifier("IF") {
+                ~if_exists := false;
+                I self.check_identifier("IF") {
                     self.advance();
-                    if self.check_identifier("EXISTS") {
+                    I self.check_identifier("EXISTS") {
                         self.advance();
-                    } else {
-                        return Err(self.parse_error("expected EXISTS after IF"));
+                    } E {
+                        R Err(self.parse_error("expected EXISTS after IF"));
                     }
                     if_exists = true;
                 }
-                let name = self.expect_identifier()?;
+                name := self.expect_identifier()?;
                 Ok(Statement.DropIndex { name, if_exists })
             },
             _ => {
@@ -1018,42 +1021,42 @@ X Parser {
 
     # Parse ALTER TABLE table_name action
     F parse_alter_table(~self) -> Result<AlterTableStmt, VaisError> {
-        let table_name = self.expect_identifier()?;
+        table_name := self.expect_identifier()?;
 
-        let action = if self.match_token(TokenKind.Add) {
+        action := I self.match_token(TokenKind.Add) {
             # ADD [COLUMN] column_def
             self.match_token(TokenKind.Column);
-            let column = self.parse_column_def()?;
+            column := self.parse_column_def()?;
             AlterAction.AddColumn { column }
-        } else if self.match_token(TokenKind.Drop) {
+        } E I self.match_token(TokenKind.Drop) {
             # DROP [COLUMN] name
             self.match_token(TokenKind.Column);
-            let name = self.expect_identifier()?;
+            name := self.expect_identifier()?;
             AlterAction.DropColumn { name }
-        } else if self.match_token(TokenKind.Rename) {
+        } E I self.match_token(TokenKind.Rename) {
             # RENAME [COLUMN] old_name TO new_name
             self.match_token(TokenKind.Column);
-            let old_name = self.expect_identifier()?;
+            old_name := self.expect_identifier()?;
             # Expect TO (parsed as identifier since it is not a keyword)
-            if !self.check_identifier("TO") {
-                return Err(self.parse_error("expected TO after column name in RENAME"));
+            I !self.check_identifier("TO") {
+                R Err(self.parse_error("expected TO after column name in RENAME"));
             }
             self.advance();
-            let new_name = self.expect_identifier()?;
+            new_name := self.expect_identifier()?;
             AlterAction.RenameColumn { old_name, new_name }
-        } else if self.match_token(TokenKind.Alter) {
+        } E I self.match_token(TokenKind.Alter) {
             # ALTER [COLUMN] name TYPE new_type
             self.match_token(TokenKind.Column);
-            let name = self.expect_identifier()?;
+            name := self.expect_identifier()?;
             # Expect TYPE (parsed as identifier since not a keyword)
-            if !self.check_identifier("TYPE") {
-                return Err(self.parse_error("expected TYPE after column name in ALTER COLUMN"));
+            I !self.check_identifier("TYPE") {
+                R Err(self.parse_error("expected TYPE after column name in ALTER COLUMN"));
             }
             self.advance();
-            let new_type = self.parse_data_type()?;
+            new_type := self.parse_data_type()?;
             AlterAction.AlterColumnType { name, new_type }
-        } else {
-            return Err(self.parse_error("expected ADD, DROP, RENAME, or ALTER after table name"));
+        } E {
+            R Err(self.parse_error("expected ADD, DROP, RENAME, or ALTER after table name"));
         };
 
         Ok(AlterTableStmt { table_name, action })
@@ -1065,21 +1068,21 @@ X Parser {
 
     # Parse SET SESSION|GLOBAL key = value
     F parse_set_statement(~self) -> Result<Statement, VaisError> {
-        ~let is_global = false;
-        if self.check_identifier("SESSION") {
+        ~is_global := false;
+        I self.check_identifier("SESSION") {
             self.advance();
-        } else if self.check_identifier("GLOBAL") {
+        } E I self.check_identifier("GLOBAL") {
             self.advance();
             is_global = true;
         }
 
-        let key = self.expect_identifier()?;
+        key := self.expect_identifier()?;
         self.expect(TokenKind.Eq)?;
-        let value = self.parse_expr()?;
+        value := self.parse_expr()?;
 
-        let target = if is_global {
+        target := I is_global {
             SetTarget.Global { key, value }
-        } else {
+        } E {
             SetTarget.Session { key, value }
         };
 
@@ -1088,24 +1091,24 @@ X Parser {
 
     # Parse PREPARE name AS statement
     F parse_prepare(~self) -> Result<Statement, VaisError> {
-        let name = self.expect_identifier()?;
+        name := self.expect_identifier()?;
         self.expect(TokenKind.As)?;
-        let stmt = self.parse_statement()?;
+        stmt := self.parse_statement()?;
         Ok(Statement.Prepare { name, stmt: Box.new(stmt) })
     }
 
     # Parse EXECUTE name [(params...)]
     F parse_execute(~self) -> Result<Statement, VaisError> {
-        let name = self.expect_identifier()?;
-        ~let params = Vec.new();
+        name := self.expect_identifier()?;
+        ~params := Vec.new();
 
-        if self.match_token(TokenKind.LParen) {
-            if !self.check(TokenKind.RParen) {
-                loop {
-                    let expr = self.parse_expr()?;
+        I self.match_token(TokenKind.LParen) {
+            I !self.check(TokenKind.RParen) {
+                L {
+                    expr := self.parse_expr()?;
                     params.push(expr);
-                    if !self.match_token(TokenKind.Comma) {
-                        break;
+                    I !self.match_token(TokenKind.Comma) {
+                        B;
                     }
                 }
             }
@@ -1126,10 +1129,12 @@ X Parser {
 
     # OR (lowest precedence)
     F parse_or_expr(~self) -> Result<Expr, VaisError> {
-        ~let left = self.parse_and_expr()?;
+        ~left := self.parse_and_expr()?;
 
-        while self.match_token(TokenKind.Or) {
-            let right = self.parse_and_expr()?;
+        L {
+
+            I !(self.match_token(TokenKind.Or)) { B }
+            right := self.parse_and_expr()?;
             left = Expr.BinaryOp {
                 left: Box.new(left),
                 op: BinOp.Or,
@@ -1142,10 +1147,12 @@ X Parser {
 
     # AND
     F parse_and_expr(~self) -> Result<Expr, VaisError> {
-        ~let left = self.parse_not_expr()?;
+        ~left := self.parse_not_expr()?;
 
-        while self.match_token(TokenKind.And) {
-            let right = self.parse_not_expr()?;
+        L {
+
+            I !(self.match_token(TokenKind.And)) { B }
+            right := self.parse_not_expr()?;
             left = Expr.BinaryOp {
                 left: Box.new(left),
                 op: BinOp.And,
@@ -1158,10 +1165,10 @@ X Parser {
 
     # NOT (prefix unary)
     F parse_not_expr(~self) -> Result<Expr, VaisError> {
-        if self.match_token(TokenKind.Not) {
-            let operand = self.parse_not_expr()?;
+        I self.match_token(TokenKind.Not) {
+            operand := self.parse_not_expr()?;
             Ok(Expr.UnaryOp { op: UnaryOp.Not, operand: Box.new(operand) })
-        } else {
+        } E {
             self.parse_comparison()
         }
     }
@@ -1169,66 +1176,66 @@ X Parser {
     # Comparison: =, <>, <, >, <=, >=, IS [NOT] NULL, BETWEEN, IN, LIKE, EXISTS
     F parse_comparison(~self) -> Result<Expr, VaisError> {
         # Handle EXISTS (subquery) at comparison level
-        if self.match_token(TokenKind.Exists) {
+        I self.match_token(TokenKind.Exists) {
             self.expect(TokenKind.LParen)?;
-            let query = self.parse_select()?;
+            query := self.parse_select()?;
             self.expect(TokenKind.RParen)?;
-            return Ok(Expr.Exists { query: Box.new(query), negated: false });
+            R Ok(Expr.Exists { query: Box.new(query), negated: false });
         }
 
         # Handle NOT EXISTS (subquery)
-        if self.check(TokenKind.Not) {
-            let saved_pos = self.pos;
+        I self.check(TokenKind.Not) {
+            saved_pos := self.pos;
             self.advance();
-            if self.match_token(TokenKind.Exists) {
+            I self.match_token(TokenKind.Exists) {
                 self.expect(TokenKind.LParen)?;
-                let query = self.parse_select()?;
+                query := self.parse_select()?;
                 self.expect(TokenKind.RParen)?;
-                return Ok(Expr.Exists { query: Box.new(query), negated: true });
+                R Ok(Expr.Exists { query: Box.new(query), negated: true });
             }
             # Not NOT EXISTS, backtrack
             self.pos = saved_pos;
         }
 
-        ~let expr = self.parse_addition()?;
+        ~expr := self.parse_addition()?;
 
         # Check for comparison operators and postfix operators
-        loop {
+        L {
             M self.peek() {
                 TokenKind.Eq => {
                     self.advance();
-                    let right = self.parse_addition()?;
+                    right := self.parse_addition()?;
                     expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Eq, right: Box.new(right) };
                 },
                 TokenKind.Neq => {
                     self.advance();
-                    let right = self.parse_addition()?;
+                    right := self.parse_addition()?;
                     expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Neq, right: Box.new(right) };
                 },
                 TokenKind.Lt => {
                     self.advance();
-                    let right = self.parse_addition()?;
+                    right := self.parse_addition()?;
                     expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Lt, right: Box.new(right) };
                 },
                 TokenKind.Gt => {
                     self.advance();
-                    let right = self.parse_addition()?;
+                    right := self.parse_addition()?;
                     expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Gt, right: Box.new(right) };
                 },
                 TokenKind.Le => {
                     self.advance();
-                    let right = self.parse_addition()?;
+                    right := self.parse_addition()?;
                     expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Le, right: Box.new(right) };
                 },
                 TokenKind.Ge => {
                     self.advance();
-                    let right = self.parse_addition()?;
+                    right := self.parse_addition()?;
                     expr = Expr.BinaryOp { left: Box.new(expr), op: BinOp.Ge, right: Box.new(right) };
                 },
                 TokenKind.Is => {
                     self.advance();
-                    ~let negated = false;
-                    if self.match_token(TokenKind.Not) {
+                    ~negated := false;
+                    I self.match_token(TokenKind.Not) {
                         negated = true;
                     }
                     self.expect(TokenKind.Null)?;
@@ -1236,9 +1243,9 @@ X Parser {
                 },
                 TokenKind.Between => {
                     self.advance();
-                    let low = self.parse_addition()?;
+                    low := self.parse_addition()?;
                     self.expect(TokenKind.And)?;
-                    let high = self.parse_addition()?;
+                    high := self.parse_addition()?;
                     expr = Expr.Between {
                         expr: Box.new(expr),
                         low: Box.new(low),
@@ -1248,14 +1255,14 @@ X Parser {
                 },
                 TokenKind.Not => {
                     # NOT BETWEEN, NOT IN, NOT LIKE
-                    let saved_pos = self.pos;
+                    saved_pos := self.pos;
                     self.advance();
                     M self.peek() {
                         TokenKind.Between => {
                             self.advance();
-                            let low = self.parse_addition()?;
+                            low := self.parse_addition()?;
                             self.expect(TokenKind.And)?;
-                            let high = self.parse_addition()?;
+                            high := self.parse_addition()?;
                             expr = Expr.Between {
                                 expr: Box.new(expr),
                                 low: Box.new(low),
@@ -1269,7 +1276,7 @@ X Parser {
                         },
                         TokenKind.Like => {
                             self.advance();
-                            let pattern = self.parse_addition()?;
+                            pattern := self.parse_addition()?;
                             expr = Expr.Like {
                                 expr: Box.new(expr),
                                 pattern: Box.new(pattern),
@@ -1279,7 +1286,7 @@ X Parser {
                         _ => {
                             # Not a postfix NOT, backtrack
                             self.pos = saved_pos;
-                            break;
+                            B;
                         },
                     }
                 },
@@ -1289,7 +1296,7 @@ X Parser {
                 },
                 TokenKind.Like => {
                     self.advance();
-                    let pattern = self.parse_addition()?;
+                    pattern := self.parse_addition()?;
                     expr = Expr.Like {
                         expr: Box.new(expr),
                         pattern: Box.new(pattern),
@@ -1297,7 +1304,7 @@ X Parser {
                     };
                 },
                 _ => {
-                    break;
+                    B;
                 },
             }
         }
@@ -1312,7 +1319,7 @@ X Parser {
         # Distinguish subquery from value list by checking for SELECT/WITH
         M self.peek() {
             TokenKind.Select | TokenKind.With => {
-                let query = self.parse_select()?;
+                query := self.parse_select()?;
                 self.expect(TokenKind.RParen)?;
                 Ok(Expr.InSubquery {
                     expr: Box.new(left),
@@ -1321,13 +1328,13 @@ X Parser {
                 })
             },
             _ => {
-                ~let list = Vec.new();
-                if !self.check(TokenKind.RParen) {
-                    loop {
-                        let expr = self.parse_expr()?;
+                ~list := Vec.new();
+                I !self.check(TokenKind.RParen) {
+                    L {
+                        expr := self.parse_expr()?;
                         list.push(expr);
-                        if !self.match_token(TokenKind.Comma) {
-                            break;
+                        I !self.match_token(TokenKind.Comma) {
+                            B;
                         }
                     }
                 }
@@ -1343,27 +1350,27 @@ X Parser {
 
     # Addition/subtraction and string concatenation (||)
     F parse_addition(~self) -> Result<Expr, VaisError> {
-        ~let left = self.parse_multiplication()?;
+        ~left := self.parse_multiplication()?;
 
-        loop {
+        L {
             M self.peek() {
                 TokenKind.Plus => {
                     self.advance();
-                    let right = self.parse_multiplication()?;
+                    right := self.parse_multiplication()?;
                     left = Expr.BinaryOp { left: Box.new(left), op: BinOp.Add, right: Box.new(right) };
                 },
                 TokenKind.Minus => {
                     self.advance();
-                    let right = self.parse_multiplication()?;
+                    right := self.parse_multiplication()?;
                     left = Expr.BinaryOp { left: Box.new(left), op: BinOp.Sub, right: Box.new(right) };
                 },
                 TokenKind.Pipe => {
                     self.advance();
-                    let right = self.parse_multiplication()?;
+                    right := self.parse_multiplication()?;
                     left = Expr.Concat { left: Box.new(left), right: Box.new(right) };
                 },
                 _ => {
-                    break;
+                    B;
                 },
             }
         }
@@ -1373,27 +1380,27 @@ X Parser {
 
     # Multiplication, division, modulo
     F parse_multiplication(~self) -> Result<Expr, VaisError> {
-        ~let left = self.parse_unary()?;
+        ~left := self.parse_unary()?;
 
-        loop {
+        L {
             M self.peek() {
                 TokenKind.Star => {
                     self.advance();
-                    let right = self.parse_unary()?;
+                    right := self.parse_unary()?;
                     left = Expr.BinaryOp { left: Box.new(left), op: BinOp.Mul, right: Box.new(right) };
                 },
                 TokenKind.Slash => {
                     self.advance();
-                    let right = self.parse_unary()?;
+                    right := self.parse_unary()?;
                     left = Expr.BinaryOp { left: Box.new(left), op: BinOp.Div, right: Box.new(right) };
                 },
                 TokenKind.Percent => {
                     self.advance();
-                    let right = self.parse_unary()?;
+                    right := self.parse_unary()?;
                     left = Expr.BinaryOp { left: Box.new(left), op: BinOp.Mod, right: Box.new(right) };
                 },
                 _ => {
-                    break;
+                    B;
                 },
             }
         }
@@ -1403,9 +1410,9 @@ X Parser {
 
     # Unary minus and NOT
     F parse_unary(~self) -> Result<Expr, VaisError> {
-        if self.match_token(TokenKind.Minus) {
-            let operand = self.parse_unary()?;
-            return Ok(Expr.UnaryOp { op: UnaryOp.Neg, operand: Box.new(operand) });
+        I self.match_token(TokenKind.Minus) {
+            operand := self.parse_unary()?;
+            R Ok(Expr.UnaryOp { op: UnaryOp.Neg, operand: Box.new(operand) });
         }
 
         self.parse_primary()
@@ -1417,7 +1424,7 @@ X Parser {
         M self.peek() {
             # Integer literal
             TokenKind.IntLit { .. } => {
-                let tok = self.advance();
+                tok := self.advance();
                 M tok.kind {
                     TokenKind.IntLit { v } => Ok(Expr.Literal { value: SqlValue.IntVal { v } }),
                     _ => Err(self.parse_error("internal error: expected integer literal")),
@@ -1425,7 +1432,7 @@ X Parser {
             },
             # Float literal
             TokenKind.FloatLit { .. } => {
-                let tok = self.advance();
+                tok := self.advance();
                 M tok.kind {
                     TokenKind.FloatLit { v } => Ok(Expr.Literal { value: SqlValue.FloatVal { v } }),
                     _ => Err(self.parse_error("internal error: expected float literal")),
@@ -1433,7 +1440,7 @@ X Parser {
             },
             # String literal
             TokenKind.StringLit { .. } => {
-                let tok = self.advance();
+                tok := self.advance();
                 M tok.kind {
                     TokenKind.StringLit { v } => Ok(Expr.Literal { value: SqlValue.StringVal { v } }),
                     _ => Err(self.parse_error("internal error: expected string literal")),
@@ -1456,7 +1463,7 @@ X Parser {
             },
             # Parameter marker ($1, $2, ...)
             TokenKind.Parameter { .. } => {
-                let tok = self.advance();
+                tok := self.advance();
                 M tok.kind {
                     TokenKind.Parameter { idx } => Ok(Expr.Parameter { idx }),
                     _ => Err(self.parse_error("internal error: expected parameter")),
@@ -1479,7 +1486,7 @@ X Parser {
             TokenKind.Exists => {
                 self.advance();
                 self.expect(TokenKind.LParen)?;
-                let query = self.parse_select()?;
+                query := self.parse_select()?;
                 self.expect(TokenKind.RParen)?;
                 Ok(Expr.Exists { query: Box.new(query), negated: false })
             },
@@ -1498,12 +1505,12 @@ X Parser {
                 # Check if it is a subquery
                 M self.peek() {
                     TokenKind.Select | TokenKind.With => {
-                        let query = self.parse_select()?;
+                        query := self.parse_select()?;
                         self.expect(TokenKind.RParen)?;
                         Ok(Expr.Subquery { query: Box.new(query) })
                     },
                     _ => {
-                        let expr = self.parse_expr()?;
+                        expr := self.parse_expr()?;
                         self.expect(TokenKind.RParen)?;
                         Ok(expr)
                     },
@@ -1521,17 +1528,17 @@ X Parser {
 
     # Parse an identifier expression: column ref, table.column, or function call
     F parse_identifier_expr(~self) -> Result<Expr, VaisError> {
-        let name = self.expect_identifier()?;
+        name := self.expect_identifier()?;
 
         # Check for function call: name(...)
-        if self.check(TokenKind.LParen) {
-            return self.parse_function_call(name);
+        I self.check(TokenKind.LParen) {
+            R self.parse_function_call(name);
         }
 
         # Check for table.column reference
-        if self.match_token(TokenKind.Dot) {
-            let column = self.expect_identifier()?;
-            return Ok(Expr.ColumnRef { table: Option.Some(name), column });
+        I self.match_token(TokenKind.Dot) {
+            column := self.expect_identifier()?;
+            R Ok(Expr.ColumnRef { table: Option.Some(name), column });
         }
 
         # Plain column reference
@@ -1543,49 +1550,49 @@ X Parser {
         self.expect(TokenKind.LParen)?;
 
         # Check for empty arg list
-        if self.match_token(TokenKind.RParen) {
-            let func_expr = Expr.FunctionCall { name, args: Vec.new(), distinct: false };
+        I self.match_token(TokenKind.RParen) {
+            func_expr := Expr.FunctionCall { name, args: Vec.new(), distinct: false };
             # Check for OVER clause (window function)
-            return self.maybe_parse_over(func_expr);
+            R self.maybe_parse_over(func_expr);
         }
 
         # Check for DISTINCT keyword
-        ~let distinct = false;
-        if self.match_token(TokenKind.Distinct) {
+        ~distinct := false;
+        I self.match_token(TokenKind.Distinct) {
             distinct = true;
         }
 
         # Check for * (e.g., COUNT(*))
-        if self.match_token(TokenKind.Star) {
+        I self.match_token(TokenKind.Star) {
             self.expect(TokenKind.RParen)?;
-            let func_expr = Expr.FunctionCall {
+            func_expr := Expr.FunctionCall {
                 name,
                 args: Vec.from([Expr.Star]),
                 distinct: false,
             };
-            return self.maybe_parse_over(func_expr);
+            R self.maybe_parse_over(func_expr);
         }
 
         # Parse argument list
-        ~let args = Vec.new();
-        loop {
-            let arg = self.parse_expr()?;
+        ~args := Vec.new();
+        L {
+            arg := self.parse_expr()?;
             args.push(arg);
-            if !self.match_token(TokenKind.Comma) {
-                break;
+            I !self.match_token(TokenKind.Comma) {
+                B;
             }
         }
         self.expect(TokenKind.RParen)?;
 
-        let func_expr = Expr.FunctionCall { name, args, distinct };
+        func_expr := Expr.FunctionCall { name, args, distinct };
         # Check for OVER clause (window function)
         self.maybe_parse_over(func_expr)
     }
 
     # Parse an aggregate function keyword (COUNT, SUM, AVG, MIN, MAX)
     F parse_aggregate_function(~self) -> Result<Expr, VaisError> {
-        let tok = self.advance();
-        let name = M tok.kind {
+        tok := self.advance();
+        name := M tok.kind {
             TokenKind.Count => "COUNT",
             TokenKind.Sum => "SUM",
             TokenKind.Avg => "AVG",
@@ -1598,8 +1605,8 @@ X Parser {
 
     # Parse a window function keyword (ROW_NUMBER, RANK, DENSE_RANK)
     F parse_window_function_keyword(~self) -> Result<Expr, VaisError> {
-        let tok = self.advance();
-        let name = M tok.kind {
+        tok := self.advance();
+        name := M tok.kind {
             TokenKind.Row_Number => "ROW_NUMBER",
             TokenKind.Rank => "RANK",
             TokenKind.Dense_Rank => "DENSE_RANK",
@@ -1610,50 +1617,50 @@ X Parser {
 
     # If an OVER clause follows, wrap the expression as a WindowFunc
     F maybe_parse_over(~self, func: Expr) -> Result<Expr, VaisError> {
-        if !self.match_token(TokenKind.Over) {
-            return Ok(func);
+        I !self.match_token(TokenKind.Over) {
+            R Ok(func);
         }
 
         self.expect(TokenKind.LParen)?;
 
         # Parse optional PARTITION BY
-        ~let partition_by = Vec.new();
-        if self.match_token(TokenKind.Partition) {
+        ~partition_by := Vec.new();
+        I self.match_token(TokenKind.Partition) {
             self.expect(TokenKind.By)?;
-            loop {
-                let expr = self.parse_expr()?;
+            L {
+                expr := self.parse_expr()?;
                 partition_by.push(expr);
-                if !self.match_token(TokenKind.Comma) {
-                    break;
+                I !self.match_token(TokenKind.Comma) {
+                    B;
                 }
             }
         }
 
         # Parse optional ORDER BY
-        ~let order_by = Vec.new();
-        if self.match_token(TokenKind.Order) {
+        ~order_by := Vec.new();
+        I self.match_token(TokenKind.Order) {
             self.expect(TokenKind.By)?;
-            loop {
-                let expr = self.parse_expr()?;
-                ~let asc = true;
-                if self.match_token(TokenKind.Asc) {
+            L {
+                expr := self.parse_expr()?;
+                ~asc := true;
+                I self.match_token(TokenKind.Asc) {
                     asc = true;
-                } else if self.match_token(TokenKind.Desc) {
+                } E I self.match_token(TokenKind.Desc) {
                     asc = false;
                 }
-                ~let nulls_first = Option.None;
-                if self.match_token(TokenKind.Nulls) {
-                    if self.match_token(TokenKind.First) {
+                ~nulls_first := Option.None;
+                I self.match_token(TokenKind.Nulls) {
+                    I self.match_token(TokenKind.First) {
                         nulls_first = Option.Some(true);
-                    } else if self.match_token(TokenKind.Last) {
+                    } E I self.match_token(TokenKind.Last) {
                         nulls_first = Option.Some(false);
-                    } else {
-                        return Err(self.parse_error("expected FIRST or LAST after NULLS"));
+                    } E {
+                        R Err(self.parse_error("expected FIRST or LAST after NULLS"));
                     }
                 }
                 order_by.push(OrderByItem { expr, asc, nulls_first });
-                if !self.match_token(TokenKind.Comma) {
-                    break;
+                I !self.match_token(TokenKind.Comma) {
+                    B;
                 }
             }
         }
@@ -1672,29 +1679,30 @@ X Parser {
         self.expect(TokenKind.Case)?;
 
         # Check for simple CASE (CASE expr WHEN ...) vs searched CASE (CASE WHEN ...)
-        ~let operand = Option.None;
-        if !self.check(TokenKind.When) {
-            let expr = self.parse_expr()?;
+        ~operand := Option.None;
+        I !self.check(TokenKind.When) {
+            expr := self.parse_expr()?;
             operand = Option.Some(Box.new(expr));
         }
 
         # Parse WHEN clauses
-        ~let when_clauses = Vec.new();
-        while self.match_token(TokenKind.When) {
-            let condition = self.parse_expr()?;
+        ~when_clauses := Vec.new();
+        L {
+            I !(self.match_token(TokenKind.When)) { B }
+            condition := self.parse_expr()?;
             self.expect(TokenKind.Then)?;
-            let result = self.parse_expr()?;
+            result := self.parse_expr()?;
             when_clauses.push(WhenClause { condition, result });
         }
 
-        if when_clauses.len() == 0 {
-            return Err(self.parse_error("CASE expression must have at least one WHEN clause"));
+        I when_clauses.len() == 0 {
+            R Err(self.parse_error("CASE expression must have at least one WHEN clause"));
         }
 
         # Parse optional ELSE
-        ~let else_result = Option.None;
-        if self.match_token(TokenKind.Else) {
-            let expr = self.parse_expr()?;
+        ~else_result := Option.None;
+        I self.match_token(TokenKind.Else) {
+            expr := self.parse_expr()?;
             else_result = Option.Some(Box.new(expr));
         }
 
@@ -1707,9 +1715,9 @@ X Parser {
     F parse_cast_expr(~self) -> Result<Expr, VaisError> {
         self.expect(TokenKind.Cast)?;
         self.expect(TokenKind.LParen)?;
-        let expr = self.parse_expr()?;
+        expr := self.parse_expr()?;
         self.expect(TokenKind.As)?;
-        let target_type = self.parse_data_type()?;
+        target_type := self.parse_data_type()?;
         self.expect(TokenKind.RParen)?;
         Ok(Expr.Cast { expr: Box.new(expr), target_type })
     }
@@ -1720,17 +1728,17 @@ X Parser {
 
     # Peek at the current token kind without consuming it
     F peek(self) -> &TokenKind {
-        if self.pos < self.tokens.len() {
+        I self.pos < self.tokens.len() {
             &self.tokens[self.pos].kind
-        } else {
+        } E {
             &TokenKind.Eof
         }
     }
 
     # Advance to the next token, returning the current one
     F advance(~self) -> &Token {
-        let tok = &self.tokens[self.pos];
-        if self.pos < self.tokens.len() {
+        tok := &self.tokens[self.pos];
+        I self.pos < self.tokens.len() {
             self.pos += 1;
         }
         tok
@@ -1738,9 +1746,9 @@ X Parser {
 
     # Consume the next token if it matches the expected kind, return error otherwise
     F expect(~self, kind: TokenKind) -> Result<&Token, VaisError> {
-        if self.check(kind) {
+        I self.check(kind) {
             Ok(self.advance())
-        } else {
+        } E {
             Err(self.parse_error("expected {kind}, got {self.peek()}"))
         }
     }
@@ -1748,10 +1756,10 @@ X Parser {
     # If the current token matches the given kind, consume it and return true;
     # otherwise return false
     F match_token(~self, kind: TokenKind) -> bool {
-        if self.check(kind) {
+        I self.check(kind) {
             self.advance();
             true
-        } else {
+        } E {
             false
         }
     }
@@ -1779,13 +1787,13 @@ X Parser {
 
     # Create a parse error with position information from the current token
     F parse_error(self, msg: Str) -> VaisError {
-        if self.pos < self.tokens.len() {
-            let tok = &self.tokens[self.pos];
+        I self.pos < self.tokens.len() {
+            tok := &self.tokens[self.pos];
             VaisError.new(
                 "VAIS-0101001",
                 "SQL parse error at line {tok.line}, col {tok.col}: {msg}"
             )
-        } else {
+        } E {
             VaisError.new(
                 "VAIS-0101001",
                 "SQL parse error at end of input: {msg}"
@@ -1813,7 +1821,7 @@ X Parser {
     F expect_identifier(~self) -> Result<Str, VaisError> {
         M self.peek() {
             TokenKind.Identifier { .. } => {
-                let tok = self.advance();
+                tok := self.advance();
                 M tok.kind {
                     TokenKind.Identifier { v } => Ok(v),
                     _ => Err(self.parse_error("internal error: expected identifier")),
@@ -1829,7 +1837,7 @@ X Parser {
     F expect_int_literal(~self) -> Result<i64, VaisError> {
         M self.peek() {
             TokenKind.IntLit { .. } => {
-                let tok = self.advance();
+                tok := self.advance();
                 M tok.kind {
                     TokenKind.IntLit { v } => Ok(v),
                     _ => Err(self.parse_error("internal error: expected integer literal")),
@@ -1858,8 +1866,8 @@ X Parser {
 
 # Parse a SQL string into a list of statements
 F parse_sql(sql: Str) -> Result<Vec<Statement>, VaisError> {
-    ~let tokenizer = Tokenizer.new(sql);
-    let tokens = tokenizer.tokenize_all()?;
-    ~let parser = Parser.new(tokens);
+    ~tokenizer := Tokenizer.new(sql);
+    tokens := tokenizer.tokenize_all()?;
+    ~parser := Parser.new(tokens);
     parser.parse_all()
 }

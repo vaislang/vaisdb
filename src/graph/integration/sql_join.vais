@@ -60,7 +60,7 @@ S GraphTraversalSource {
 
     # Materialized results (populated during open())
     result_rows: Vec<TraverseRow>,
-    cursor: usize,
+    cursor: u64,
     is_open: bool,
     stats: ExecStats,
 }
@@ -106,13 +106,13 @@ X GraphTraversalSource {
 
     # Helper: convert Vec<u64> to comma-separated string
     F ids_to_string(ids: &Vec<u64>) -> Str {
-        if ids.is_empty() {
-            return "".to_string();
+        I ids.is_empty() {
+            R "".to_string();
         }
         ~result = Str.new();
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < ids.len() {
-            if i > 0 {
+            I i > 0 {
                 result.push(',');
             }
             result.push_str(&ids[i].to_string());
@@ -123,13 +123,13 @@ X GraphTraversalSource {
 
     # Helper: convert Vec<u16> to comma-separated string
     F u16s_to_string(ids: &Vec<u16>) -> Str {
-        if ids.is_empty() {
-            return "".to_string();
+        I ids.is_empty() {
+            R "".to_string();
         }
         ~result = Str.new();
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < ids.len() {
-            if i > 0 {
+            I i > 0 {
                 result.push(',');
             }
             result.push_str(&(ids[i] as u64).to_string());
@@ -152,8 +152,8 @@ X GraphTraversalSource {
 # Implement RowSource trait for GraphTraversalSource
 X GraphTraversalSource: RowSource {
     F open(~self, ctx: &ExecContext) -> Result<(), VaisError> {
-        if self.is_open {
-            return Ok(());
+        I self.is_open {
+            R Ok(());
         }
 
         # Execute graph traversal
@@ -169,8 +169,8 @@ X GraphTraversalSource: RowSource {
     }
 
     F next(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
-        if !self.is_open || self.cursor >= self.result_rows.len() {
-            return Ok(None);
+        I !self.is_open || self.cursor >= self.result_rows.len() {
+            R Ok(None);
         }
 
         ~row = GraphTraversalSource.row_to_executor_row(&self.result_rows[self.cursor]);
@@ -197,8 +197,8 @@ X GraphTraversalSource: RowSource {
 S GraphNodeLookupSource {
     node_ids: Vec<u64>,
     table_name: Str,
-    join_column: Str,     # Column in SQL table to match against node_id
-    cursor: usize,
+    join_column: Str,     # Column in SQL table to M against node_id
+    cursor: u64,
     is_open: bool,
     stats: ExecStats,
 }
@@ -226,19 +226,18 @@ X GraphNodeLookupSource {
         join_column: Str,
     ) -> GraphNodeLookupSource {
         ~node_ids = Vec.new();
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < result.rows.len() {
             # Deduplicate node IDs
             ~found = false;
-            ~j: usize = 0;
+            ~j: u64 = 0;
             L while j < node_ids.len() {
-                if node_ids[j] == result.rows[i].node_id {
+                I node_ids[j] == result.rows[i].node_id {
                     found = true;
-                    break;
-                }
+                    B                }
                 j += 1;
             }
-            if !found {
+            I !found {
                 node_ids.push(result.rows[i].node_id);
             }
             i += 1;
@@ -258,12 +257,12 @@ X GraphNodeLookupSource: RowSource {
     }
 
     F next(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
-        if !self.is_open || self.cursor >= self.node_ids.len() {
-            return Ok(None);
+        I !self.is_open || self.cursor >= self.node_ids.len() {
+            R Ok(None);
         }
 
         # Produce a single-column row with the node_id
-        # The join executor will match this against the SQL table's join column
+        # The join executor will M this against the SQL table's join column
         ~values = Vec.new();
         values.push(SqlValue.from_u64(self.node_ids[self.cursor]));
         ~row = ExecutorRow.virtual(Row.from_values(values));
@@ -395,7 +394,7 @@ X GraphSqlJoinBuilder {
     ) -> Result<(GraphTraversalSource, PushdownResult), VaisError> {
         ~params = M self.traverse_params {
             Some(p) => p,
-            None => return Err(err_integration_open_failed(
+            None => R Err(err_integration_open_failed(
                 "No traversal parameters specified".to_string()
             )),
         };

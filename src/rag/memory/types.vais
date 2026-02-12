@@ -148,8 +148,8 @@ X MemoryEntry {
 
     ## Deserialize metadata from 72-byte format
     F deserialize_meta(data: &[u8]) -> Result<MemoryEntry, VaisError> {
-        if data.len() < 72 {
-            return Err(VaisError.new("MemoryEntry metadata too short"))
+        I data.len() < 72 {
+            R Err(VaisError.new("MemoryEntry metadata too short"))
         }
 
         ~buf = ByteBuffer.from_slice(data)
@@ -221,8 +221,8 @@ X MemoryEntry {
 
     ## Check if memory has expired based on TTL
     F is_expired(&self, current_time: i64) -> bool {
-        if self.ttl_seconds == 0 {
-            return false  # TTL=0 means never expire
+        I self.ttl_seconds == 0 {
+            R false  # TTL=0 means never expire
         }
 
         ~elapsed = (current_time - self.created_at) as u64
@@ -234,13 +234,13 @@ X MemoryEntry {
     ## Decay formula: importance * exp(-ln(2) * elapsed / half_life)
     ## Where elapsed is time since last access in seconds.
     F importance_with_decay(&self, current_time: i64, half_life: f64) -> f64 {
-        if half_life <= 0.0 {
-            return self.importance
+        I half_life <= 0.0 {
+            R self.importance
         }
 
         ~elapsed = (current_time - self.last_accessed) as f64
-        if elapsed <= 0.0 {
-            return self.importance
+        I elapsed <= 0.0 {
+            R self.importance
         }
 
         # Exponential decay: base * exp(-ln(2) * t / half_life)
@@ -302,13 +302,13 @@ X ImportanceScorer {
         M explicit_mark {
             Some(mark) => {
                 # Clamp to [0, 1]
-                if mark < 0.0 {
-                    return 0.0
+                I mark < 0.0 {
+                    R 0.0
                 }
-                if mark > 1.0 {
-                    return 1.0
+                I mark > 1.0 {
+                    R 1.0
                 }
-                return mark
+                R mark
             }
             None => {}
         }
@@ -330,10 +330,10 @@ X ImportanceScorer {
             self.base_crossref_weight * crossref_score
 
         # Clamp to [0, 1]
-        if importance < 0.0 {
+        I importance < 0.0 {
             importance = 0.0
         }
-        if importance > 1.0 {
+        I importance > 1.0 {
             importance = 1.0
         }
 
@@ -347,21 +347,21 @@ X ImportanceScorer {
         elapsed_seconds: f64,
         half_life: f64,
     ) -> f64 {
-        if half_life <= 0.0 {
-            return current_importance
+        I half_life <= 0.0 {
+            R current_importance
         }
-        if elapsed_seconds <= 0.0 {
-            return current_importance
+        I elapsed_seconds <= 0.0 {
+            R current_importance
         }
 
         ~decay_factor = (-0.693147 * elapsed_seconds / half_life).exp()
         ~decayed = current_importance * decay_factor
 
         # Clamp to [0, 1]
-        if decayed < 0.0 {
+        I decayed < 0.0 {
             decayed = 0.0
         }
-        if decayed > 1.0 {
+        I decayed > 1.0 {
             decayed = 1.0
         }
 

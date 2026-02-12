@@ -35,9 +35,9 @@ X RollbackExecutor {
         undo_ptr: u64,
         pool: &~BufferPool
     ) -> Result<u32, VaisError> {
-        if undo_ptr == NULL_UNDO_PTR {
+        I undo_ptr == NULL_UNDO_PTR {
             # No undo entries, nothing to rollback
-            return Ok(0);
+            R Ok(0);
         }
 
         # Read the entire undo chain
@@ -45,10 +45,10 @@ X RollbackExecutor {
         ~count = 0u32;
 
         # Process each undo entry in reverse chronological order (newest first)
-        for entry in entries {
+        L entry: entries {
             # Verify this entry belongs to the transaction being rolled back
-            if entry.txn_id != txn_id {
-                return Err(err_internal(
+            I entry.txn_id != txn_id {
+                R Err(err_internal(
                     "Undo entry txn_id mismatch: expected {txn_id}, got {entry.txn_id}"
                 ));
             }
@@ -68,7 +68,7 @@ X RollbackExecutor {
                     self.undo_update(&entry, pool)?;
                 },
                 _ => {
-                    return Err(err_internal("Invalid undo entry type: {entry.entry_type}"));
+                    R Err(err_internal("Invalid undo entry type: {entry.entry_type}"));
                 }
             }
 
@@ -86,8 +86,8 @@ X RollbackExecutor {
         ~page_data = frame.get_data_mut();
 
         # Calculate slot offset
-        ~slot_offset = PAGE_HEADER_SIZE as usize +
-            (entry.slot_id as usize * SLOT_ENTRY_SIZE as usize);
+        ~slot_offset = PAGE_HEADER_SIZE as u64 +
+            (entry.slot_id as u64 * SLOT_ENTRY_SIZE as u64);
 
         # Read the slot entry
         ~slot = HeapPageSlot.read_at_index(page_data, entry.slot_id)?;
@@ -120,13 +120,13 @@ X RollbackExecutor {
         # Read the slot entry to find the tuple location
         ~slot = HeapPageSlot.read_at_index(page_data, entry.slot_id)?;
 
-        if slot.tuple_off == 0 {
-            return Err(err_internal("Cannot undo DELETE: slot is already dead"));
+        I slot.tuple_off == 0 {
+            R Err(err_internal("Cannot undo DELETE: slot is already dead"));
         }
 
         # Read the MVCC metadata at the tuple location
-        ~tuple_offset = slot.tuple_off as usize;
-        ~mvcc_data = &page_data[tuple_offset..(tuple_offset + MVCC_TUPLE_META_SIZE as usize)];
+        ~tuple_offset = slot.tuple_off as u64;
+        ~mvcc_data = &page_data[tuple_offset..(tuple_offset + MVCC_TUPLE_META_SIZE as u64)];
         ~mvcc_buf = ByteBuffer.from_slice(mvcc_data);
         ~mvcc = MvccTupleMeta.deserialize(&mvcc_buf)?;
 
@@ -134,9 +134,9 @@ X RollbackExecutor {
         mvcc.clear_expired();
 
         # Write back the MVCC metadata
-        ~write_buf = ByteBuffer.with_capacity(MVCC_TUPLE_META_SIZE as usize);
+        ~write_buf = ByteBuffer.with_capacity(MVCC_TUPLE_META_SIZE as u64);
         mvcc.serialize(&write_buf);
-        page_data[tuple_offset..(tuple_offset + MVCC_TUPLE_META_SIZE as usize)]
+        page_data[tuple_offset..(tuple_offset + MVCC_TUPLE_META_SIZE as u64)]
             .copy_from_slice(write_buf.as_bytes());
 
         # Mark page as dirty
@@ -158,24 +158,24 @@ X RollbackExecutor {
         # Read the slot entry to find the tuple location
         ~slot = HeapPageSlot.read_at_index(page_data, entry.slot_id)?;
 
-        if slot.tuple_off == 0 {
-            return Err(err_internal("Cannot undo UPDATE: slot is dead"));
+        I slot.tuple_off == 0 {
+            R Err(err_internal("Cannot undo UPDATE: slot is dead"));
         }
 
         # Verify the old_data fits in the current slot
-        if entry.data_len > slot.tuple_len as u32 {
-            return Err(err_internal(
+        I entry.data_len > slot.tuple_len as u32 {
+            R Err(err_internal(
                 "Undo UPDATE data too large: {entry.data_len} > {slot.tuple_len}"
             ));
         }
 
         # Restore the old tuple data (MVCC metadata + user data)
-        ~tuple_offset = slot.tuple_off as usize;
-        page_data[tuple_offset..(tuple_offset + entry.data_len as usize)]
+        ~tuple_offset = slot.tuple_off as u64;
+        page_data[tuple_offset..(tuple_offset + entry.data_len as u64)]
             .copy_from_slice(&entry.old_data);
 
         # Update slot length if the old data is smaller
-        if entry.data_len < slot.tuple_len as u32 {
+        I entry.data_len < slot.tuple_len as u32 {
             ~updated_slot = HeapPageSlot.new(slot.tuple_off, entry.data_len as u16);
             updated_slot.write_at_index(page_data, entry.slot_id);
         }

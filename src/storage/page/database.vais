@@ -39,8 +39,8 @@ X Database {
     # Create a new database at the given path
     F create(db_path: Str, page_size: u32) -> Result<Database, VaisError> {
         # Validate page size
-        if page_size != 8192 && page_size != 16384 {
-            return Err(err_internal("Page size must be 8192 or 16384"));
+        I page_size != 8192 && page_size != 16384 {
+            R Err(err_internal("Page size must be 8192 or 16384"));
         }
 
         # Create directory structure
@@ -55,8 +55,8 @@ X Database {
         # Create and write meta.vdb (authoritative metadata)
         ~meta_header = MetaPageHeader.new(page_size, db_uuid, creation_ts);
         ~meta_file = File.open("{db_path}/{FILE_NAME_META}", "rw+")?;
-        ~meta_page = Vec.with_capacity(page_size as usize);
-        meta_page.resize(page_size as usize, 0u8);
+        ~meta_page = Vec.with_capacity(page_size as u64);
+        meta_page.resize(page_size as u64, 0u8);
         meta_header.write_to_page(&meta_page);
         PageHeader.update_checksum(&meta_page);
         meta_file.write_at(0, &meta_page)?;
@@ -103,7 +103,7 @@ X Database {
 
         # Step 2: Open meta.vdb → read page 0 → verify magic → load database header
         ~meta_file = File.open("{db_path}/{FILE_NAME_META}", "rw")?;
-        ~meta_buf = meta_file.read_at(0, page_size as usize)?;
+        ~meta_buf = meta_file.read_at(0, page_size as u64)?;
         ~meta = MetaPageHeader.read_from_page(&meta_buf)?;
         meta.validate()?;
 
@@ -164,8 +164,8 @@ X Database {
 
     # Flush meta page to disk
     F flush_meta(~self) -> Result<(), VaisError> {
-        ~page_buf = Vec.with_capacity(self.page_size as usize);
-        page_buf.resize(self.page_size as usize, 0u8);
+        ~page_buf = Vec.with_capacity(self.page_size as u64);
+        page_buf.resize(self.page_size as u64, 0u8);
         self.meta.write_to_page(&page_buf);
         PageHeader.update_checksum(&page_buf);
         self.meta_file.write_at(0, &page_buf)?;
@@ -204,8 +204,8 @@ X Database {
 # Helper: write bootstrap page to data.vdb
 F write_bootstrap_page(file: &File, page_size: u32) -> Result<(), VaisError> {
     ~bootstrap = BootstrapPage.new(page_size);
-    ~page_buf = Vec.with_capacity(page_size as usize);
-    page_buf.resize(page_size as usize, 0u8);
+    ~page_buf = Vec.with_capacity(page_size as u64);
+    page_buf.resize(page_size as u64, 0u8);
     bootstrap.write_to_page(&page_buf);
     PageHeader.update_checksum(&page_buf);
     file.write_at(0, &page_buf)?;
@@ -215,8 +215,8 @@ F write_bootstrap_page(file: &File, page_size: u32) -> Result<(), VaisError> {
 # Helper: write initial empty freelist page at page 1
 F write_initial_freelist(file: &File, page_size: u32, file_id: u8) -> Result<(), VaisError> {
     ~header = PageHeader.new(1, PAGE_TYPE_FREELIST, ENGINE_TAG_COMMON);
-    ~page_buf = Vec.with_capacity(page_size as usize);
-    page_buf.resize(page_size as usize, 0u8);
+    ~page_buf = Vec.with_capacity(page_size as u64);
+    page_buf.resize(page_size as u64, 0u8);
 
     ~buf = ByteBuffer.wrap(&page_buf);
     header.serialize(&buf);
@@ -236,8 +236,8 @@ F create_engine_file(db_path: &Str, file_name: &Str, file_id: u8, page_size: u32
 
     # Write file header at page 0
     ~file_header = FileHeader.new(file_id, page_size, FILE_EXTENSION_INCREMENT + 2);
-    ~page_buf = Vec.with_capacity(page_size as usize);
-    page_buf.resize(page_size as usize, 0u8);
+    ~page_buf = Vec.with_capacity(page_size as u64);
+    page_buf.resize(page_size as u64, 0u8);
     file_header.write_to_page(&page_buf);
     PageHeader.update_checksum(&page_buf);
     file.write_at(0, &page_buf)?;
@@ -252,15 +252,15 @@ F create_engine_file(db_path: &Str, file_name: &Str, file_id: u8, page_size: u32
 # Helper: open and verify an engine file
 F open_and_verify_file(db_path: &Str, file_name: &Str, expected_file_id: u8, page_size: u32) -> Result<File, VaisError> {
     ~file = File.open("{db_path}/{file_name}", "rw")?;
-    ~page_buf = file.read_at(0, page_size as usize)?;
+    ~page_buf = file.read_at(0, page_size as u64)?;
     ~file_header = FileHeader.read_from_page(&page_buf)?;
     file_header.validate()?;
 
-    if file_header.file_id != expected_file_id {
-        return Err(err_internal("File ID mismatch in {file_name}"));
+    I file_header.file_id != expected_file_id {
+        R Err(err_internal("File ID mismatch in {file_name}"));
     }
-    if file_header.page_size != page_size {
-        return Err(err_internal("Page size mismatch in {file_name}"));
+    I file_header.page_size != page_size {
+        R Err(err_internal("Page size mismatch in {file_name}"));
     }
 
     Ok(file)
@@ -270,7 +270,7 @@ F open_and_verify_file(db_path: &Str, file_name: &Str, expected_file_id: u8, pag
 F generate_uuid() -> [u8; 16] {
     ~uuid = [0u8; 16];
     ~rng = Random.new();
-    for i in 0..16 {
+    L i: 0..16 {
         uuid[i] = rng.uniform(0, 255) as u8;
     }
     # Set version 4 (bits 4-7 of byte 6)

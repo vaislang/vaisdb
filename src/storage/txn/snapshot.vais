@@ -16,8 +16,8 @@ X Snapshot {
     # Create a new snapshot
     F new(txn_id: u64, active_txns: Vec<u64>) -> Snapshot {
         ~min_active = txn_id;
-        for id in &active_txns {
-            if *id < min_active {
+        L id: &active_txns {
+            I *id < min_active {
                 min_active = *id;
             }
         }
@@ -37,9 +37,9 @@ X Snapshot {
 
     # Check if a transaction ID was active at snapshot time
     F is_active(self, txn_id: u64) -> bool {
-        for id in &self.active_txns {
-            if *id == txn_id {
-                return true;
+        L id: &self.active_txns {
+            I *id == txn_id {
+                R true;
             }
         }
         false
@@ -48,8 +48,8 @@ X Snapshot {
     # Check if a transaction was committed before this snapshot
     # txn_id < snapshot.txn_id AND txn_id NOT IN active_txns
     F is_visible_txn(self, txn_id: u64) -> bool {
-        if txn_id >= self.txn_id {
-            return false;
+        I txn_id >= self.txn_id {
+            R false;
         }
         !self.is_active(txn_id)
     }

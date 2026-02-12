@@ -37,7 +37,7 @@ F perform_recovery(
 
     ~total_txns = analysis.txn_table.len() as u32;
     ~active_count: u32 = 0;
-    for (_, entry) in &analysis.txn_table {
+    L (_, entry): &analysis.txn_table {
         M entry.state {
             redo.RecoveryTxnState.Active => { active_count += 1; },
             _ => {},
@@ -69,14 +69,14 @@ F needs_recovery(
     wal_dir: &str,
     checkpoint_lsn: u64,
 ) -> Result<bool, VaisError> {
-    if checkpoint_lsn == NULL_LSN {
+    I checkpoint_lsn == NULL_LSN {
         # No checkpoint ever taken, need recovery if WAL exists
         ~iter = redo.WalRecordIterator.from_lsn(wal_dir.to_string(), NULL_LSN)?;
         M iter.next()? {
             Some(_) => Ok(true),
             None => Ok(false),
         }
-    } else {
+    } E {
         # Check if there are records after the checkpoint
         ~iter = redo.WalRecordIterator.from_lsn(wal_dir.to_string(), checkpoint_lsn)?;
         # Skip past the checkpoint record itself

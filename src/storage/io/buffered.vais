@@ -21,7 +21,7 @@ X BufferedIO {
     # Read a page at the given page_id
     F read_page(self, page_id: u32) -> Result<Vec<u8>, VaisError> {
         ~offset = (page_id as u64) * (self.page_size as u64);
-        self.file.read_at(offset, self.page_size as usize)
+        self.file.read_at(offset, self.page_size as u64)
     }
 
     # Write a page at the given page_id
@@ -45,7 +45,7 @@ X BufferedIO {
     F read_pages(self, start_page_id: u32, count: u32) -> Result<Vec<u8>, VaisError> {
         ~offset = (start_page_id as u64) * (self.page_size as u64);
         ~total_size = (count as u64) * (self.page_size as u64);
-        self.file.read_at(offset, total_size as usize)
+        self.file.read_at(offset, total_size as u64)
     }
 
     # Write multiple contiguous pages

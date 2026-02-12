@@ -41,19 +41,19 @@ F analyze_query(query: &SelectQuery) -> Result<QueryProfile, VaisError> {
 
 F analyze_select_query(query: &SelectQuery, profile: &~QueryProfile) -> Result<(), VaisError> {
     # 1. Analyze CTEs (WITH clause)
-    for cte in &query.ctes {
+    L cte: &query.ctes {
         analyze_cte(cte, profile)?;
     }
 
     # 2. Analyze SELECT list
-    for item in &query.select_list {
+    L item: &query.select_list {
         analyze_select_item(item, profile)?;
     }
 
     # 3. Analyze FROM clause
     M &query.from {
         Some(ref table_refs) => {
-            for table_ref in table_refs {
+            L table_ref: table_refs {
                 analyze_table_ref(table_ref, profile)?;
             }
         },
@@ -69,7 +69,7 @@ F analyze_select_query(query: &SelectQuery, profile: &~QueryProfile) -> Result<(
     }
 
     # 5. Analyze GROUP BY
-    for expr in &query.group_by {
+    L expr: &query.group_by {
         analyze_expr(expr, profile)?;
     }
 
@@ -82,7 +82,7 @@ F analyze_select_query(query: &SelectQuery, profile: &~QueryProfile) -> Result<(
     }
 
     # 7. Analyze ORDER BY
-    for order_item in &query.order_by {
+    L order_item: &query.order_by {
         analyze_expr(&order_item.expr, profile)?;
     }
 
@@ -164,7 +164,7 @@ F analyze_table_ref(table_ref: &TableRef, profile: &~QueryProfile) -> Result<(),
         TableRef.TableFunction { name, args, alias } => {
             # Table-valued function — detect engine functions (VECTOR_SEARCH, etc.)
             analyze_function_call(name, args, profile)?;
-            for arg in args {
+            L arg: args {
                 analyze_expr(arg, profile)?;
             }
             Ok(())
@@ -229,7 +229,7 @@ F analyze_expr(expr: &Expr, profile: &~QueryProfile) -> Result<(), VaisError> {
         },
         Expr.InList { expr, list, .. } => {
             analyze_expr(expr, profile)?;
-            for item in list {
+            L item: list {
                 analyze_expr(item, profile)?;
             }
             Ok(())
@@ -246,7 +246,7 @@ F analyze_expr(expr: &Expr, profile: &~QueryProfile) -> Result<(), VaisError> {
             analyze_expr(pattern, profile)
         },
         Expr.Case { operand, when_clauses, else_result } => {
-            # Analyze operand if present
+            # Analyze operand I present
             M operand {
                 Some(ref op) => {
                     analyze_expr(op, profile)?;
@@ -254,11 +254,11 @@ F analyze_expr(expr: &Expr, profile: &~QueryProfile) -> Result<(), VaisError> {
                 None => {},
             }
             # Analyze all WHEN clauses
-            for when in when_clauses {
+            L when: when_clauses {
                 analyze_expr(&when.condition, profile)?;
                 analyze_expr(&when.result, profile)?;
             }
-            # Analyze ELSE clause if present
+            # Analyze ELSE clause I present
             M else_result {
                 Some(ref res) => {
                     analyze_expr(res, profile)?;
@@ -274,17 +274,17 @@ F analyze_expr(expr: &Expr, profile: &~QueryProfile) -> Result<(), VaisError> {
             # This is where we detect engine functions!
             analyze_function_call(name, args, profile)?;
             # Also analyze arguments recursively
-            for arg in args {
+            L arg: args {
                 analyze_expr(arg, profile)?;
             }
             Ok(())
         },
         Expr.WindowFunc { func, partition_by, order_by } => {
             analyze_expr(func, profile)?;
-            for expr in partition_by {
+            L expr: partition_by {
                 analyze_expr(expr, profile)?;
             }
-            for order_item in order_by {
+            L order_item: order_by {
                 analyze_expr(&order_item.expr, profile)?;
             }
             Ok(())
@@ -340,8 +340,8 @@ F analyze_function_call(name: &Str, args: &Vec<Expr>, profile: &~QueryProfile) -
 
 # VECTOR_SEARCH(table, column, query_vector, top_k [, ef_search])
 F extract_vector_search_params(args: &Vec<Expr>, profile: &~QueryProfile) -> Result<(), VaisError> {
-    if args.len() < 4 || args.len() > 5 {
-        return Err(err_analyze_failed(
+    I args.len() < 4 || args.len() > 5 {
+        R Err(err_analyze_failed(
             "VECTOR_SEARCH requires 4-5 arguments: (table, column, query_vector, top_k [, ef_search])"
         ));
     }
@@ -360,14 +360,14 @@ F extract_vector_search_params(args: &Vec<Expr>, profile: &~QueryProfile) -> Res
 
     # Extract optional ef_search (arg 4)
     ~ef_search: Option<u32> = None;
-    if args.len() == 5 {
+    I args.len() == 5 {
         ef_search = Some(extract_integer_literal(&args[4])?);
     }
 
     # Build VectorScanParams
     ~params = VectorScanParams.new(table_name, column_name, query_vector_expr, top_k);
-    if ef_search.is_some() {
-        params = params.with_ef_search(ef_search.unwrap());
+    I ef_search.is_some() {
+        params = params.with_ef_search(ef_search!);
     }
 
     profile.vector_calls.push(params);
@@ -380,8 +380,8 @@ F extract_vector_search_params(args: &Vec<Expr>, profile: &~QueryProfile) -> Res
 
 # GRAPH_TRAVERSE(start_node_id, max_depth [, direction] [, edge_types] [, return_paths] [, use_dfs])
 F extract_graph_traverse_params(args: &Vec<Expr>, profile: &~QueryProfile) -> Result<(), VaisError> {
-    if args.len() < 2 || args.len() > 6 {
-        return Err(err_analyze_failed(
+    I args.len() < 2 || args.len() > 6 {
+        R Err(err_analyze_failed(
             "GRAPH_TRAVERSE requires 2-6 arguments: (start_node_id, max_depth [, direction] [, edge_types] [, return_paths] [, use_dfs])"
         ));
     }
@@ -394,38 +394,38 @@ F extract_graph_traverse_params(args: &Vec<Expr>, profile: &~QueryProfile) -> Re
 
     # Extract optional direction (arg 2, default OUTGOING)
     ~direction: u8 = DIRECTION_OUTGOING;
-    if args.len() >= 3 {
+    I args.len() >= 3 {
         direction = extract_direction(&args[2])?;
     }
 
     # Extract optional edge_types (arg 3)
     ~edge_type_filter: Option<Vec<Str>> = None;
-    if args.len() >= 4 {
+    I args.len() >= 4 {
         edge_type_filter = Some(extract_string_array(&args[3])?);
     }
 
     # Extract optional return_paths (arg 4, default false)
     ~return_paths = false;
-    if args.len() >= 5 {
+    I args.len() >= 5 {
         return_paths = extract_boolean_literal(&args[4])?;
     }
 
     # Extract optional use_dfs (arg 5, default false)
     ~use_dfs = false;
-    if args.len() >= 6 {
+    I args.len() >= 6 {
         use_dfs = extract_boolean_literal(&args[5])?;
     }
 
     # Build GraphTraverseNodeParams
     ~params = GraphTraverseNodeParams.new(start_node_expr, max_depth);
     params = params.with_direction(direction);
-    if edge_type_filter.is_some() {
-        params = params.with_edge_filter(edge_type_filter.unwrap());
+    I edge_type_filter.is_some() {
+        params = params.with_edge_filter(edge_type_filter!);
     }
-    if return_paths {
+    I return_paths {
         params = params.with_paths();
     }
-    if use_dfs {
+    I use_dfs {
         params = params.with_dfs();
     }
 
@@ -439,8 +439,8 @@ F extract_graph_traverse_params(args: &Vec<Expr>, profile: &~QueryProfile) -> Re
 
 # FULLTEXT_MATCH(table, column, query_text, top_k)
 F extract_fulltext_match_params(args: &Vec<Expr>, profile: &~QueryProfile) -> Result<(), VaisError> {
-    if args.len() != 4 {
-        return Err(err_analyze_failed(
+    I args.len() != 4 {
+        R Err(err_analyze_failed(
             "FULLTEXT_MATCH requires 4 arguments: (table, column, query_text, top_k)"
         ));
     }
@@ -489,14 +489,14 @@ F extract_integer_literal(expr: &Expr) -> Result<u32, VaisError> {
         Expr.Literal { value } => {
             M value {
                 SqlValue.IntVal { v: n } => {
-                    if *n < 0 {
-                        return Err(err_analyze_failed("Expected non-negative integer"));
+                    I *n < 0 {
+                        R Err(err_analyze_failed("Expected non-negative integer"));
                     }
                     Ok(*n as u32)
                 },
                 SqlValue.IntVal { v: n } => {
-                    if *n < 0 {
-                        return Err(err_analyze_failed("Expected non-negative integer"));
+                    I *n < 0 {
+                        R Err(err_analyze_failed("Expected non-negative integer"));
                     }
                     Ok(*n as u32)
                 },
@@ -545,16 +545,16 @@ F extract_string_array(expr: &Expr) -> Result<Vec<Str>, VaisError> {
             M value {
                 SqlValue.StringVal { v: ref s } => {
                     # Comma-separated string → split into array
-                    if s.contains(',') {
+                    I s.contains(',') {
                         ~result: Vec<Str> = Vec.new();
-                        for part in s.split(',') {
+                        L part: s.split(',') {
                             ~trimmed = part.trim().to_string();
-                            if trimmed.len() > 0 {
+                            I trimmed.len() > 0 {
                                 result.push(trimmed);
                             }
                         }
                         Ok(result)
-                    } else {
+                    } E {
                         # Single string → single-element array
                         ~result: Vec<Str> = Vec.new();
                         result.push(s.clone());

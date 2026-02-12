@@ -95,20 +95,20 @@ X HnswConfig {
         distance_metric: u8
     ) -> Result<HnswConfig, VaisError> {
         # Validate parameters
-        if m == 0 {
-            return Err(err_hnsw_invalid_config("m must be > 0"));
+        I m == 0 {
+            R Err(err_hnsw_invalid_config("m must be > 0"));
         }
-        if m_max_0 < m {
-            return Err(err_hnsw_invalid_config("m_max_0 must be >= m"));
+        I m_max_0 < m {
+            R Err(err_hnsw_invalid_config("m_max_0 must be >= m"));
         }
-        if ef_construction < m {
-            return Err(err_hnsw_invalid_config("ef_construction must be >= m"));
+        I ef_construction < m {
+            R Err(err_hnsw_invalid_config("ef_construction must be >= m"));
         }
-        if ef_search == 0 {
-            return Err(err_hnsw_invalid_config("ef_search must be > 0"));
+        I ef_search == 0 {
+            R Err(err_hnsw_invalid_config("ef_search must be > 0"));
         }
-        if distance_metric > DISTANCE_DOT_PRODUCT {
-            return Err(err_hnsw_invalid_config("invalid distance_metric"));
+        I distance_metric > DISTANCE_DOT_PRODUCT {
+            R Err(err_hnsw_invalid_config("invalid distance_metric"));
         }
 
         Ok(HnswConfig {
@@ -194,7 +194,7 @@ X HnswMeta {
         header.write_to_page(page_data);
 
         # Write metadata after page header
-        ~buf = ByteBuffer.wrap(&page_data[PAGE_HEADER_SIZE as usize..]);
+        ~buf = ByteBuffer.wrap(&page_data[PAGE_HEADER_SIZE as u64..]);
         buf.put_u8(self.format_version);
         buf.put_u64_le(self.entry_point);
         buf.put_u8(self.max_layer);
@@ -211,15 +211,15 @@ X HnswMeta {
     F deserialize_from_page(page_data: &[u8]) -> Result<HnswMeta, VaisError> {
         # Read and validate page header
         ~header = PageHeader.read_from_page(page_data)?;
-        if header.page_type != PAGE_TYPE_HNSW_META {
-            return Err(err_hnsw_meta_corrupt(header.page_id));
+        I header.page_type != PAGE_TYPE_HNSW_META {
+            R Err(err_hnsw_meta_corrupt(header.page_id));
         }
 
         # Read metadata after page header
-        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as usize..]);
+        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as u64..]);
         ~format_version = buf.get_u8()?;
-        if format_version != HNSW_FORMAT_VERSION {
-            return Err(err_hnsw_meta_corrupt(header.page_id));
+        I format_version != HNSW_FORMAT_VERSION {
+            R Err(err_hnsw_meta_corrupt(header.page_id));
         }
 
         Ok(HnswMeta {
@@ -241,7 +241,7 @@ X HnswMeta {
     # Update entry point and max layer
     F update_entry_point(~self, node_id: u64, layer: u8) {
         self.entry_point = node_id;
-        if layer > self.max_layer {
+        I layer > self.max_layer {
             self.max_layer = layer;
         }
     }
@@ -296,7 +296,7 @@ X HnswNode {
         cmd_id: u32
     ) -> HnswNode {
         # Initialize neighbor lists for all layers (0..=max_layer)
-        ~neighbors = Vec.with_capacity((max_layer + 1) as usize);
+        ~neighbors = Vec.with_capacity((max_layer + 1) as u64);
         ~i = 0;
         L while i <= max_layer {
             neighbors.push(Vec.new());
@@ -326,7 +326,7 @@ X HnswNode {
         buf.put_u32_le(self.vector_page_id);
         buf.put_u16_le(self.vector_offset);
         buf.put_u8(self.max_layer);
-        buf.put_u8(if self.is_deleted { 1 } else { 0 });
+        buf.put_u8(I self.is_deleted { 1 } E { 0 });
 
         # MVCC metadata (32 bytes)
         buf.put_u64_le(self.txn_id_create);
@@ -339,7 +339,7 @@ X HnswNode {
         # Format per layer: neighbor_count(u16) + [node_id(u64) + distance(f32)] * count
         ~layer = 0;
         L while layer <= self.max_layer {
-            ~layer_neighbors = &self.neighbors[layer as usize];
+            ~layer_neighbors = &self.neighbors[layer as u64];
             buf.put_u16_le(layer_neighbors.len() as u16);
 
             ~i = 0;
@@ -369,10 +369,10 @@ X HnswNode {
         ~expire_cmd_id = buf.get_u32_le()?;
 
         # Neighbor lists
-        ~neighbors = Vec.with_capacity((max_layer + 1) as usize);
+        ~neighbors = Vec.with_capacity((max_layer + 1) as u64);
         ~layer = 0;
         L while layer <= max_layer {
-            ~count = buf.get_u16_le()? as usize;
+            ~count = buf.get_u16_le()? as u64;
             ~layer_neighbors = Vec.with_capacity(count);
 
             ~i = 0;
@@ -414,26 +414,26 @@ X HnswNode {
 
     # Get neighbors at specific layer
     F get_neighbors(self, layer: u8) -> Result<&Vec<HnswNeighbor>, VaisError> {
-        if layer > self.max_layer {
-            return Err(err_hnsw_invalid_layer(layer, self.max_layer));
+        I layer > self.max_layer {
+            R Err(err_hnsw_invalid_layer(layer, self.max_layer));
         }
-        Ok(&self.neighbors[layer as usize])
+        Ok(&self.neighbors[layer as u64])
     }
 
     # Get mutable neighbors at specific layer
     F get_neighbors_mut(~self, layer: u8) -> Result<&~Vec<HnswNeighbor>, VaisError> {
-        if layer > self.max_layer {
-            return Err(err_hnsw_invalid_layer(layer, self.max_layer));
+        I layer > self.max_layer {
+            R Err(err_hnsw_invalid_layer(layer, self.max_layer));
         }
-        Ok(&~self.neighbors[layer as usize])
+        Ok(&~self.neighbors[layer as u64])
     }
 
     # Add neighbor at specific layer
     F add_neighbor(~self, layer: u8, neighbor: HnswNeighbor) -> Result<(), VaisError> {
-        if layer > self.max_layer {
-            return Err(err_hnsw_invalid_layer(layer, self.max_layer));
+        I layer > self.max_layer {
+            R Err(err_hnsw_invalid_layer(layer, self.max_layer));
         }
-        self.neighbors[layer as usize].push(neighbor);
+        self.neighbors[layer as u64].push(neighbor);
         Ok(())
     }
 
@@ -443,12 +443,12 @@ X HnswNode {
     }
 
     # Calculate serialized size
-    F serialized_size(self) -> usize {
+    F serialized_size(self) -> u64 {
         ~size = 48;  # Fixed header
         ~layer = 0;
         L while layer <= self.max_layer {
             size += 2;  # neighbor_count
-            size += self.neighbors[layer as usize].len() * 12;  # (u64 + f32) per neighbor
+            size += self.neighbors[layer as u64].len() * 12;  # (u64 + f32) per neighbor
             layer += 1;
         }
         size
@@ -498,22 +498,22 @@ X SearchCandidate {
 
     # Compare by distance (for min-heap: smaller distance = higher priority)
     F cmp_min(self, other: &SearchCandidate) -> i8 {
-        if self.distance < other.distance {
+        I self.distance < other.distance {
             -1
-        } else if self.distance > other.distance {
+        } E I self.distance > other.distance {
             1
-        } else {
+        } E {
             0
         }
     }
 
     # Compare by distance (for max-heap: larger distance = higher priority)
     F cmp_max(self, other: &SearchCandidate) -> i8 {
-        if self.distance > other.distance {
+        I self.distance > other.distance {
             -1
-        } else if self.distance < other.distance {
+        } E I self.distance < other.distance {
             1
-        } else {
+        } E {
             0
         }
     }
@@ -562,7 +562,7 @@ X LayerRng {
         ~uniform = self.next_f64();
 
         # Avoid ln(0) by clamping to small positive value
-        if uniform < 0.000001 {
+        I uniform < 0.000001 {
             uniform = 0.000001;
         }
 
@@ -570,9 +570,9 @@ X LayerRng {
 
         # Clamp to reasonable hard maximum to prevent runaway layers
         # For M=16, layer > 30 is astronomically unlikely (~10^-36)
-        if layer > 30 {
+        I layer > 30 {
             30
-        } else {
+        } E {
             layer
         }
     }

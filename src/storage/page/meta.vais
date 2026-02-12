@@ -71,8 +71,8 @@ X MetaPageHeader {
     # Deserialize metadata fields (reads 208 bytes)
     F deserialize(buf: &ByteBuffer) -> Result<MetaPageHeader, VaisError> {
         ~magic = buf.get_u64_le()?;
-        if magic != VAISDB_MAGIC {
-            return Err(err_invalid_magic());
+        I magic != VAISDB_MAGIC {
+            R Err(err_invalid_magic());
         }
         Ok(MetaPageHeader {
             magic,
@@ -103,20 +103,20 @@ X MetaPageHeader {
     # Read metadata from a page-sized buffer (skips 48B page header)
     F read_from_page(page_data: &[u8]) -> Result<MetaPageHeader, VaisError> {
         ~buf = ByteBuffer.wrap_readonly(page_data);
-        buf.set_position(PAGE_HEADER_SIZE as usize);
+        buf.set_position(PAGE_HEADER_SIZE as u64);
         MetaPageHeader.deserialize(&buf)
     }
 
     # Validate the meta page header
     F validate(self) -> Result<(), VaisError> {
-        if self.magic != VAISDB_MAGIC {
-            return Err(err_invalid_magic());
+        I self.magic != VAISDB_MAGIC {
+            R Err(err_invalid_magic());
         }
-        if self.page_size != 8192 && self.page_size != 16384 {
-            return Err(err_internal("Invalid page size in meta header"));
+        I self.page_size != 8192 && self.page_size != 16384 {
+            R Err(err_internal("Invalid page size in meta header"));
         }
-        if self.db_format_version == 0 {
-            return Err(err_internal("Invalid format version 0"));
+        I self.db_format_version == 0 {
+            R Err(err_internal("Invalid format version 0"));
         }
         Ok(())
     }

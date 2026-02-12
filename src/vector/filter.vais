@@ -153,7 +153,7 @@ X FilteredVectorSearch {
         # If no predicate, just run regular vector search
         M &self.predicate {
             None => {
-                return execute_vector_search(&self.search_params, self.ctx);
+                R execute_vector_search(&self.search_params, self.ctx);
             },
             Some(_) => {
                 # Determine strategy and execute
@@ -180,7 +180,7 @@ X FilteredVectorSearch {
     F execute_pre_filter(~self) -> Result<Vec<VectorSearchRow>, VaisError> {
         ~predicate = M &self.predicate {
             Some(p) => p,
-            None => return execute_vector_search(&self.search_params, self.ctx),
+            None => R execute_vector_search(&self.search_params, self.ctx),
         };
 
         # 1. Get table metadata
@@ -199,9 +199,8 @@ X FilteredVectorSearch {
 
         ~current_page_id = table_info.first_page_id;
         L {
-            if current_page_id == 0 || current_page_id == NULL_PAGE {
-                break;
-            }
+            I current_page_id == 0 || current_page_id == NULL_PAGE {
+                B            }
 
             # Load heap page
             ~frame_id = self.ctx.pool.fetch_page(FILE_ID_DATA, current_page_id)?;
@@ -210,7 +209,7 @@ X FilteredVectorSearch {
             ~next_page_id = heap.next_page_id();
 
             # Scan all slots in this page
-            for slot_id in 0..heap.slot_count() {
+            L slot_id: 0..heap.slot_count() {
                 scanned_count += 1;
 
                 # Get tuple data
@@ -221,15 +220,14 @@ X FilteredVectorSearch {
                         M heap.get_mvcc_tuple(slot_id) {
                             None => continue,
                             Some(mvcc_tuple) => {
-                                if !is_tuple_visible(
+                                I !is_tuple_visible(
                                     mvcc_tuple,
                                     self.ctx.txn_id,
                                     0,
                                     &self.ctx.snapshot,
                                     self.ctx.catalog.get_clog()
                                 ) {
-                                    continue;
-                                }
+                                    C                                }
                             }
                         }
 
@@ -237,7 +235,7 @@ X FilteredVectorSearch {
                         ~row = Row.decode(tuple_data, columns.iter().map(|c| c.data_type).collect().as_slice())?;
 
                         # Evaluate predicate
-                        if eval_predicate(predicate, &row, &eval_ctx)? {
+                        I eval_predicate(predicate, &row, &eval_ctx)? {
                             # Compute node_id from page_id and slot_id
                             ~node_id = ((current_page_id as u64) << 16) | (slot_id as u64);
                             valid_node_ids.insert(node_id);
@@ -257,12 +255,11 @@ X FilteredVectorSearch {
 
         # 5. Filter results against bitmap
         ~filtered_results = Vec.new();
-        for result in search_results {
-            if valid_node_ids.contains(&result.node_id) {
+        L result: search_results {
+            I valid_node_ids.contains(&result.node_id) {
                 filtered_results.push(result);
-                if filtered_results.len() >= self.search_params.top_k {
-                    break;
-                }
+                I filtered_results.len() >= self.search_params.top_k {
+                    B                }
             }
         }
 
@@ -280,7 +277,7 @@ X FilteredVectorSearch {
     F execute_post_filter(~self) -> Result<Vec<VectorSearchRow>, VaisError> {
         ~predicate = M &self.predicate {
             Some(p) => p,
-            None => return execute_vector_search(&self.search_params, self.ctx),
+            None => R execute_vector_search(&self.search_params, self.ctx),
         };
 
         # 1. Get table metadata for evaluation context
@@ -294,7 +291,7 @@ X FilteredVectorSearch {
         ~eval_ctx = EvalContext.from_columns(&table_info.name, columns.as_slice());
 
         # 3. Execute vector search with oversampling
-        ~oversample_k = (self.search_params.top_k as f32 * self.config.post_filter_oversample) as usize;
+        ~oversample_k = (self.search_params.top_k as f32 * self.config.post_filter_oversample) as u64;
         ~oversample_params = VectorSearchParams {
             table_name: self.search_params.table_name.clone(),
             column_name: self.search_params.column_name.clone(),
@@ -310,12 +307,11 @@ X FilteredVectorSearch {
 
         # 4. Filter results by evaluating predicate
         ~filtered_results = Vec.new();
-        for result in search_results {
-            if eval_predicate(predicate, &result.row, &eval_ctx)? {
+        L result: search_results {
+            I eval_predicate(predicate, &result.row, &eval_ctx)? {
                 filtered_results.push(result);
-                if filtered_results.len() >= self.search_params.top_k {
-                    break;
-                }
+                I filtered_results.len() >= self.search_params.top_k {
+                    B                }
             }
         }
 
@@ -332,7 +328,7 @@ X FilteredVectorSearch {
     F execute_hybrid(~self) -> Result<Vec<VectorSearchRow>, VaisError> {
         ~predicate = M &self.predicate {
             Some(p) => p,
-            None => return execute_vector_search(&self.search_params, self.ctx),
+            None => R execute_vector_search(&self.search_params, self.ctx),
         };
 
         # 1. Get table statistics
@@ -345,10 +341,10 @@ X FilteredVectorSearch {
         ~selectivity = estimate_selectivity(predicate, &table_stats);
 
         # 3. Choose strategy based on selectivity threshold
-        if selectivity < self.config.selectivity_threshold {
+        I selectivity < self.config.selectivity_threshold {
             # Very selective → pre-filter
             self.execute_pre_filter()
-        } else {
+        } E {
             # Not very selective → post-filter
             self.execute_post_filter()
         }
@@ -409,13 +405,13 @@ F estimate_selectivity(predicate: &Expr, table_stats: &TableStats) -> f32 {
         # IS NULL
         Expr.IsNull { expr: _, negated } => {
             # Assume 5% NULL values
-            if *negated { 0.95 } else { 0.05 }
+            I *negated { 0.95 } E { 0.05 }
         },
 
         # BETWEEN
         Expr.Between { expr: _, low: _, high: _, negated } => {
             # Range: assume 20%
-            if *negated { 0.8 } else { 0.2 }
+            I *negated { 0.8 } E { 0.2 }
         },
 
         # IN list
@@ -423,14 +419,14 @@ F estimate_selectivity(predicate: &Expr, table_stats: &TableStats) -> f32 {
             # IN: selectivity = list_size / distinct_count
             # Default heuristic: 0.1 per item, capped at 0.9
             ~sel = (list.len() as f32) * 0.1;
-            if sel > 0.9 { sel = 0.9; }
-            if *negated { 1.0 - sel } else { sel }
+            I sel > 0.9 { sel = 0.9; }
+            I *negated { 1.0 - sel } E { sel }
         },
 
         # LIKE
         Expr.Like { expr: _, pattern: _, negated } => {
             # LIKE: assume 20% (conservative)
-            if *negated { 0.8 } else { 0.2 }
+            I *negated { 0.8 } E { 0.2 }
         },
 
         # Default for other expressions
@@ -450,7 +446,7 @@ F estimate_equality_selectivity(left: &Expr, right: &Expr, table_stats: &TableSt
         _ => {}
     }
 
-    if column_name.is_none() {
+    I column_name.is_none() {
         M right {
             Expr.ColumnRef { table: _, column } => {
                 column_name = Some(column.clone());
@@ -464,12 +460,12 @@ F estimate_equality_selectivity(left: &Expr, right: &Expr, table_stats: &TableSt
             # Use distinct count if available
             M table_stats.get_distinct_count(col) {
                 Some(distinct_count) => {
-                    if distinct_count == 0 || table_stats.row_count == 0 {
-                        return 0.1;
+                    I distinct_count == 0 || table_stats.row_count == 0 {
+                        R 0.1;
                     }
                     ~sel = 1.0 / (distinct_count as f32);
                     # Cap selectivity to avoid extreme values
-                    if sel < 0.001 { 0.001 } else if sel > 0.5 { 0.5 } else { sel }
+                    I sel < 0.001 { 0.001 } E I sel > 0.5 { 0.5 } E { sel }
                 },
                 None => 0.1,  # Default: assume 10%
             }

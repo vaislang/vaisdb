@@ -18,73 +18,73 @@ F is_visible(
     clog: &Clog,
 ) -> bool {
     # Fast-path: if creating txn was aborted, tuple was never committed → invisible
-    if is_aborted_fast(txn_id_create, clog) {
-        return false;
+    I is_aborted_fast(txn_id_create, clog) {
+        R false;
     }
 
     ~created_by = txn_id_create;
     ~expired_by = txn_id_expire;
 
     # If the expiring txn was aborted, treat as not expired
-    ~expired_by_effective = if expired_by != INVALID_TXN_ID && !is_aborted_fast(expired_by, clog) {
+    ~expired_by_effective = I expired_by != INVALID_TXN_ID && !is_aborted_fast(expired_by, clog) {
         expired_by
-    } else {
+    } E {
         INVALID_TXN_ID
     };
 
     # Case 1: Created by current transaction — use cmd_id for same-txn visibility
-    if created_by == snapshot.get_txn_id() {
+    I created_by == snapshot.get_txn_id() {
         # Created by later command in same txn → invisible
-        if cmd_id >= snapshot.get_cmd_id() {
-            return false;
+        I cmd_id >= snapshot.get_cmd_id() {
+            R false;
         }
         # Not yet expired, or expired by later command
-        if expired_by_effective == INVALID_TXN_ID {
-            return true;
+        I expired_by_effective == INVALID_TXN_ID {
+            R true;
         }
         # Expired by same transaction - check expire_cmd_id
-        if expired_by_effective == snapshot.get_txn_id() {
+        I expired_by_effective == snapshot.get_txn_id() {
             # Visible if expiration hasn't happened yet from this command's perspective
-            return expire_cmd_id >= snapshot.get_cmd_id();
+            R expire_cmd_id >= snapshot.get_cmd_id();
         }
-        return true;
+        R true;
     }
 
     # Case 2: Created by committed transaction visible to this snapshot
-    if !is_committed_before(created_by, snapshot, clog) {
-        return false;  # Creator not yet committed or aborted
+    I !is_committed_before(created_by, snapshot, clog) {
+        R false;  # Creator not yet committed or aborted
     }
 
     # Case 3: Check expiration
-    if expired_by_effective == INVALID_TXN_ID {
-        return true;  # Not expired
+    I expired_by_effective == INVALID_TXN_ID {
+        R true;  # Not expired
     }
     # Expired by current transaction - check expire_cmd_id
-    if expired_by_effective == snapshot.get_txn_id() {
-        return expire_cmd_id >= snapshot.get_cmd_id();
+    I expired_by_effective == snapshot.get_txn_id() {
+        R expire_cmd_id >= snapshot.get_cmd_id();
     }
-    if !is_committed_before(expired_by_effective, snapshot, clog) {
-        return true;  # Expirer not yet committed = still visible
+    I !is_committed_before(expired_by_effective, snapshot, clog) {
+        R true;  # Expirer not yet committed = still visible
     }
-    return false;  # Expired by committed transaction
+    R false;  # Expired by committed transaction
 }
 
 # Check if a transaction was committed before the snapshot
 F is_committed_before(txn_id: u64, snapshot: &Snapshot, clog: &Clog) -> bool {
     # Must be: txn_id < snapshot.txn_id AND txn_id NOT IN snapshot.active_txns AND committed
-    if txn_id >= snapshot.get_txn_id() {
-        return false;
+    I txn_id >= snapshot.get_txn_id() {
+        R false;
     }
-    if snapshot.is_active(txn_id) {
-        return false;
+    I snapshot.is_active(txn_id) {
+        R false;
     }
     clog.is_committed(txn_id)
 }
 
 # Fast-path check for aborted transactions
 F is_aborted_fast(txn_id: u64, clog: &Clog) -> bool {
-    if txn_id == INVALID_TXN_ID {
-        return false;
+    I txn_id == INVALID_TXN_ID {
+        R false;
     }
     clog.is_aborted(txn_id)
 }

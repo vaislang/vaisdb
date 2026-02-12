@@ -38,11 +38,11 @@ X FreelistBitmap {
     # Get the state of a bit (true = free, false = allocated)
     F get_bit(self, page_id: u32, pages_per_bitmap: u32) -> bool {
         ~bit_index = page_id % pages_per_bitmap;
-        ~byte_index = (bit_index / 8) as usize;
+        ~byte_index = (bit_index / 8) as u64;
         ~bit_offset = (bit_index % 8) as u8;
 
-        if byte_index >= self.data.len() {
-            return false;
+        I byte_index >= self.data.len() {
+            R false;
         }
 
         (self.data[byte_index] & (1 << bit_offset)) != 0
@@ -51,17 +51,17 @@ X FreelistBitmap {
     # Set the state of a bit (true = free, false = allocated)
     F set_bit(~self, page_id: u32, pages_per_bitmap: u32, free: bool) {
         ~bit_index = page_id % pages_per_bitmap;
-        ~byte_index = (bit_index / 8) as usize;
+        ~byte_index = (bit_index / 8) as u64;
         ~bit_offset = (bit_index % 8) as u8;
 
-        if byte_index >= self.data.len() {
+        I byte_index >= self.data.len() {
             return;
         }
 
-        if free {
+        I free {
             # Set bit to 1 (free)
             self.data[byte_index] |= (1 << bit_offset);
-        } else {
+        } E {
             # Set bit to 0 (allocated)
             self.data[byte_index] &= !(1 << bit_offset);
         }
@@ -74,17 +74,17 @@ X FreelistBitmap {
         ~max_bits = pages_per_bitmap.min((self.data.len() * 8) as u32);
 
         # Scan from hint to end
-        for bit in start_bit..max_bits {
-            if self.get_bit(bit, pages_per_bitmap) {
-                return Some(bit);
+        L bit: start_bit..max_bits {
+            I self.get_bit(bit, pages_per_bitmap) {
+                R Some(bit);
             }
         }
 
         # Wrap around: scan from 0 to hint
-        if start_bit > 0 {
-            for bit in 0..start_bit {
-                if self.get_bit(bit, pages_per_bitmap) {
-                    return Some(bit);
+        I start_bit > 0 {
+            L bit: 0..start_bit {
+                I self.get_bit(bit, pages_per_bitmap) {
+                    R Some(bit);
                 }
             }
         }
@@ -95,36 +95,36 @@ X FreelistBitmap {
     # Find first free page using byte-level scanning for better performance
     # This is an optimized version of find_first_free
     F find_first_free_fast(self, pages_per_bitmap: u32, start_hint: u32) -> Option<u32> {
-        ~start_byte = ((start_hint % pages_per_bitmap) / 8) as usize;
-        ~max_bytes = ((pages_per_bitmap + 7) / 8) as usize.min(self.data.len());
+        ~start_byte = ((start_hint % pages_per_bitmap) / 8) as u64;
+        ~max_bytes = ((pages_per_bitmap + 7) / 8) as u64.min(self.data.len());
 
         # Scan from hint byte to end
-        for byte_idx in start_byte..max_bytes {
-            if self.data[byte_idx] != 0 {
+        L byte_idx: start_byte..max_bytes {
+            I self.data[byte_idx] != 0 {
                 # Found a byte with free bits, find the first free bit
-                for bit_offset in 0..8 {
+                L bit_offset: 0..8 {
                     ~page_id = (byte_idx * 8 + bit_offset) as u32;
-                    if page_id >= pages_per_bitmap {
-                        break;
+                    I page_id >= pages_per_bitmap {
+                        B;
                     }
-                    if (self.data[byte_idx] & (1 << bit_offset)) != 0 {
-                        return Some(page_id);
+                    I (self.data[byte_idx] & (1 << bit_offset)) != 0 {
+                        R Some(page_id);
                     }
                 }
             }
         }
 
         # Wrap around: scan from 0 to hint byte
-        if start_byte > 0 {
-            for byte_idx in 0..start_byte {
-                if self.data[byte_idx] != 0 {
-                    for bit_offset in 0..8 {
+        I start_byte > 0 {
+            L byte_idx: 0..start_byte {
+                I self.data[byte_idx] != 0 {
+                    L bit_offset: 0..8 {
                         ~page_id = (byte_idx * 8 + bit_offset) as u32;
-                        if page_id >= pages_per_bitmap {
-                            break;
+                        I page_id >= pages_per_bitmap {
+                            B;
                         }
-                        if (self.data[byte_idx] & (1 << bit_offset)) != 0 {
-                            return Some(page_id);
+                        I (self.data[byte_idx] & (1 << bit_offset)) != 0 {
+                            R Some(page_id);
                         }
                     }
                 }
@@ -137,12 +137,12 @@ X FreelistBitmap {
     # Count total number of free pages in this bitmap
     F count_free(self, pages_per_bitmap: u32) -> u32 {
         ~count = 0u32;
-        ~max_bytes = ((pages_per_bitmap + 7) / 8) as usize.min(self.data.len());
+        ~max_bytes = ((pages_per_bitmap + 7) / 8) as u64.min(self.data.len());
 
-        for byte_idx in 0..max_bytes {
+        L byte_idx: 0..max_bytes {
             ~byte_val = self.data[byte_idx];
             # Count set bits in this byte using Brian Kernighan's algorithm
-            while byte_val != 0 {
+            L while byte_val != 0 {
                 byte_val &= byte_val - 1;  # Clear the lowest set bit
                 count += 1;
             }
@@ -150,13 +150,13 @@ X FreelistBitmap {
 
         # Adjust for partial last byte if pages_per_bitmap is not a multiple of 8
         ~last_byte_bits = pages_per_bitmap % 8;
-        if last_byte_bits != 0 {
-            ~last_byte_idx = (pages_per_bitmap / 8) as usize;
-            if last_byte_idx < self.data.len() {
+        I last_byte_bits != 0 {
+            ~last_byte_idx = (pages_per_bitmap / 8) as u64;
+            I last_byte_idx < self.data.len() {
                 ~last_byte = self.data[last_byte_idx];
                 # Count bits beyond pages_per_bitmap that shouldn't be counted
-                for bit in last_byte_bits..8 {
-                    if (last_byte & (1 << bit)) != 0 {
+                L bit: last_byte_bits..8 {
+                    I (last_byte & (1 << bit)) != 0 {
                         count -= 1;
                     }
                 }
@@ -173,7 +173,7 @@ X FreelistBitmap {
         ~allocated = Vec.new();
         ~search_start = 0u32;
 
-        while allocated.len() < (count as usize) {
+        L while allocated.len() < (count as u64) {
             M self.find_first_free_fast(pages_per_bitmap, search_start) {
                 Some(page_id) => {
                     self.set_bit(page_id, pages_per_bitmap, false);
@@ -182,7 +182,7 @@ X FreelistBitmap {
                 }
                 None => {
                     # No more free pages
-                    break;
+                    B;
                 }
             }
         }
@@ -197,11 +197,11 @@ X FreelistBitmap {
 
     # Deserialize bitmap from byte buffer
     F deserialize(buf: &ByteBuffer, page_size: u32) -> Result<FreelistBitmap, VaisError> {
-        ~body_size = (page_size - PAGE_HEADER_SIZE) as usize;
+        ~body_size = (page_size - PAGE_HEADER_SIZE) as u64;
         ~data = buf.get_bytes(body_size)?;
 
         ~bitmap = FreelistBitmap.new();
-        for i in 0..body_size.min(bitmap.data.len()) {
+        L i: 0..body_size.min(bitmap.data.len()) {
             bitmap.data[i] = data[i];
         }
 
@@ -220,8 +220,8 @@ X FreelistBitmap {
         header.write_to_page(page_data);
 
         # Write bitmap data after header
-        for i in 0..self.data.len() {
-            page_data[PAGE_HEADER_SIZE as usize + i] = self.data[i];
+        L i: 0..self.data.len() {
+            page_data[PAGE_HEADER_SIZE as u64 + i] = self.data[i];
         }
 
         # Update checksum
@@ -233,15 +233,15 @@ X FreelistBitmap {
         ~header = PageHeader.read_from_page(page_data)?;
 
         # Verify this is a freelist page
-        if header.page_type != PAGE_TYPE_FREELIST {
-            return Err(err_internal("Expected FREELIST page type"));
+        I header.page_type != PAGE_TYPE_FREELIST {
+            R Err(err_internal("Expected FREELIST page type"));
         }
 
         ~bitmap = FreelistBitmap.new();
-        ~body_size = (page_size - PAGE_HEADER_SIZE) as usize;
+        ~body_size = (page_size - PAGE_HEADER_SIZE) as u64;
 
-        for i in 0..body_size.min(bitmap.data.len()) {
-            bitmap.data[i] = page_data[PAGE_HEADER_SIZE as usize + i];
+        L i: 0..body_size.min(bitmap.data.len()) {
+            bitmap.data[i] = page_data[PAGE_HEADER_SIZE as u64 + i];
         }
 
         Ok(bitmap)
@@ -259,8 +259,8 @@ F bit_index_in_freelist(target_page_id: u32, pages_per_bitmap: u32) -> u32 {
 }
 
 # Helper function to calculate byte offset within freelist bitmap data
-F byte_offset_for_page(target_page_id: u32, pages_per_bitmap: u32) -> usize {
-    ((target_page_id % pages_per_bitmap) / 8) as usize
+F byte_offset_for_page(target_page_id: u32, pages_per_bitmap: u32) -> u64 {
+    ((target_page_id % pages_per_bitmap) / 8) as u64
 }
 
 # Helper function to calculate bit offset within a byte

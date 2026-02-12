@@ -69,8 +69,8 @@ X EmbeddingModelInfo {
 
     ## Validate that a vector matches this model's expected dimensions
     F validate_vector(&self, vector: &Vec<f32>) -> Result<(), VaisError> {
-        if vector.len() as u32 != self.dimensions {
-            return Err(err_rag_dimension_mismatch(self.dimensions, vector.len() as u32));
+        I vector.len() as u32 != self.dimensions {
+            R Err(err_rag_dimension_mismatch(self.dimensions, vector.len() as u32));
         }
         Ok(())
     }
@@ -96,7 +96,7 @@ X EmbeddingModelInfo {
         buf.put_u32_le(self.model_version);
         buf.put_u32_le(self.dimensions);
         buf.put_u8(self.distance_metric);
-        buf.put_u8(if self.is_active { 1 } else { 0 });
+        buf.put_u8(I self.is_active { 1 } E { 0 });
         buf.put_u16_le(0);  # reserved
         buf.put_i64_le(self.created_at);
         buf.put_u64_le(0);  # reserved for future
@@ -141,11 +141,11 @@ X EmbeddingModelRegistry {
     F register_model(~self, name: Str, dimensions: u32, distance: u8,
                      provider: Str, endpoint: Str) -> Result<u32, VaisError> {
         # Validate dimensions
-        if dimensions == 0 {
-            return Err(err_rag_invalid_embedding_config("Dimensions must be > 0"));
+        I dimensions == 0 {
+            R Err(err_rag_invalid_embedding_config("Dimensions must be > 0"));
         }
-        if distance > DISTANCE_DOT_PRODUCT {
-            return Err(err_rag_invalid_embedding_config("Invalid distance metric"));
+        I distance > DISTANCE_DOT_PRODUCT {
+            R Err(err_rag_invalid_embedding_config("Invalid distance metric"));
         }
 
         ~model_id = self.next_model_id;
@@ -154,7 +154,7 @@ X EmbeddingModelRegistry {
         # Deactivate all other models
         ~i: u32 = 0;
         W i < self.models.len() as u32 {
-            self.models.get_mut(i as usize).is_active = false;
+            self.models.get_mut(i as u64).is_active = false;
             i = i + 1;
         }
 
@@ -178,9 +178,9 @@ X EmbeddingModelRegistry {
     F get_active_model(&self) -> Option<&EmbeddingModelInfo> {
         ~i: u32 = 0;
         W i < self.models.len() as u32 {
-            ~model = self.models.get(i as usize);
-            if model.is_active {
-                return Some(model);
+            ~model = self.models.get(i as u64);
+            I model.is_active {
+                R Some(model);
             }
             i = i + 1;
         }
@@ -191,9 +191,9 @@ X EmbeddingModelRegistry {
     F get_model(&self, model_id: u32) -> Option<&EmbeddingModelInfo> {
         ~i: u32 = 0;
         W i < self.models.len() as u32 {
-            ~model = self.models.get(i as usize);
-            if model.model_id == model_id {
-                return Some(model);
+            ~model = self.models.get(i as u64);
+            I model.model_id == model_id {
+                R Some(model);
             }
             i = i + 1;
         }
@@ -204,9 +204,9 @@ X EmbeddingModelRegistry {
     F get_model_by_name(&self, name: &Str) -> Option<&EmbeddingModelInfo> {
         ~i: u32 = 0;
         W i < self.models.len() as u32 {
-            ~model = self.models.get(i as usize);
-            if model.model_name == *name {
-                return Some(model);
+            ~model = self.models.get(i as u64);
+            I model.model_name == *name {
+                R Some(model);
             }
             i = i + 1;
         }
@@ -225,9 +225,9 @@ X EmbeddingModelRegistry {
     F check_version(&self, index_model_id: u32, index_model_version: u32) -> Result<(), VaisError> {
         M self.get_model(index_model_id) {
             Some(model) => {
-                if model.model_version != index_model_version {
+                I model.model_version != index_model_version {
                     Err(err_rag_model_version_mismatch(model.model_version, index_model_version))
-                } else {
+                } E {
                     Ok(())
                 }
             },
@@ -239,10 +239,10 @@ X EmbeddingModelRegistry {
     F bump_version(~self, model_id: u32) -> Result<u32, VaisError> {
         ~i: u32 = 0;
         W i < self.models.len() as u32 {
-            ~model = self.models.get_mut(i as usize);
-            if model.model_id == model_id {
+            ~model = self.models.get_mut(i as u64);
+            I model.model_id == model_id {
                 model.model_version = model.model_version + 1;
-                return Ok(model.model_version);
+                R Ok(model.model_version);
             }
             i = i + 1;
         }
@@ -254,17 +254,17 @@ X EmbeddingModelRegistry {
         ~found = false;
         ~i: u32 = 0;
         W i < self.models.len() as u32 {
-            ~model = self.models.get_mut(i as usize);
-            if model.model_id == model_id {
+            ~model = self.models.get_mut(i as u64);
+            I model.model_id == model_id {
                 model.is_active = true;
                 found = true;
-            } else {
+            } E {
                 model.is_active = false;
             }
             i = i + 1;
         }
-        if !found {
-            return Err(err_rag_model_not_found(&"unknown"));
+        I !found {
+            R Err(err_rag_model_not_found(&"unknown"));
         }
         Ok(())
     }

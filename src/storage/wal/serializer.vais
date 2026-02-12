@@ -27,7 +27,7 @@ X WalRecord {
 
     # Serialize full record to bytes (header + payload)
     F to_bytes(&self) -> Vec<u8> {
-        ~buf = ByteBuffer.with_capacity(self.header.record_length as usize);
+        ~buf = ByteBuffer.with_capacity(self.header.record_length as u64);
         self.header.serialize(&~buf);
         buf.put_bytes(&self.payload);
         buf.to_vec()
@@ -39,7 +39,7 @@ X WalRecord {
         ~header = WalRecordHeader.deserialize(&buf)?;
 
         # Read payload (remaining bytes after header)
-        ~payload_len = (header.record_length as usize) - (WalRecordHeader.size() as usize);
+        ~payload_len = (header.record_length as u64) - (WalRecordHeader.size() as u64);
         ~payload = buf.get_bytes(payload_len)?;
 
         Ok(WalRecord { header, payload })
@@ -69,7 +69,7 @@ X WalRecordSerializer {
     # Returns the full serialized record ready to write to WAL
     F serialize_record(header: &WalRecordHeader, payload: &[u8]) -> Vec<u8> {
         # Allocate buffer for header + payload
-        ~total_len = (WAL_RECORD_HEADER_SIZE as usize) + payload.len();
+        ~total_len = (WAL_RECORD_HEADER_SIZE as u64) + payload.len();
         ~buf = ByteBuffer.with_capacity(total_len);
 
         # Write header (checksum will be 0 initially)
@@ -97,8 +97,8 @@ X WalRecordSerializer {
     # Verifies checksum before returning
     F deserialize_record(data: &[u8]) -> Result<(WalRecordHeader, Vec<u8>), VaisError> {
         # Minimum size check
-        if data.len() < (WAL_RECORD_HEADER_SIZE as usize) {
-            return Err(err_wal_corruption(0));
+        I data.len() < (WAL_RECORD_HEADER_SIZE as u64) {
+            R Err(err_wal_corruption(0));
         }
 
         # Parse header
@@ -106,17 +106,17 @@ X WalRecordSerializer {
         ~header = WalRecordHeader.deserialize(&buf)?;
 
         # Verify record length matches data length
-        if (header.record_length as usize) != data.len() {
-            return Err(err_wal_corruption(header.lsn));
+        I (header.record_length as u64) != data.len() {
+            R Err(err_wal_corruption(header.lsn));
         }
 
         # Verify checksum
-        if !header.verify_checksum(data) {
-            return Err(err_wal_corruption(header.lsn));
+        I !header.verify_checksum(data) {
+            R Err(err_wal_corruption(header.lsn));
         }
 
         # Extract payload (everything after header)
-        ~payload_len = data.len() - (WAL_RECORD_HEADER_SIZE as usize);
+        ~payload_len = data.len() - (WAL_RECORD_HEADER_SIZE as u64);
         ~payload = buf.get_bytes(payload_len)?;
 
         Ok((header, payload))

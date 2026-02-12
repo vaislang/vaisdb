@@ -112,15 +112,15 @@ X CycleDetector {
         config: &TraversalConfig
     ) -> Result<bool, VaisError> {
         # Validate input
-        if start == INVALID_NODE_ID {
-            return Err(err_cycle_invalid_node(start));
+        I start == INVALID_NODE_ID {
+            R Err(err_cycle_invalid_node(start));
         }
 
         # Validate direction
-        if config.direction != DIRECTION_OUTGOING &&
+        I config.direction != DIRECTION_OUTGOING &&
            config.direction != DIRECTION_INCOMING &&
            config.direction != DIRECTION_BOTH {
-            return Err(err_cycle_invalid_direction(config.direction));
+            R Err(err_cycle_invalid_direction(config.direction));
         }
 
         # Color map: Vec<(node_id, color)>
@@ -163,15 +163,15 @@ X CycleDetector {
         max_cycles: u32
     ) -> Result<Vec<CycleResult>, VaisError> {
         # Validate input
-        if start == INVALID_NODE_ID {
-            return Err(err_cycle_invalid_node(start));
+        I start == INVALID_NODE_ID {
+            R Err(err_cycle_invalid_node(start));
         }
 
         # Validate direction
-        if config.direction != DIRECTION_OUTGOING &&
+        I config.direction != DIRECTION_OUTGOING &&
            config.direction != DIRECTION_INCOMING &&
            config.direction != DIRECTION_BOTH {
-            return Err(err_cycle_invalid_direction(config.direction));
+            R Err(err_cycle_invalid_direction(config.direction));
         }
 
         # Results
@@ -192,9 +192,8 @@ X CycleDetector {
         rec_path.push((start, INVALID_EDGE_ID));
 
         L while stack.len() > 0 {
-            if cycles.len() >= max_cycles as usize {
-                break;
-            }
+            I cycles.len() >= max_cycles as u64 {
+                B            }
 
             ~current = stack[stack.len() - 1];
             ~current_node = current.0;
@@ -219,10 +218,10 @@ X CycleDetector {
 
     # Helper: get color of a node (default WHITE if not found)
     F get_color(colors: &Vec<(u64, u8)>, node_id: u64) -> u8 {
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < colors.len() {
-            if colors[i].0 == node_id {
-                return colors[i].1;
+            I colors[i].0 == node_id {
+                R colors[i].1;
             }
             i += 1;
         }
@@ -231,9 +230,9 @@ X CycleDetector {
 
     # Helper: set color of a node (add or update)
     F set_color(colors: &~Vec<(u64, u8)>, node_id: u64, color: u8) {
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < colors.len() {
-            if colors[i].0 == node_id {
+            I colors[i].0 == node_id {
                 colors[i] = (node_id, color);
                 return;
             }
@@ -243,11 +242,11 @@ X CycleDetector {
     }
 
     # Helper: check if node exists in recursion path
-    F in_rec_path(rec_path: &Vec<(u64, u64)>, node_id: u64) -> Option<usize> {
-        ~i: usize = 0;
+    F in_rec_path(rec_path: &Vec<(u64, u64)>, node_id: u64) -> Option<u64> {
+        ~i: u64 = 0;
         L while i < rec_path.len() {
-            if rec_path[i].0 == node_id {
-                return Some(i);
+            I rec_path[i].0 == node_id {
+                R Some(i);
             }
             i += 1;
         }
@@ -255,14 +254,14 @@ X CycleDetector {
     }
 
     # Helper: extract cycle from recursion path
-    F extract_cycle(rec_path: &Vec<(u64, u64)>, cycle_start_idx: usize) -> CycleResult {
+    F extract_cycle(rec_path: &Vec<(u64, u64)>, cycle_start_idx: u64) -> CycleResult {
         ~nodes = Vec.new();
         ~edges = Vec.new();
 
         ~i = cycle_start_idx;
         L while i < rec_path.len() {
             nodes.push(rec_path[i].0);
-            if rec_path[i].1 != INVALID_EDGE_ID {
+            I rec_path[i].1 != INVALID_EDGE_ID {
                 edges.push(rec_path[i].1);
             }
             i += 1;
@@ -286,25 +285,23 @@ X CycleDetector {
         ~cycles: &~Vec<CycleResult>,
         max_cycles: u32
     ) -> bool {
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < entries.len() {
-            if cycles.len() >= max_cycles as usize {
-                return true;
+            I cycles.len() >= max_cycles as u64 {
+                R true;
             }
 
             ~entry = &entries[i];
 
             # Check MVCC visibility
-            if !is_adj_entry_visible(entry, &self.snapshot, self.clog) {
+            I !is_adj_entry_visible(entry, &self.snapshot, self.clog) {
                 i += 1;
-                continue;
-            }
+                C            }
 
             # Check edge type filter
-            if !config.is_edge_type_allowed(entry.edge_type) {
+            I !config.is_edge_type_allowed(entry.edge_type) {
                 i += 1;
-                continue;
-            }
+                C            }
 
             ~target = entry.target_node;
             ~target_color = CycleDetector.get_color(colors, target);

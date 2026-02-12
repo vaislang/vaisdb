@@ -26,7 +26,7 @@ S SortExecutor {
     order_items: Vec<OrderByItem>,
     eval_ctx: EvalContext,
     materialized: Option<Vec<Row>>,
-    cursor: usize,
+    cursor: u64,
     stats: ExecStats,
 }
 
@@ -53,7 +53,7 @@ X SortExecutor {
                     self.stats.add_scanned(1);
                     rows.push(exec_row.get_row().clone());
                 },
-                Option.None => { break; },
+                Option.None => { B; },
             }
         }
 
@@ -72,9 +72,9 @@ X SortExecutor {
                 Result.Err(VaisError.new("VAIS-E0105001", "SortExecutor not opened"))
             },
             Option.Some(rows) => {
-                if self.cursor >= rows.len() {
+                I self.cursor >= rows.len() {
                     Result.Ok(Option.None)
-                } else {
+                } E {
                     ~row = &rows[self.cursor];
                     self.cursor += 1;
                     self.stats.add_produced();
@@ -97,7 +97,7 @@ X SortExecutor {
 
     # Compare two rows using multi-key ORDER BY
     F compare_rows(self, a: &Row, b: &Row) -> i32 {
-        for item in &self.order_items {
+        L item: &self.order_items {
             # Evaluate sort key for both rows
             ~val_a = M eval_expr(&item.expr, a, &self.eval_ctx) {
                 Result.Ok(v) => v,
@@ -116,8 +116,8 @@ X SortExecutor {
             };
 
             ~cmp = order_by_compare(&val_a, &val_b, item.asc, Option.Some(nulls_first));
-            if cmp != 0 {
-                return cmp;
+            I cmp != 0 {
+                R cmp;
             }
         }
 
@@ -143,9 +143,9 @@ S AggGroup {
 }
 
 X AggGroup {
-    F new(key_values: Vec<SqlValue>, agg_count: usize) -> AggGroup {
+    F new(key_values: Vec<SqlValue>, agg_count: u64) -> AggGroup {
         ~accumulators = Vec.with_capacity(agg_count);
-        for _ in 0..agg_count {
+        L _: 0..agg_count {
             accumulators.push(AggAccumulator.Count { count: 0 });  # Placeholder
         }
 
@@ -177,7 +177,7 @@ S AggregateExecutor {
     eval_ctx: EvalContext,
     groups: Option<HashMap<u64, AggGroup>>,
     group_iter: Option<Vec<AggGroup>>,
-    cursor: usize,
+    cursor: u64,
     stats: ExecStats,
 }
 
@@ -209,10 +209,10 @@ X AggregateExecutor {
 
         # Initialize DISTINCT tracking for each aggregate if needed
         ~distinct_sets: Vec<Option<HashSet<u64>>> = Vec.new();
-        for spec in &self.agg_specs {
-            if spec.is_distinct {
+        L spec: &self.agg_specs {
+            I spec.is_distinct {
                 distinct_sets.push(Option.Some(HashSet.new()));
-            } else {
+            } E {
                 distinct_sets.push(Option.None);
             }
         }
@@ -220,36 +220,36 @@ X AggregateExecutor {
         # Process all input rows
         L {
             M self.input.next()? {
-                Option.None => { break; },
+                Option.None => { B; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
 
                     # Evaluate group key
                     ~group_key_values = Vec.new();
-                    for expr in &self.group_exprs {
+                    L expr: &self.group_exprs {
                         ~val = eval_expr(expr, row, &self.eval_ctx)?;
                         group_key_values.push(val);
                     }
 
                     # Hash group key
-                    ~hash = if group_key_values.is_empty() {
+                    ~hash = I group_key_values.is_empty() {
                         0  # No GROUP BY: single group
-                    } else {
+                    } E {
                         group_key_hash(&group_key_values)
                     };
 
                     # Get or create group
-                    if !groups.contains_key(&hash) {
+                    I !groups.contains_key(&hash) {
                         groups.insert(hash, AggGroup.new(group_key_values.clone(), self.agg_specs.len()));
                     }
-                    ~group = groups.get_mut(&hash).unwrap();
+                    ~group = groups.get_mut(&hash)!;
 
                     # Update COUNT(*)
                     group.count_star += 1;
 
                     # Update each aggregate
-                    for i in 0..self.agg_specs.len() {
+                    L i: 0..self.agg_specs.len() {
                         ~spec = &self.agg_specs[i];
 
                         # Evaluate aggregate argument
@@ -259,13 +259,13 @@ X AggregateExecutor {
                         };
 
                         # Check DISTINCT
-                        if spec.is_distinct {
-                            M &mut distinct_sets[i] {
+                        I spec.is_distinct {
+                            M &~distinct_sets[i] {
                                 Option.Some(set) => {
                                     # Hash the value for DISTINCT tracking
                                     ~val_hash = group_key_hash(&[arg_val.clone()]);
-                                    if set.contains(&val_hash) {
-                                        continue;  # Already seen this value
+                                    I set.contains(&val_hash) {
+                                        C;  # Already seen this value
                                     }
                                     set.insert(val_hash);
                                 },
@@ -287,14 +287,14 @@ X AggregateExecutor {
 
     F next(~self) -> Result<Option<ExecutorRow>, VaisError> {
         # Lazy convert HashMap to Vec on first next() call
-        if self.group_iter.is_none() {
+        I self.group_iter.is_none() {
             M &self.groups {
                 Option.None => {
-                    return Result.Err(VaisError.new("VAIS-E0105002", "AggregateExecutor not opened"));
+                    R Result.Err(VaisError.new("VAIS-E0105002", "AggregateExecutor not opened"));
                 },
                 Option.Some(groups) => {
                     ~group_vec = Vec.new();
-                    for (_, group) in groups {
+                    L (_, group): groups {
                         group_vec.push(group.clone());
                     }
                     self.group_iter = Option.Some(group_vec);
@@ -306,8 +306,8 @@ X AggregateExecutor {
             Option.None => Result.Err(VaisError.new("VAIS-E0105002", "AggregateExecutor not opened")),
             Option.Some(groups) => {
                 L {
-                    if self.cursor >= groups.len() {
-                        return Result.Ok(Option.None);
+                    I self.cursor >= groups.len() {
+                        R Result.Ok(Option.None);
                     }
 
                     ~group = &groups[self.cursor];
@@ -317,12 +317,12 @@ X AggregateExecutor {
                     ~result_values = Vec.new();
 
                     # Add group key columns
-                    for val in &group.key_values {
+                    L val: &group.key_values {
                         result_values.push(val.clone());
                     }
 
                     # Add aggregate results
-                    for i in 0..self.agg_specs.len() {
+                    L i: 0..self.agg_specs.len() {
                         ~spec = &self.agg_specs[i];
                         ~agg_val = self.finalize_accumulator(group, i, &spec.func_name)?;
                         result_values.push(agg_val);
@@ -334,7 +334,7 @@ X AggregateExecutor {
                     M &self.having {
                         Option.None => {
                             self.stats.add_produced();
-                            return Result.Ok(Option.Some(ExecutorRow.virtual(result_row)));
+                            R Result.Ok(Option.Some(ExecutorRow.virtual(result_row)));
                         },
                         Option.Some(having_expr) => {
                             ~passed = M eval_expr(having_expr, &result_row, &self.eval_ctx)? {
@@ -342,9 +342,9 @@ X AggregateExecutor {
                                 _ => false,
                             };
 
-                            if passed {
+                            I passed {
                                 self.stats.add_produced();
-                                return Result.Ok(Option.Some(ExecutorRow.virtual(result_row)));
+                                R Result.Ok(Option.Some(ExecutorRow.virtual(result_row)));
                             }
                             # else: skip this group, continue loop
                         },
@@ -370,15 +370,15 @@ X AggregateExecutor {
     F update_accumulator(
         ~self,
         group: ~AggGroup,
-        agg_idx: usize,
+        agg_idx: u64,
         func_name: &Str,
         val: &SqlValue,
     ) -> Result<(), VaisError> {
         M func_name.as_str() {
             "COUNT" => {
                 # COUNT: increment if non-NULL
-                if agg_count_value(val) {
-                    M &mut group.accumulators[agg_idx] {
+                I agg_count_value(val) {
+                    M &~group.accumulators[agg_idx] {
                         AggAccumulator.Count { count } => {
                             *count += 1;
                         },
@@ -389,7 +389,7 @@ X AggregateExecutor {
                 }
             },
             "SUM" => {
-                M &mut group.accumulators[agg_idx] {
+                M &~group.accumulators[agg_idx] {
                     AggAccumulator.Sum { acc } => {
                         ~new_acc = agg_sum(acc, val)?;
                         *acc = new_acc;
@@ -401,7 +401,7 @@ X AggregateExecutor {
                 }
             },
             "AVG" => {
-                M &mut group.accumulators[agg_idx] {
+                M &~group.accumulators[agg_idx] {
                     AggAccumulator.Avg { sum, count } => {
                         ~result = agg_avg_accumulate(sum, count, val)?;
                         *sum = result.0;
@@ -414,7 +414,7 @@ X AggregateExecutor {
                 }
             },
             "MIN" => {
-                M &mut group.accumulators[agg_idx] {
+                M &~group.accumulators[agg_idx] {
                     AggAccumulator.Min { acc } => {
                         ~new_acc = agg_min(acc, val)?;
                         *acc = new_acc;
@@ -426,7 +426,7 @@ X AggregateExecutor {
                 }
             },
             "MAX" => {
-                M &mut group.accumulators[agg_idx] {
+                M &~group.accumulators[agg_idx] {
                     AggAccumulator.Max { acc } => {
                         ~new_acc = agg_max(acc, val)?;
                         *acc = new_acc;
@@ -438,7 +438,7 @@ X AggregateExecutor {
                 }
             },
             _ => {
-                return Result.Err(VaisError.new("VAIS-E0105003", "Unknown aggregate function: {func_name}"));
+                R Result.Err(VaisError.new("VAIS-E0105003", "Unknown aggregate function: {func_name}"));
             },
         }
 
@@ -449,7 +449,7 @@ X AggregateExecutor {
     F finalize_accumulator(
         self,
         group: &AggGroup,
-        agg_idx: usize,
+        agg_idx: u64,
         func_name: &Str,
     ) -> Result<SqlValue, VaisError> {
         M func_name.as_str() {
@@ -536,7 +536,7 @@ X DistinctExecutor {
         L {
             M self.input.next()? {
                 Option.None => {
-                    return Result.Ok(Option.None);
+                    R Result.Ok(Option.None);
                 },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
@@ -544,20 +544,20 @@ X DistinctExecutor {
                     # Hash all row values
                     ~row = exec_row.get_row();
                     ~values: Vec<SqlValue> = Vec.new();
-                    for i in 0..row.column_count() {
+                    L i: 0..row.column_count() {
                         values.push(row.get(i).clone());
                     }
                     ~hash = group_key_hash(&values);
 
                     # Check if already seen
-                    if self.seen.contains(&hash) {
-                        continue;  # Duplicate, skip
+                    I self.seen.contains(&hash) {
+                        C;  # Duplicate, skip
                     }
 
                     # New row, record and return
                     self.seen.insert(hash);
                     self.stats.add_produced();
-                    return Result.Ok(Option.Some(exec_row));
+                    R Result.Ok(Option.Some(exec_row));
                 },
             }
         }

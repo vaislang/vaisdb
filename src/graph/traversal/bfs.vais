@@ -129,10 +129,10 @@ X TraversalConfig {
         M self.edge_types {
             None => true,
             Some(ref types) => {
-                ~i: usize = 0;
+                ~i: u64 = 0;
                 L while i < types.len() {
-                    if types[i] == edge_type {
-                        return true;
+                    I types[i] == edge_type {
+                        R true;
                     }
                     i += 1;
                 }
@@ -174,15 +174,15 @@ X BfsTraversal {
         adj_mgr: &AdjacencyManager,
         config: &TraversalConfig
     ) -> Result<TraversalResult, VaisError> {
-        if start_node == INVALID_NODE_ID {
-            return Err(err_traversal_invalid_node(start_node));
+        I start_node == INVALID_NODE_ID {
+            R Err(err_traversal_invalid_node(start_node));
         }
 
         # Validate direction
-        if config.direction != DIRECTION_OUTGOING &&
+        I config.direction != DIRECTION_OUTGOING &&
            config.direction != DIRECTION_INCOMING &&
            config.direction != DIRECTION_BOTH {
-            return Err(err_traversal_invalid_direction(config.direction));
+            R Err(err_traversal_invalid_direction(config.direction));
         }
 
         # Initialize result
@@ -211,9 +211,8 @@ X BfsTraversal {
             ~current_depth = current.1;
 
             # Check depth limit
-            if config.max_depth > 0 && current_depth >= config.max_depth {
-                continue;
-            }
+            I config.max_depth > 0 && current_depth >= config.max_depth {
+                C            }
 
             # NOTE: In production, need to:
             # 1. Look up current_node in node index to get (page_id, slot_index)
@@ -245,10 +244,10 @@ X BfsTraversal {
 
     # Helper: check if node is already visited
     F is_visited(visited: &Vec<u64>, node_id: u64) -> bool {
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < visited.len() {
-            if visited[i] == node_id {
-                return true;
+            I visited[i] == node_id {
+                R true;
             }
             i += 1;
         }
@@ -268,28 +267,25 @@ X BfsTraversal {
     ) {
         ~next_depth = current_depth + 1;
 
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < entries.len() {
             ~entry = &entries[i];
 
             # Check MVCC visibility
-            if !is_adj_entry_visible(entry, &self.snapshot, self.clog) {
+            I !is_adj_entry_visible(entry, &self.snapshot, self.clog) {
                 i += 1;
-                continue;
-            }
+                C            }
 
             # Check edge type filter
-            if !config.is_edge_type_allowed(entry.edge_type) {
+            I !config.is_edge_type_allowed(entry.edge_type) {
                 i += 1;
-                continue;
-            }
+                C            }
 
             # Check if target node already visited
             ~target = entry.target_node;
-            if BfsTraversal.is_visited(visited, target) {
+            I BfsTraversal.is_visited(visited, target) {
                 i += 1;
-                continue;
-            }
+                C            }
 
             # Mark as visited
             visited.push(target);

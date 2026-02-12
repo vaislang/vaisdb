@@ -52,18 +52,18 @@ F detect_traversal_hint(params: &GraphTraverseNodeParams) -> TraversalHint {
     # - If max_depth is large or unlimited, prefer DFS (deeper exploration)
     # - If edge_type_filter is present, prefer DFS (filter early in deep traversal)
 
-    if params.max_depth > 0 && params.max_depth < 4 {
+    I params.max_depth > 0 && params.max_depth < 4 {
         # Shallow traversal: BFS is efficient
-        if params.return_paths {
+        I params.return_paths {
             # Shortest path queries: BFS is optimal
             TraversalHint.PreferBFS
-        } else {
+        } E {
             TraversalHint.PreferBFS
         }
-    } else if params.max_depth >= 6 || params.max_depth == 0 {
+    } E I params.max_depth >= 6 || params.max_depth == 0 {
         # Deep or unlimited traversal: DFS is better
         TraversalHint.PreferDFS
-    } else {
+    } E {
         # Medium depth: no strong preference
         TraversalHint.NoPreference
     }
@@ -95,11 +95,11 @@ F extract_edge_type_filter(where_clause: &Expr) -> (Option<Vec<Str>>, Option<Exp
                 BinOp.Eq => {
                     M (left.as_ref(), right.as_ref()) {
                         (Expr.ColumnRef { column, .. }, Expr.Literal { value }) => {
-                            if column == "edge_type" || column == "type" || column == "label" {
+                            I column == "edge_type" || column == "type" || column == "label" {
                                 # Extract edge type from literal
                                 M value {
                                     sql/types.SqlValue.StringVal { v } => {
-                                        return (Some(vec![v.clone()]), None);
+                                        R (Some(vec![v.clone()]), None);
                                     },
                                     _ => {},
                                 }
@@ -115,7 +115,7 @@ F extract_edge_type_filter(where_clause: &Expr) -> (Option<Vec<Str>>, Option<Exp
 
                     # Merge edge types
                     ~merged_types = M (left_types, right_types) {
-                        (Some(mut lt), Some(rt)) => {
+                        (Some(~lt), Some(rt)) => {
                             lt.extend(rt);
                             Some(lt)
                         },
@@ -138,7 +138,7 @@ F extract_edge_type_filter(where_clause: &Expr) -> (Option<Vec<Str>>, Option<Exp
                         (None, None) => None,
                     };
 
-                    return (merged_types, merged_residual);
+                    R (merged_types, merged_residual);
                 },
                 _ => {},
             }
@@ -148,11 +148,11 @@ F extract_edge_type_filter(where_clause: &Expr) -> (Option<Vec<Str>>, Option<Exp
         Expr.InList { expr, list, negated } => {
             M expr.as_ref() {
                 Expr.ColumnRef { column, .. } => {
-                    if column == "edge_type" || column == "type" || column == "label" {
-                        if !*negated {
+                    I column == "edge_type" || column == "type" || column == "label" {
+                        I !*negated {
                             # Extract all edge types from IN list
                             ~types = Vec.new();
-                            for item in list {
+                            L item: list {
                                 M item {
                                     Expr.Literal { value } => {
                                         M value {
@@ -165,8 +165,8 @@ F extract_edge_type_filter(where_clause: &Expr) -> (Option<Vec<Str>>, Option<Exp
                                     _ => {},
                                 }
                             }
-                            if types.len() > 0 {
-                                return (Some(types), None);
+                            I types.len() > 0 {
+                                R (Some(types), None);
                             }
                         }
                     }
@@ -178,7 +178,7 @@ F extract_edge_type_filter(where_clause: &Expr) -> (Option<Vec<Str>>, Option<Exp
         _ => {},
     }
 
-    # No edge type filter found: return all as residual
+    # No edge type filter found: R all as residual
     (None, Some(where_clause.clone()))
 }
 
@@ -200,7 +200,7 @@ F push_predicates(
             # Merge edge types with existing filter
             ~merged_edge_filter = M (params.edge_type_filter, edge_types) {
                 (Some(existing), Some(new_types)) => {
-                    ~mut combined = existing.clone();
+                    ~combined = existing.clone();
                     combined.extend(new_types);
                     Some(combined)
                 },

@@ -97,8 +97,8 @@ X PropertyStore {
         props: &PropertyMap,
         txn_id: u64
     ) -> Result<u32, VaisError> {
-        if props.is_empty() {
-            return Ok(NULL_PAGE);
+        I props.is_empty() {
+            R Ok(NULL_PAGE);
         }
 
         # Serialize properties
@@ -110,7 +110,7 @@ X PropertyStore {
         ~page_id = self.allocator.allocate_page(FILE_ID_GRAPH, self.bitmap)?;
 
         # Build page
-        ~page_data = vec![0u8; self.page_size as usize];
+        ~page_data = vec![0u8; self.page_size as u64];
 
         # Write page header
         ~header = PageHeader.new(page_id, PAGE_TYPE_GRAPH_PROPERTY, ENGINE_TAG_GRAPH);
@@ -120,17 +120,17 @@ X PropertyStore {
 
         # Write property page header
         ~buf = ByteBuffer.wrap(&page_data);
-        buf.set_position(PAGE_HEADER_SIZE as usize);
+        buf.set_position(PAGE_HEADER_SIZE as u64);
         ~prop_header = PropertyPageHeader.new(entity_type, entity_id);
         prop_header.prop_count = props.len() as u16;
         prop_header.serialize(&buf);
 
         # Write property data
         ~available = self.page_size - PAGE_HEADER_SIZE - PROP_PAGE_HEADER_SIZE;
-        if prop_bytes.len() as u32 > available {
-            return Err(err_graph_page_full(page_id));
+        I prop_bytes.len() as u32 > available {
+            R Err(err_graph_page_full(page_id));
         }
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < prop_bytes.len() {
             buf.put_u8(prop_bytes[i]);
             i += 1;
@@ -142,7 +142,7 @@ X PropertyStore {
         # Write to buffer pool
         ~frame_id = self.pool.fetch_page(FILE_ID_GRAPH, page_id)?;
         ~frame_data = self.pool.get_page_mut(frame_id);
-        ~j: usize = 0;
+        ~j: u64 = 0;
         L while j < page_data.len() {
             frame_data[j] = page_data[j];
             j += 1;
@@ -154,8 +154,8 @@ X PropertyStore {
 
     # Read properties for an entity
     F read_properties(self, page_id: u32) -> Result<PropertyMap, VaisError> {
-        if page_id == NULL_PAGE {
-            return Ok(PropertyMap.new());
+        I page_id == NULL_PAGE {
+            R Ok(PropertyMap.new());
         }
 
         ~frame_id = self.pool.fetch_page(FILE_ID_GRAPH, page_id)?;
@@ -163,13 +163,13 @@ X PropertyStore {
 
         # Verify page type
         ~header = PageHeader.read_from_page(page_data)?;
-        if header.page_type != PAGE_TYPE_GRAPH_PROPERTY {
+        I header.page_type != PAGE_TYPE_GRAPH_PROPERTY {
             self.pool.unpin_page(frame_id, false);
-            return Err(err_internal("Expected GRAPH_PROPERTY page type"));
+            R Err(err_internal("Expected GRAPH_PROPERTY page type"));
         }
 
         # Read property page header
-        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as usize..]);
+        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as u64..]);
         ~prop_header = PropertyPageHeader.deserialize(&buf)?;
 
         # Read property data
@@ -186,8 +186,8 @@ X PropertyStore {
         props: &PropertyMap,
         txn_id: u64
     ) -> Result<(), VaisError> {
-        if page_id == NULL_PAGE {
-            return Err(err_internal("Cannot update properties on NULL page"));
+        I page_id == NULL_PAGE {
+            R Err(err_internal("Cannot update properties on NULL page"));
         }
 
         ~frame_id = self.pool.fetch_page(FILE_ID_GRAPH, page_id)?;
@@ -195,7 +195,7 @@ X PropertyStore {
 
         # Read existing header
         ~header = PageHeader.read_from_page(page_data)?;
-        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as usize..]);
+        ~buf = ByteBuffer.wrap_readonly(&page_data[PAGE_HEADER_SIZE as u64..]);
         ~prop_header = PropertyPageHeader.deserialize(&buf)?;
 
         # Serialize new properties
@@ -204,15 +204,15 @@ X PropertyStore {
         ~prop_bytes = prop_buf.to_vec();
 
         ~available = self.page_size - PAGE_HEADER_SIZE - PROP_PAGE_HEADER_SIZE;
-        if prop_bytes.len() as u32 > available {
+        I prop_bytes.len() as u32 > available {
             self.pool.unpin_page(frame_id, false);
-            return Err(err_graph_page_full(page_id));
+            R Err(err_graph_page_full(page_id));
         }
 
         # Rewrite property data
         ~write_buf = ByteBuffer.wrap(page_data);
-        write_buf.set_position((PAGE_HEADER_SIZE + PROP_PAGE_HEADER_SIZE) as usize);
-        ~i: usize = 0;
+        write_buf.set_position((PAGE_HEADER_SIZE + PROP_PAGE_HEADER_SIZE) as u64);
+        ~i: u64 = 0;
         L while i < prop_bytes.len() {
             write_buf.put_u8(prop_bytes[i]);
             i += 1;
@@ -226,7 +226,7 @@ X PropertyStore {
 
         # Update prop_header count
         ~h_buf = ByteBuffer.wrap(page_data);
-        h_buf.set_position(PAGE_HEADER_SIZE as usize);
+        h_buf.set_position(PAGE_HEADER_SIZE as u64);
         ~updated_prop_header = prop_header;
         updated_prop_header.prop_count = props.len() as u16;
         updated_prop_header.serialize(&h_buf);
@@ -238,8 +238,8 @@ X PropertyStore {
 
     # Delete properties (free the page)
     F delete_properties(~self, page_id: u32) -> Result<(), VaisError> {
-        if page_id == NULL_PAGE {
-            return Ok(());
+        I page_id == NULL_PAGE {
+            R Ok(());
         }
         self.allocator.free_page(FILE_ID_GRAPH, page_id, self.bitmap)?;
         Ok(())

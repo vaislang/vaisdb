@@ -36,15 +36,15 @@ S NestedLoopJoinExecutor {
     condition: Option<JoinCondition>,
     left_rows: Vec<ExecutorRow>,
     right_source: Box<RowSource>,
-    current_left_idx: usize,
-    left_col_count: usize,
-    right_col_count: usize,
+    current_left_idx: u64,
+    left_col_count: u64,
+    right_col_count: u64,
     eval_ctx: EvalContext,
     # For RIGHT join: track matched right rows
     matched_right_rows: Vec<bool>,
     right_row_buffer: Vec<ExecutorRow>,
     emitting_unmatched_right: bool,
-    unmatched_right_idx: usize,
+    unmatched_right_idx: u64,
     stats: ExecStats,
     is_open: bool,
 }
@@ -62,12 +62,12 @@ X NestedLoopJoinExecutor {
         ~eval_ctx = EvalContext.new();
 
         # Add left bindings
-        for binding in left_bindings {
+        L binding: left_bindings {
             eval_ctx.add_binding(binding);
         }
 
         # Add right bindings with offset
-        for binding in right_bindings {
+        L binding: right_bindings {
             eval_ctx.add_binding(binding);
         }
 
@@ -94,8 +94,8 @@ X NestedLoopJoinExecutor {
 
     # Open the executor: materialize left side
     F open(~self, ctx: &ExecContext) -> Result<(), VaisError> {
-        if self.is_open {
-            return Ok(());
+        I self.is_open {
+            R Ok(());
         }
 
         # Materialize left side — we need left_source stored separately
@@ -115,7 +115,7 @@ X NestedLoopJoinExecutor {
                             self.right_row_buffer.push(row);
                             self.stats.add_scanned(1);
                         },
-                        None => { break; },
+                        None => { B; },
                     }
                 }
 
@@ -124,7 +124,7 @@ X NestedLoopJoinExecutor {
                 # Initialize matched tracking
                 ~count = self.right_row_buffer.len();
                 self.matched_right_rows = Vec.with_capacity(count);
-                for _ in 0..count {
+                L _: 0..count {
                     self.matched_right_rows.push(false);
                 }
             },
@@ -138,16 +138,16 @@ X NestedLoopJoinExecutor {
 
     # Get next joined row
     F next(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
-        if !self.is_open {
-            return Err(VaisError.new(
+        I !self.is_open {
+            R Err(VaisError.new(
                 JOIN_ERROR_UNSUPPORTED,
                 "Join executor not opened"
             ));
         }
 
         # Handle RIGHT join unmatched rows emission
-        if self.emitting_unmatched_right {
-            return self.emit_unmatched_right();
+        I self.emitting_unmatched_right {
+            R self.emit_unmatched_right();
         }
 
         M self.join_type {
@@ -160,8 +160,8 @@ X NestedLoopJoinExecutor {
 
     # Close the executor
     F close(~self) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Ok(());
+        I !self.is_open {
+            R Ok(());
         }
 
         self.left_rows.clear();
@@ -182,8 +182,8 @@ X NestedLoopJoinExecutor {
     # CROSS JOIN: emit all combinations without condition check
     F next_cross(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
         L {
-            if self.current_left_idx >= self.left_rows.len() {
-                return Ok(None);
+            I self.current_left_idx >= self.left_rows.len() {
+                R Ok(None);
             }
 
             # Open right source for this left row
@@ -198,7 +198,7 @@ X NestedLoopJoinExecutor {
                     );
 
                     self.stats.add_produced();
-                    return Ok(Some(ExecutorRow.virtual(combined)));
+                    R Ok(Some(ExecutorRow.virtual(combined)));
                 },
                 None => {
                     # Exhausted right side for this left row
@@ -212,8 +212,8 @@ X NestedLoopJoinExecutor {
     # INNER JOIN: emit only matching rows
     F next_inner(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
         L {
-            if self.current_left_idx >= self.left_rows.len() {
-                return Ok(None);
+            I self.current_left_idx >= self.left_rows.len() {
+                R Ok(None);
             }
 
             self.right_source.open(ctx)?;
@@ -227,10 +227,10 @@ X NestedLoopJoinExecutor {
                     );
 
                     # Evaluate join condition
-                    if self.evaluate_condition(&combined, ctx)? {
+                    I self.evaluate_condition(&combined, ctx)? {
                         self.stats.add_produced();
-                        return Ok(Some(ExecutorRow.virtual(combined)));
-                    } else {
+                        R Ok(Some(ExecutorRow.virtual(combined)));
+                    } E {
                         self.stats.add_rejected();
                     }
                 },
@@ -243,11 +243,10 @@ X NestedLoopJoinExecutor {
         }
     }
 
-    # LEFT JOIN: emit left rows with matching right rows, or nulls if no match
-    F next_left(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
+    # LEFT JOIN: emit left rows with matching right rows, or nulls if no M F next_left(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
         L {
-            if self.current_left_idx >= self.left_rows.len() {
-                return Ok(None);
+            I self.current_left_idx >= self.left_rows.len() {
+                R Ok(None);
             }
 
             ~left_row = &self.left_rows[self.current_left_idx];
@@ -264,11 +263,11 @@ X NestedLoopJoinExecutor {
                         );
 
                         # Evaluate join condition
-                        if self.evaluate_condition(&combined, ctx)? {
+                        I self.evaluate_condition(&combined, ctx)? {
                             found_match = true;
                             self.stats.add_produced();
-                            return Ok(Some(ExecutorRow.virtual(combined)));
-                        } else {
+                            R Ok(Some(ExecutorRow.virtual(combined)));
+                        } E {
                             self.stats.add_rejected();
                         }
                     },
@@ -276,8 +275,8 @@ X NestedLoopJoinExecutor {
                         # Exhausted right side
                         self.right_source.close()?;
 
-                        # If no match found, emit left row with nulls
-                        if !found_match {
+                        # If no M found, emit left row with nulls
+                        I !found_match {
                             ~null_right = Row.null_row(self.right_col_count);
                             ~combined = combine_rows(
                                 left_row.get_row(),
@@ -285,11 +284,11 @@ X NestedLoopJoinExecutor {
                             );
                             self.current_left_idx += 1;
                             self.stats.add_produced();
-                            return Ok(Some(ExecutorRow.virtual(combined)));
+                            R Ok(Some(ExecutorRow.virtual(combined)));
                         }
 
                         self.current_left_idx += 1;
-                        break;
+                        B;
                     },
                 }
             }
@@ -300,17 +299,17 @@ X NestedLoopJoinExecutor {
     F next_right(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
         # First phase: emit all matching rows (iterating left × buffered right)
         L {
-            if self.current_left_idx >= self.left_rows.len() {
+            I self.current_left_idx >= self.left_rows.len() {
                 # Switch to emitting unmatched right rows
                 self.emitting_unmatched_right = true;
                 self.unmatched_right_idx = 0;
-                return self.emit_unmatched_right();
+                R self.emit_unmatched_right();
             }
 
             ~left_row = &self.left_rows[self.current_left_idx];
 
             # Iterate through buffered right rows
-            for ~i in 0..self.right_row_buffer.len() {
+            L ~i: 0..self.right_row_buffer.len() {
                 ~right_row = &self.right_row_buffer[i];
                 ~combined = combine_rows(
                     left_row.get_row(),
@@ -318,11 +317,11 @@ X NestedLoopJoinExecutor {
                 );
 
                 # Evaluate join condition
-                if self.evaluate_condition(&combined, ctx)? {
+                I self.evaluate_condition(&combined, ctx)? {
                     self.matched_right_rows[i] = true;
                     self.stats.add_produced();
-                    return Ok(Some(ExecutorRow.virtual(combined)));
-                } else {
+                    R Ok(Some(ExecutorRow.virtual(combined)));
+                } E {
                     self.stats.add_rejected();
                 }
             }
@@ -333,15 +332,16 @@ X NestedLoopJoinExecutor {
 
     # Emit unmatched right rows for RIGHT JOIN
     F emit_unmatched_right(~self) -> Result<Option<ExecutorRow>, VaisError> {
-        while self.unmatched_right_idx < self.right_row_buffer.len() {
-            if !self.matched_right_rows[self.unmatched_right_idx] {
+        L {
+            I !(self.unmatched_right_idx < self.right_row_buffer.len()) { B }
+            I !self.matched_right_rows[self.unmatched_right_idx] {
                 ~right_row = &self.right_row_buffer[self.unmatched_right_idx];
                 ~null_left = Row.null_row(self.left_col_count);
                 ~combined = combine_rows(&null_left, right_row.get_row());
 
                 self.unmatched_right_idx += 1;
                 self.stats.add_produced();
-                return Ok(Some(ExecutorRow.virtual(combined)));
+                R Ok(Some(ExecutorRow.virtual(combined)));
             }
             self.unmatched_right_idx += 1;
         }
@@ -356,8 +356,7 @@ X NestedLoopJoinExecutor {
         ctx: &ExecContext,
     ) -> Result<bool, VaisError> {
         M &self.condition {
-            None => Ok(true),  # No condition means always match
-            Some(JoinCondition.On { expr }) => {
+            None => Ok(true),  # No condition means always M Some(JoinCondition.On { expr }) => {
                 M eval_predicate(expr, combined_row, &self.eval_ctx) {
                     Ok(result) => Ok(result),
                     Err(e) => Err(VaisError.new(
@@ -370,7 +369,7 @@ X NestedLoopJoinExecutor {
                 self.evaluate_using_condition(combined_row, columns)
             },
             Some(JoinCondition.Natural) => {
-                # Natural join: match all common column names
+                # Natural join: M all common column names
                 Err(VaisError.new(
                     JOIN_ERROR_UNSUPPORTED,
                     "NATURAL join not yet implemented"
@@ -385,12 +384,12 @@ X NestedLoopJoinExecutor {
         combined_row: &Row,
         columns: &Vec<Str>,
     ) -> Result<bool, VaisError> {
-        for col_name in columns {
+        L col_name: columns {
             # Resolve column in left side
             ~left_idx = M self.eval_ctx.resolve(&None, col_name) {
                 Ok(idx) => idx,
                 Err(_) => {
-                    return Err(VaisError.new(
+                    R Err(VaisError.new(
                         JOIN_ERROR_COLUMN_MISMATCH,
                         "USING column '{col_name}' not found in left table"
                     ));
@@ -400,8 +399,8 @@ X NestedLoopJoinExecutor {
             # Resolve column in right side (offset by left_col_count)
             ~right_idx = left_idx + self.left_col_count;
 
-            if right_idx >= combined_row.column_count() {
-                return Err(VaisError.new(
+            I right_idx >= combined_row.column_count() {
+                R Err(VaisError.new(
                     JOIN_ERROR_COLUMN_MISMATCH,
                     "USING column '{col_name}' not found in right table"
                 ));
@@ -411,8 +410,8 @@ X NestedLoopJoinExecutor {
             ~left_val = combined_row.get(left_idx);
             ~right_val = combined_row.get(right_idx);
 
-            if left_val != right_val {
-                return Ok(false);
+            I left_val != right_val {
+                R Ok(false);
             }
         }
 
@@ -428,16 +427,16 @@ U std/hashmap.{HashMap};
 
 S HashJoinExecutor {
     join_type: JoinType,
-    join_keys_left: Vec<usize>,   # Column indices for join keys (probe side)
-    join_keys_right: Vec<usize>,  # Column indices for join keys (build side)
+    join_keys_left: Vec<u64>,   # Column indices for join keys (probe side)
+    join_keys_right: Vec<u64>,  # Column indices for join keys (build side)
     build_side: Box<RowSource>,
     probe_side: Box<RowSource>,
     hash_table: HashMap<u64, Vec<Row>>,
     current_probe_row: Option<ExecutorRow>,
     current_matches: Vec<Row>,
-    current_match_idx: usize,
-    left_col_count: usize,
-    right_col_count: usize,
+    current_match_idx: u64,
+    left_col_count: u64,
+    right_col_count: u64,
     found_match: bool,
     stats: ExecStats,
     is_open: bool,
@@ -448,18 +447,18 @@ X HashJoinExecutor {
     # join_keys_left/right are column indices to hash on
     F new(
         join_type: JoinType,
-        join_keys_left: Vec<usize>,
-        join_keys_right: Vec<usize>,
+        join_keys_left: Vec<u64>,
+        join_keys_right: Vec<u64>,
         left_source: Box<RowSource>,
         right_source: Box<RowSource>,
-        left_col_count: usize,
-        right_col_count: usize,
+        left_col_count: u64,
+        right_col_count: u64,
     ) -> Result<HashJoinExecutor, VaisError> {
         # Hash join only supports INNER and LEFT for now
         M join_type {
             JoinType.Inner | JoinType.Left => {},
             _ => {
-                return Err(VaisError.new(
+                R Err(VaisError.new(
                     JOIN_ERROR_UNSUPPORTED,
                     "Hash join only supports INNER and LEFT join types"
                 ));
@@ -486,8 +485,8 @@ X HashJoinExecutor {
 
     # Open the executor: build hash table from build side
     F open(~self, ctx: &ExecContext) -> Result<(), VaisError> {
-        if self.is_open {
-            return Ok(());
+        I self.is_open {
+            R Ok(());
         }
 
         # Build phase: materialize build side (right) into hash table
@@ -503,15 +502,15 @@ X HashJoinExecutor {
                     )?;
                     ~hash = group_key_hash(&key_values);
 
-                    if !self.hash_table.contains_key(&hash) {
+                    I !self.hash_table.contains_key(&hash) {
                         self.hash_table.insert(hash, Vec.new());
                     }
-                    ~bucket = self.hash_table.get_mut(&hash).unwrap();
+                    ~bucket = self.hash_table.get_mut(&hash)!;
                     bucket.push(row.get_row().clone());
 
                     self.stats.add_scanned(1);
                 },
-                None => { break; },
+                None => { B; },
             }
         }
 
@@ -525,8 +524,8 @@ X HashJoinExecutor {
 
     # Get next joined row
     F next(~self, ctx: &ExecContext) -> Result<Option<ExecutorRow>, VaisError> {
-        if !self.is_open {
-            return Err(VaisError.new(
+        I !self.is_open {
+            R Err(VaisError.new(
                 JOIN_ERROR_UNSUPPORTED,
                 "Hash join executor not opened"
             ));
@@ -534,14 +533,14 @@ X HashJoinExecutor {
 
         L {
             # If we have pending matches for current probe row, emit them
-            if self.current_match_idx < self.current_matches.len() {
-                ~probe_row = self.current_probe_row.as_ref().unwrap();
+            I self.current_match_idx < self.current_matches.len() {
+                ~probe_row = self.current_probe_row.as_ref()!;
                 ~build_row = &self.current_matches[self.current_match_idx];
                 self.current_match_idx += 1;
 
                 ~combined = combine_rows(probe_row.get_row(), build_row);
                 self.stats.add_produced();
-                return Ok(Some(ExecutorRow.virtual(combined)));
+                R Ok(Some(ExecutorRow.virtual(combined)));
             }
 
             # For LEFT JOIN, if current probe row had no matches, emit with nulls
@@ -549,14 +548,14 @@ X HashJoinExecutor {
                 JoinType.Left => true,
                 _ => false,
             };
-            if is_left && self.current_probe_row.is_some() && !self.found_match {
-                ~probe_row = self.current_probe_row.as_ref().unwrap();
+            I is_left && self.current_probe_row.is_some() && !self.found_match {
+                ~probe_row = self.current_probe_row.as_ref()!;
                 ~null_build = Row.null_row(self.right_col_count);
                 ~combined = combine_rows(probe_row.get_row(), &null_build);
 
                 self.current_probe_row = None;
                 self.stats.add_produced();
-                return Ok(Some(ExecutorRow.virtual(combined)));
+                R Ok(Some(ExecutorRow.virtual(combined)));
             }
 
             # Get next probe row
@@ -578,14 +577,14 @@ X HashJoinExecutor {
 
                     M self.hash_table.get(&hash) {
                         Some(matches) => {
-                            # Verify join keys match (not just hash collision)
-                            for build_row in matches {
+                            # Verify join keys M (not just hash collision)
+                            L build_row: matches {
                                 ~build_keys = self.extract_join_keys(
                                     build_row,
                                     &self.join_keys_right,
                                 )?;
 
-                                if self.keys_equal(&key_values, &build_keys) {
+                                I self.keys_equal(&key_values, &build_keys) {
                                     self.current_matches.push(build_row.clone());
                                     self.found_match = true;
                                 }
@@ -598,7 +597,7 @@ X HashJoinExecutor {
                 },
                 None => {
                     # No more probe rows
-                    return Ok(None);
+                    R Ok(None);
                 },
             }
         }
@@ -606,8 +605,8 @@ X HashJoinExecutor {
 
     # Close the executor
     F close(~self) -> Result<(), VaisError> {
-        if !self.is_open {
-            return Ok(());
+        I !self.is_open {
+            R Ok(());
         }
 
         self.hash_table.clear();
@@ -629,13 +628,13 @@ X HashJoinExecutor {
     F extract_join_keys(
         ~self,
         row: &Row,
-        key_indices: &Vec<usize>,
+        key_indices: &Vec<u64>,
     ) -> Result<Vec<SqlValue>, VaisError> {
         ~values = Vec.new();
 
-        for ~idx in key_indices {
-            if *idx >= row.column_count() {
-                return Err(VaisError.new(
+        L ~idx: key_indices {
+            I *idx >= row.column_count() {
+                R Err(VaisError.new(
                     JOIN_ERROR_BUILD_FAILED,
                     "Join key index {idx} out of bounds"
                 ));
@@ -648,13 +647,13 @@ X HashJoinExecutor {
 
     # Compare two sets of join key values for equality
     F keys_equal(~self, keys1: &Vec<SqlValue>, keys2: &Vec<SqlValue>) -> bool {
-        if keys1.len() != keys2.len() {
-            return false;
+        I keys1.len() != keys2.len() {
+            R false;
         }
 
-        for ~i in 0..keys1.len() {
-            if keys1[i] != keys2[i] {
-                return false;
+        L ~i: 0..keys1.len() {
+            I keys1[i] != keys2[i] {
+                R false;
             }
         }
 
@@ -671,12 +670,12 @@ F combine_rows(left: &Row, right: &Row) -> Row {
     ~combined_values = Vec.new();
 
     # Add left row values
-    for ~i in 0..left.column_count() {
+    L ~i: 0..left.column_count() {
         combined_values.push(left.get(i).clone());
     }
 
     # Add right row values
-    for ~i in 0..right.column_count() {
+    L ~i: 0..right.column_count() {
         combined_values.push(right.get(i).clone());
     }
 

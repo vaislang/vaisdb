@@ -84,8 +84,8 @@ S WalRecordIterator {
 X WalRecordIterator {
     # Create iterator starting from a specific LSN
     F from_lsn(wal_dir: Str, start_lsn: u64) -> Result<WalRecordIterator, VaisError> {
-        ~segment = if start_lsn == NULL_LSN { 1u32 } else { lsn_segment(start_lsn) };
-        ~offset = if start_lsn == NULL_LSN { WAL_SEGMENT_HEADER_SIZE } else { lsn_offset(start_lsn) };
+        ~segment = I start_lsn == NULL_LSN { 1u32 } E { lsn_segment(start_lsn) };
+        ~offset = I start_lsn == NULL_LSN { WAL_SEGMENT_HEADER_SIZE } E { lsn_offset(start_lsn) };
 
         ~iter = WalRecordIterator {
             wal_dir,
@@ -102,17 +102,17 @@ X WalRecordIterator {
 
     # Read the next WAL record, returns None at end of WAL
     F next(~self) -> Result<Option<(WalRecordHeader, Vec<u8>)>, VaisError> {
-        loop {
+        L {
             # Ensure we have a segment file open
-            if self.segment_file.is_none() {
-                if !self.try_open_next_segment()? {
-                    return Ok(None);  # No more segments
+            I self.segment_file.is_none() {
+                I !self.try_open_next_segment()? {
+                    R Ok(None);  # No more segments
                 }
             }
 
             ~file = M &self.segment_file {
                 Some(ref f) => f,
-                None => return Ok(None),
+                None => R Ok(None),
             };
 
             # Check if we're past the end of records in this segment
@@ -121,43 +121,43 @@ X WalRecordIterator {
                 None => 0u32,
             };
 
-            if self.current_offset >= seg_end {
+            I self.current_offset >= seg_end {
                 # Move to next segment
                 self.segment_file = None;
                 self.current_segment += 1;
                 self.current_offset = WAL_SEGMENT_HEADER_SIZE;
-                continue;
+                C;
             }
 
             # Read record header
-            ~header_buf = Vec.with_capacity(WAL_RECORD_HEADER_SIZE as usize);
-            header_buf.resize(WAL_RECORD_HEADER_SIZE as usize, 0u8);
+            ~header_buf = Vec.with_capacity(WAL_RECORD_HEADER_SIZE as u64);
+            header_buf.resize(WAL_RECORD_HEADER_SIZE as u64, 0u8);
             ~bytes_read = file.read_at(self.current_offset as u64, &header_buf)?;
-            if bytes_read < WAL_RECORD_HEADER_SIZE as usize {
+            I bytes_read < WAL_RECORD_HEADER_SIZE as u64 {
                 # Partial header = end of segment or torn write
                 self.segment_file = None;
                 self.current_segment += 1;
                 self.current_offset = WAL_SEGMENT_HEADER_SIZE;
-                continue;
+                C;
             }
 
             ~buf = ByteBuffer.wrap_readonly(&header_buf);
             ~header = WalRecordHeader.deserialize(&buf)?;
 
             # Validate record
-            if header.record_length < WAL_RECORD_HEADER_SIZE || header.lsn == NULL_LSN {
+            I header.record_length < WAL_RECORD_HEADER_SIZE || header.lsn == NULL_LSN {
                 # Invalid record = end of valid data
                 self.segment_file = None;
                 self.current_segment += 1;
                 self.current_offset = WAL_SEGMENT_HEADER_SIZE;
-                continue;
+                C;
             }
 
             # Read payload
             ~payload_size = header.record_length - WAL_RECORD_HEADER_SIZE;
-            ~payload = Vec.with_capacity(payload_size as usize);
-            payload.resize(payload_size as usize, 0u8);
-            if payload_size > 0 {
+            ~payload = Vec.with_capacity(payload_size as u64);
+            payload.resize(payload_size as u64, 0u8);
+            I payload_size > 0 {
                 file.read_at(
                     (self.current_offset + WAL_RECORD_HEADER_SIZE) as u64,
                     &payload,
@@ -165,21 +165,21 @@ X WalRecordIterator {
             }
 
             # Verify checksum of full record
-            ~full_record = Vec.with_capacity(header.record_length as usize);
-            full_record.resize(header.record_length as usize, 0u8);
+            ~full_record = Vec.with_capacity(header.record_length as u64);
+            full_record.resize(header.record_length as u64, 0u8);
             file.read_at(self.current_offset as u64, &full_record)?;
-            if !header.verify_checksum(&full_record) {
+            I !header.verify_checksum(&full_record) {
                 # Checksum failure = torn write, end of valid data
                 self.segment_file = None;
                 self.current_segment += 1;
                 self.current_offset = WAL_SEGMENT_HEADER_SIZE;
-                continue;
+                C;
             }
 
             # Advance offset
             self.current_offset += header.record_length;
 
-            return Ok(Some((header, payload)));
+            R Ok(Some((header, payload)));
         }
     }
 
@@ -195,8 +195,8 @@ X WalRecordIterator {
         M File.open(&path, OpenMode.ReadOnly) {
             Ok(file) => {
                 # Read segment header
-                ~header_buf = Vec.with_capacity(WAL_SEGMENT_HEADER_SIZE as usize);
-                header_buf.resize(WAL_SEGMENT_HEADER_SIZE as usize, 0u8);
+                ~header_buf = Vec.with_capacity(WAL_SEGMENT_HEADER_SIZE as u64);
+                header_buf.resize(WAL_SEGMENT_HEADER_SIZE as u64, 0u8);
                 file.read_at(0, &header_buf)?;
                 ~seg_header = WalSegmentHeader.deserialize(
                     &ByteBuffer.wrap_readonly(&header_buf)
@@ -204,7 +204,7 @@ X WalRecordIterator {
 
                 self.segment_file = Some(file);
                 self.segment_header = Some(seg_header);
-                if self.current_offset < WAL_SEGMENT_HEADER_SIZE {
+                I self.current_offset < WAL_SEGMENT_HEADER_SIZE {
                     self.current_offset = WAL_SEGMENT_HEADER_SIZE;
                 }
                 Ok(true)
@@ -226,10 +226,10 @@ F recovery_analysis(
 
     ~iter = WalRecordIterator.from_lsn(wal_dir.to_string(), checkpoint_lsn)?;
 
-    loop {
+    L {
         ~record = M iter.next()? {
             Some(r) => r,
-            None => break,
+            None => B,
         };
         ~(header, payload) = record;
         ~txn_id = header.txn_id;
@@ -271,8 +271,8 @@ F recovery_analysis(
                 # Parse active txns from checkpoint payload
                 ~buf = ByteBuffer.wrap_readonly(&payload);
                 ~cp_payload = CheckpointBeginPayload.deserialize(&buf)?;
-                for active_txn in &cp_payload.active_txns {
-                    if !txn_table.contains_key(active_txn) {
+                L active_txn: &cp_payload.active_txns {
+                    I !txn_table.contains_key(active_txn) {
                         txn_table.insert(*active_txn, RecoveryTxnEntry.new(*active_txn, header.lsn));
                     }
                 }
@@ -301,7 +301,7 @@ F recovery_analysis(
                         entry.last_lsn = header.lsn;
                     },
                     None => {
-                        if txn_id != 0 {
+                        I txn_id != 0 {
                             txn_table.insert(txn_id, RecoveryTxnEntry.new(txn_id, header.lsn));
                         }
                     },
@@ -323,7 +323,7 @@ F recovery_analysis(
 # Track dirty pages from a WAL record
 F track_dirty_page(header: &WalRecordHeader, payload: &[u8], dirty_pages: &~Vec<DirtyPageEntry>) {
     # Extract file_id and page_id from common record types
-    if payload.len() >= 5 {
+    I payload.len() >= 5 {
         ~buf = ByteBuffer.wrap_readonly(payload);
         M buf.get_u8() {
             Ok(file_id) => {
@@ -331,13 +331,13 @@ F track_dirty_page(header: &WalRecordHeader, payload: &[u8], dirty_pages: &~Vec<
                     Ok(page_id) => {
                         # Check if already tracked
                         ~found = false;
-                        for dp in dirty_pages.iter() {
-                            if dp.file_id == file_id && dp.page_id == page_id {
+                        L dp: dirty_pages.iter() {
+                            I dp.file_id == file_id && dp.page_id == page_id {
                                 found = true;
-                                break;
+                                B;
                             }
                         }
-                        if !found {
+                        I !found {
                             dirty_pages.push(DirtyPageEntry {
                                 file_id,
                                 page_id,
@@ -365,45 +365,45 @@ F recovery_redo(
 
     ~iter = WalRecordIterator.from_lsn(wal_dir.to_string(), analysis.redo_start_lsn)?;
 
-    loop {
+    L {
         ~record = M iter.next()? {
             Some(r) => r,
-            None => break,
+            None => B,
         };
         ~(header, payload) = record;
 
         # Skip meta records that don't modify pages
         M header.record_type {
             TXN_BEGIN | TXN_COMMIT | TXN_ABORT |
-            CHECKPOINT_BEGIN | CHECKPOINT_END => continue,
+            CHECKPOINT_BEGIN | CHECKPOINT_END => C,
             _ => {},
         }
 
         # Apply FPI directly (full page image replaces entire page)
-        if header.record_type == FPI {
+        I header.record_type == FPI {
             ~buf = ByteBuffer.wrap_readonly(&payload);
             ~fpi_payload = FpiPayload.deserialize(&buf)?;
             redo_fpi(pool, &fpi_payload, header.lsn)?;
             records_redone += 1;
-            continue;
+            C;
         }
 
         # For CLR: redo the compensation (CLRs are redo-only)
-        if header.record_type == CLR {
+        I header.record_type == CLR {
             ~buf = ByteBuffer.wrap_readonly(&payload);
             ~clr_payload = ClrPayload.deserialize(&buf)?;
             # CLRs record the undo operation - redo them to restore undo state
             records_redone += 1;
-            continue;
+            C;
         }
 
         # For data records: check if page needs redo
         # Extract file_id and page_id from payload
-        if payload.len() >= 5 {
+        I payload.len() >= 5 {
             ~buf = ByteBuffer.wrap_readonly(&payload);
             M (buf.get_u8(), buf.get_u32_le()) {
                 (Ok(file_id), Ok(page_id)) => {
-                    if needs_redo(pool, file_id, page_id, header.lsn)? {
+                    I needs_redo(pool, file_id, page_id, header.lsn)? {
                         redo_record(pool, &header, &payload)?;
                         records_redone += 1;
                     }

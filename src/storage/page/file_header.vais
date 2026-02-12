@@ -50,8 +50,8 @@ X FileHeader {
     # Deserialize file header data
     F deserialize(buf: &ByteBuffer) -> Result<FileHeader, VaisError> {
         ~magic = buf.get_u64_le()?;
-        if magic != VAISDB_MAGIC {
-            return Err(err_invalid_magic());
+        I magic != VAISDB_MAGIC {
+            R Err(err_invalid_magic());
         }
         Ok(FileHeader {
             magic,
@@ -75,20 +75,20 @@ X FileHeader {
     # Read file header from a page-sized buffer
     F read_from_page(page_data: &[u8]) -> Result<FileHeader, VaisError> {
         ~buf = ByteBuffer.wrap_readonly(page_data);
-        buf.set_position(PAGE_HEADER_SIZE as usize);
+        buf.set_position(PAGE_HEADER_SIZE as u64);
         FileHeader.deserialize(&buf)
     }
 
     # Validate file header
     F validate(self) -> Result<(), VaisError> {
-        if self.magic != VAISDB_MAGIC {
-            return Err(err_invalid_magic());
+        I self.magic != VAISDB_MAGIC {
+            R Err(err_invalid_magic());
         }
-        if self.page_size != 8192 && self.page_size != 16384 {
-            return Err(err_internal("Invalid page size in file header"));
+        I self.page_size != 8192 && self.page_size != 16384 {
+            R Err(err_internal("Invalid page size in file header"));
         }
-        if self.file_id > 4 {
-            return Err(err_internal("Invalid file_id in file header"));
+        I self.file_id > 4 {
+            R Err(err_internal("Invalid file_id in file header"));
         }
         Ok(())
     }

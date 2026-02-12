@@ -44,12 +44,12 @@ X UndoLog {
         ~available_space = self.available_space_in_current_page();
 
         # Check if we need a new page
-        if entry_size > available_space {
+        I entry_size > available_space {
             self.allocate_new_page(pool)?;
         }
 
         # Serialize the entry to a buffer
-        ~buf = ByteBuffer.with_capacity(entry_size as usize);
+        ~buf = ByteBuffer.with_capacity(entry_size as u64);
         entry.serialize(&buf);
         ~entry_data = buf.as_bytes();
 
@@ -59,8 +59,8 @@ X UndoLog {
 
         # Write entry data at current offset
         ~page_data = frame.get_data_mut();
-        ~write_offset = self.current_offset as usize;
-        page_data[write_offset..(write_offset + entry_size as usize)]
+        ~write_offset = self.current_offset as u64;
+        page_data[write_offset..(write_offset + entry_size as u64)]
             .copy_from_slice(entry_data);
 
         # Update page header's free_space_offset and item_count
@@ -92,15 +92,15 @@ X UndoLog {
 
     # Read an undo entry by its undo_ptr
     F read_entry(self, undo_ptr: u64, pool: &~BufferPool) -> Result<UndoEntry, VaisError> {
-        if undo_ptr == NULL_UNDO_PTR {
-            return Err(err_internal("Cannot read null undo pointer"));
+        I undo_ptr == NULL_UNDO_PTR {
+            R Err(err_internal("Cannot read null undo pointer"));
         }
 
         # Decode undo_ptr
         ~(file_id, page_id, offset) = decode_undo_ptr(undo_ptr);
 
-        if file_id != self.file_id {
-            return Err(err_internal("Invalid undo file_id: {file_id}, expected {self.file_id}"));
+        I file_id != self.file_id {
+            R Err(err_internal("Invalid undo file_id: {file_id}, expected {self.file_id}"));
         }
 
         # Fetch the undo page
@@ -109,7 +109,7 @@ X UndoLog {
         ~page_data = frame.get_data();
 
         # Create a ByteBuffer starting at the offset
-        ~buf = ByteBuffer.from_slice(&page_data[offset as usize..]);
+        ~buf = ByteBuffer.from_slice(&page_data[offset as u64..]);
 
         # Deserialize the entry
         ~entry = UndoEntry.deserialize(&buf)?;
@@ -126,7 +126,7 @@ X UndoLog {
         ~entries = Vec.new();
         ~current_ptr = undo_ptr;
 
-        while current_ptr != NULL_UNDO_PTR {
+        L while current_ptr != NULL_UNDO_PTR {
             ~entry = self.read_entry(current_ptr, pool)?;
             current_ptr = entry.prev_undo_ptr;
             entries.push(entry);

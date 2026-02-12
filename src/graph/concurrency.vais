@@ -83,20 +83,20 @@ X NodeLock {
 
     # Try to acquire shared lock without blocking
     F try_read_lock(~self) -> bool {
-        if self.lock.try_read_lock() {
+        I self.lock.try_read_lock() {
             self.ref_count += 1;
             true
-        } else {
+        } E {
             false
         }
     }
 
     # Try to acquire exclusive lock without blocking
     F try_write_lock(~self) -> bool {
-        if self.lock.try_write_lock() {
+        I self.lock.try_write_lock() {
             self.ref_count += 1;
             true
-        } else {
+        } E {
             false
         }
     }
@@ -104,7 +104,7 @@ X NodeLock {
     # Release shared lock
     F read_unlock(~self) {
         self.lock.read_unlock();
-        if self.ref_count > 0 {
+        I self.ref_count > 0 {
             self.ref_count -= 1;
         }
     }
@@ -112,7 +112,7 @@ X NodeLock {
     # Release exclusive lock
     F write_unlock(~self) {
         self.lock.write_unlock();
-        if self.ref_count > 0 {
+        I self.ref_count > 0 {
             self.ref_count -= 1;
         }
     }
@@ -146,11 +146,11 @@ X LockSlot {
         self.slot_lock.write_lock();
 
         # Search for existing lock
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < self.locks.len() {
-            if self.locks[i].node_id == node_id {
+            I self.locks[i].node_id == node_id {
                 self.slot_lock.write_unlock();
-                return &~self.locks[i];
+                R &~self.locks[i];
             }
             i += 1;
         }
@@ -165,12 +165,12 @@ X LockSlot {
     # Find existing node lock in this slot (read-only)
     F find_lock(self, node_id: u64) -> Option<&NodeLock> {
         self.slot_lock.read_lock();
-        ~i: usize = 0;
+        ~i: u64 = 0;
         L while i < self.locks.len() {
-            if self.locks[i].node_id == node_id {
+            I self.locks[i].node_id == node_id {
                 ~result = Some(&self.locks[i]);
                 self.slot_lock.read_unlock();
-                return result;
+                R result;
             }
             i += 1;
         }
@@ -191,7 +191,7 @@ S GraphLockManager {
 X GraphLockManager {
     # Create new lock manager with specified capacity
     F new(capacity: u32) -> GraphLockManager {
-        ~slots = Vec.with_capacity(capacity as usize);
+        ~slots = Vec.with_capacity(capacity as u64);
         ~i: u32 = 0;
         L while i < capacity {
             slots.push(LockSlot.new());
@@ -206,8 +206,8 @@ X GraphLockManager {
     }
 
     # Hash node_id to slot index
-    F hash(self, node_id: u64) -> usize {
-        (node_id % (self.capacity as u64)) as usize
+    F hash(self, node_id: u64) -> u64 {
+        (node_id % (self.capacity as u64)) as u64
     }
 
     # Acquire shared (read) lock on node
@@ -230,9 +230,9 @@ X GraphLockManager {
     F try_lock_node_shared(~self, node_id: u64) -> Result<Option<NodeLockGuard>, VaisError> {
         ~slot_idx = self.hash(node_id);
         ~lock = self.slots[slot_idx].get_or_create_lock(node_id);
-        if lock.try_read_lock() {
+        I lock.try_read_lock() {
             Ok(Some(NodeLockGuard.new(&self, node_id, LockMode.Shared)))
-        } else {
+        } E {
             Ok(None)
         }
     }
@@ -241,9 +241,9 @@ X GraphLockManager {
     F try_lock_node_exclusive(~self, node_id: u64) -> Result<Option<NodeLockGuard>, VaisError> {
         ~slot_idx = self.hash(node_id);
         ~lock = self.slots[slot_idx].get_or_create_lock(node_id);
-        if lock.try_write_lock() {
+        I lock.try_write_lock() {
             Ok(Some(NodeLockGuard.new(&self, node_id, LockMode.Exclusive)))
-        } else {
+        } E {
             Ok(None)
         }
     }
@@ -251,15 +251,15 @@ X GraphLockManager {
     # Lock an edge (both src and dst nodes) in ID order to prevent deadlock
     F lock_edge(~self, src: u64, dst: u64) -> Result<EdgeLockGuard, VaisError> {
         # Always lock in ascending node ID order to prevent deadlock
-        if src < dst {
+        I src < dst {
             ~src_guard = self.lock_node_exclusive(src)?;
             ~dst_guard = self.lock_node_exclusive(dst)?;
             Ok(EdgeLockGuard.new(src, dst, src_guard, dst_guard))
-        } else if src > dst {
+        } E I src > dst {
             ~dst_guard = self.lock_node_exclusive(dst)?;
             ~src_guard = self.lock_node_exclusive(src)?;
             Ok(EdgeLockGuard.new(src, dst, src_guard, dst_guard))
-        } else {
+        } E {
             # Self-loop: only lock once
             ~src_guard = self.lock_node_exclusive(src)?;
             Ok(EdgeLockGuard.new_self_loop(src, src_guard))
@@ -269,8 +269,8 @@ X GraphLockManager {
     # Release node lock explicitly (normally handled by guard drop)
     F release_node(~self, node_id: u64, mode: LockMode) {
         ~slot_idx = self.hash(node_id);
-        if ~opt_lock = self.slots[slot_idx].find_lock(node_id) {
-            if ~lock = opt_lock {
+        I ~opt_lock = self.slots[slot_idx].find_lock(node_id) {
+            I ~lock = opt_lock {
                 M mode {
                     LockMode.Shared => lock.read_unlock(),
                     LockMode.Exclusive => lock.write_unlock(),
@@ -303,7 +303,7 @@ X NodeLockGuard {
 
     # Release the lock early (before drop)
     F release(~self) {
-        if self.held {
+        I self.held {
             self.manager.release_node(self.node_id, self.mode);
             self.held = false;
         }
@@ -387,8 +387,8 @@ X EdgeLockGuard {
     # Release both locks early (before drop)
     F release(~self) {
         self.src_guard.release();
-        if ~opt_dst = &~self.dst_guard {
-            if ~dst = opt_dst {
+        I ~opt_dst = &~self.dst_guard {
+            I ~dst = opt_dst {
                 dst.release();
             }
         }
@@ -432,18 +432,18 @@ X GraphRwLatch {
 
     # Try to acquire read latch without blocking
     F try_read_lock(~self) -> Option<GraphLatchGuard> {
-        if self.latch.try_read_lock() {
+        I self.latch.try_read_lock() {
             Some(GraphLatchGuard.new(&~self, LatchMode.Read))
-        } else {
+        } E {
             None
         }
     }
 
     # Try to acquire write latch without blocking
     F try_write_lock(~self) -> Option<GraphLatchGuard> {
-        if self.latch.try_write_lock() {
+        I self.latch.try_write_lock() {
             Some(GraphLatchGuard.new(&~self, LatchMode.Write))
-        } else {
+        } E {
             None
         }
     }
@@ -486,7 +486,7 @@ X GraphLatchGuard {
 
     # Release latch early (before drop)
     F release(~self) {
-        if self.held {
+        I self.held {
             M self.mode {
                 LatchMode.Read => self.latch.read_unlock(),
                 LatchMode.Write => self.latch.write_unlock(),
@@ -519,9 +519,9 @@ X Drop for GraphLatchGuard {
 
 # Sort two node IDs in ascending order for deadlock-free locking
 F order_node_ids(a: u64, b: u64) -> (u64, u64) {
-    if a < b {
+    I a < b {
         (a, b)
-    } else {
+    } E {
         (b, a)
     }
 }
@@ -535,18 +535,18 @@ F lock_nodes_ordered(
 ) -> Result<Vec<NodeLockGuard>, VaisError> {
     # Sort node IDs to ensure consistent lock ordering
     ~sorted_ids = Vec.with_capacity(node_ids.len());
-    ~i: usize = 0;
+    ~i: u64 = 0;
     L while i < node_ids.len() {
         sorted_ids.push(node_ids[i]);
         i += 1;
     }
 
     # Simple bubble sort for small arrays
-    ~j: usize = 0;
+    ~j: u64 = 0;
     L while j < sorted_ids.len() {
-        ~k: usize = 0;
+        ~k: u64 = 0;
         L while k < sorted_ids.len() - 1 - j {
-            if sorted_ids[k] > sorted_ids[k + 1] {
+            I sorted_ids[k] > sorted_ids[k + 1] {
                 ~temp = sorted_ids[k];
                 sorted_ids[k] = sorted_ids[k + 1];
                 sorted_ids[k + 1] = temp;
@@ -558,11 +558,11 @@ F lock_nodes_ordered(
 
     # Acquire locks in sorted order
     ~guards = Vec.with_capacity(sorted_ids.len());
-    ~idx: usize = 0;
+    ~idx: u64 = 0;
     L while idx < sorted_ids.len() {
-        ~guard = if exclusive {
+        ~guard = I exclusive {
             manager.lock_node_exclusive(sorted_ids[idx])?
-        } else {
+        } E {
             manager.lock_node_shared(sorted_ids[idx])?
         };
         guards.push(guard);

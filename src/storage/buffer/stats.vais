@@ -77,14 +77,14 @@ X AggregatedStats {
         output += "  Flushes:       {self.total_flushes}\n\n";
 
         # Partition distribution (if partitioned)
-        if self.partition_count > 1 {
+        I self.partition_count > 1 {
             output += "Partition Distribution:\n";
-            for i in 0..self.partition_count {
-                ~usage = self.per_partition_usage[i as usize];
+            L i: 0..self.partition_count {
+                ~usage = self.per_partition_usage[i as u64];
                 ~capacity = self.total_capacity / self.partition_count;
-                ~ratio = if capacity > 0 {
+                ~ratio = I capacity > 0 {
                     (usage as f64) / (capacity as f64) * 100.0
-                } else {
+                } E {
                     0.0
                 };
                 output += "  Partition {i}: {usage}/{capacity} ({ratio:.1}%)\n";
@@ -119,21 +119,21 @@ X BufferPoolStatsCollector {
         ~dirty = pool.dirty_count();
 
         ~total_accesses = stats.hits + stats.misses;
-        ~hit_rate = if total_accesses > 0 {
+        ~hit_rate = I total_accesses > 0 {
             (stats.hits as f64) / (total_accesses as f64) * 100.0
-        } else {
+        } E {
             100.0
         };
 
-        ~usage_ratio = if capacity > 0 {
+        ~usage_ratio = I capacity > 0 {
             (used as f64) / (capacity as f64) * 100.0
-        } else {
+        } E {
             0.0
         };
 
-        ~dirty_ratio = if used > 0 {
+        ~dirty_ratio = I used > 0 {
             (dirty as f64) / (used as f64) * 100.0
-        } else {
+        } E {
             0.0
         };
 
@@ -165,9 +165,9 @@ X BufferPoolStatsCollector {
         ~total_misses: u64 = 0;
         ~total_evictions: u64 = 0;
         ~total_flushes: u64 = 0;
-        ~per_partition_usage = Vec.with_capacity(partition_count as usize);
+        ~per_partition_usage = Vec.with_capacity(partition_count as u64);
 
-        for i in 0..partition_count {
+        L i: 0..partition_count {
             ~partition = pool.get_partition(i);
             ~partition_stats = partition.get_stats();
             ~partition_used = partition.used_count();
@@ -181,21 +181,21 @@ X BufferPoolStatsCollector {
 
         # Calculate ratios
         ~total_accesses = total_hits + total_misses;
-        ~hit_rate = if total_accesses > 0 {
+        ~hit_rate = I total_accesses > 0 {
             (total_hits as f64) / (total_accesses as f64) * 100.0
-        } else {
+        } E {
             100.0
         };
 
-        ~usage_ratio = if total_capacity > 0 {
+        ~usage_ratio = I total_capacity > 0 {
             (total_used as f64) / (total_capacity as f64) * 100.0
-        } else {
+        } E {
             0.0
         };
 
-        ~dirty_ratio = if total_used > 0 {
+        ~dirty_ratio = I total_used > 0 {
             (total_dirty as f64) / (total_used as f64) * 100.0
-        } else {
+        } E {
             0.0
         };
 
@@ -240,7 +240,7 @@ X BufferPoolSnapshot {
 # Time-series stats collector (for monitoring trends)
 S BufferPoolMonitor {
     snapshots: Vec<BufferPoolSnapshot>,
-    max_snapshots: usize,
+    max_snapshots: u64,
 }
 
 X BufferPoolMonitor {
@@ -257,24 +257,24 @@ X BufferPoolMonitor {
         self.snapshots.push(snapshot);
 
         # Keep only the last N snapshots
-        if self.snapshots.len() > self.max_snapshots {
+        I self.snapshots.len() > self.max_snapshots {
             self.snapshots.remove(0);
         }
     }
 
     # Get the most recent snapshot
     F latest(self) -> Option<&BufferPoolSnapshot> {
-        if self.snapshots.is_empty() {
+        I self.snapshots.is_empty() {
             None
-        } else {
+        } E {
             Some(&self.snapshots[self.snapshots.len() - 1])
         }
     }
 
     # Calculate hit rate trend (increase/decrease over time)
     F hit_rate_trend(self) -> Option<f64> {
-        if self.snapshots.len() < 2 {
-            return None;
+        I self.snapshots.len() < 2 {
+            R None;
         }
 
         ~first = &self.snapshots[0];
@@ -285,12 +285,12 @@ X BufferPoolMonitor {
 
     # Get average hit rate over all snapshots
     F average_hit_rate(self) -> f64 {
-        if self.snapshots.is_empty() {
-            return 0.0;
+        I self.snapshots.is_empty() {
+            R 0.0;
         }
 
         ~sum: f64 = 0.0;
-        for snapshot in &self.snapshots {
+        L snapshot: &self.snapshots {
             sum += snapshot.stats.hit_rate;
         }
 

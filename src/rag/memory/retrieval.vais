@@ -160,9 +160,9 @@ X HybridResult {
 
     ## Format source description
     F source_description(&self) -> Str {
-        if self.source_type == 0 {
+        I self.source_type == 0 {
             "doc:{self.doc_id}/chunk:{self.source_id}"
-        } else {
+        } E {
             "memory:{self.source_id}/session:{self.session_id}"
         }
     }
@@ -219,7 +219,7 @@ X HybridRetriever {
         # Add document results first
         ~di: u32 = 0;
         W di < rag_results.len() as u32 && di < doc_limit {
-            ~r = rag_results.get(di as usize);
+            ~r = rag_results.get(di as u64);
             results.push(HybridResult.from_rag_result(r, di + 1));
             di = di + 1;
         }
@@ -227,7 +227,7 @@ X HybridRetriever {
         # Fill remaining with memory results
         ~mi: u32 = 0;
         W mi < memory_results.len() as u32 && mi < mem_limit {
-            ~m = memory_results.get(mi as usize);
+            ~m = memory_results.get(mi as u64);
             results.push(HybridResult.from_memory_result(m, mi + 1));
             mi = mi + 1;
         }
@@ -250,7 +250,7 @@ X HybridRetriever {
         # Add memory results first
         ~mi: u32 = 0;
         W mi < memory_results.len() as u32 && mi < mem_limit {
-            ~m = memory_results.get(mi as usize);
+            ~m = memory_results.get(mi as u64);
             results.push(HybridResult.from_memory_result(m, mi + 1));
             mi = mi + 1;
         }
@@ -258,7 +258,7 @@ X HybridRetriever {
         # Fill remaining with document results
         ~di: u32 = 0;
         W di < rag_results.len() as u32 && di < doc_limit {
-            ~r = rag_results.get(di as usize);
+            ~r = rag_results.get(di as u64);
             results.push(HybridResult.from_rag_result(r, di + 1));
             di = di + 1;
         }
@@ -279,8 +279,8 @@ X HybridRetriever {
         ~doc_norm = normalize_rag_scores(rag_results);
         ~di: u32 = 0;
         W di < doc_norm.len() as u32 {
-            ~entry = doc_norm.get(di as usize);
-            ~r = rag_results.get(di as usize);
+            ~entry = doc_norm.get(di as u64);
+            ~r = rag_results.get(di as u64);
             ~hr = HybridResult.from_rag_result(r, di + 1);
             hr.score = entry.1 * (1.0 - self.config.memory_weight_in_fusion);
             all.push(hr);
@@ -291,8 +291,8 @@ X HybridRetriever {
         ~mem_norm = normalize_memory_scores(memory_results);
         ~mi: u32 = 0;
         W mi < mem_norm.len() as u32 {
-            ~entry = mem_norm.get(mi as usize);
-            ~m = memory_results.get(mi as usize);
+            ~entry = mem_norm.get(mi as u64);
+            ~m = memory_results.get(mi as u64);
             ~hr = HybridResult.from_memory_result(m, mi + 1);
             hr.score = entry.1 * self.config.memory_weight_in_fusion;
             all.push(hr);
@@ -306,26 +306,26 @@ X HybridRetriever {
         trim_to_budget(&~all, self.config.total_budget);
 
         # Apply min_score threshold
-        if self.config.min_score_threshold > 0.0 {
+        I self.config.min_score_threshold > 0.0 {
             ~filtered = Vec.new();
             ~fi: u32 = 0;
             W fi < all.len() as u32 {
-                if all.get(fi as usize).score >= self.config.min_score_threshold {
+                I all.get(fi as u64).score >= self.config.min_score_threshold {
                     ~hr = HybridResult {
-                        source_type: all.get(fi as usize).source_type,
-                        source_id: all.get(fi as usize).source_id,
-                        doc_id: all.get(fi as usize).doc_id,
-                        session_id: all.get(fi as usize).session_id,
-                        content: all.get(fi as usize).content.clone(),
-                        score: all.get(fi as usize).score,
-                        original_rank: all.get(fi as usize).original_rank,
+                        source_type: all.get(fi as u64).source_type,
+                        source_id: all.get(fi as u64).source_id,
+                        doc_id: all.get(fi as u64).doc_id,
+                        session_id: all.get(fi as u64).session_id,
+                        content: all.get(fi as u64).content.clone(),
+                        score: all.get(fi as u64).score,
+                        original_rank: all.get(fi as u64).original_rank,
                         metadata: HashMap.new(),
                     };
                     filtered.push(hr);
                 }
                 fi = fi + 1;
             }
-            return filtered;
+            R filtered;
         }
 
         all
@@ -337,15 +337,15 @@ X HybridRetriever {
         memory_results: &Vec<MemorySearchResult>,
     ) -> Vec<HybridResult> {
         ~results = Vec.new();
-        ~limit = if self.config.total_budget < memory_results.len() as u32 {
+        ~limit = I self.config.total_budget < memory_results.len() as u32 {
             self.config.total_budget
-        } else {
+        } E {
             memory_results.len() as u32
         };
 
         ~i: u32 = 0;
         W i < limit {
-            ~m = memory_results.get(i as usize);
+            ~m = memory_results.get(i as u64);
             results.push(HybridResult.from_memory_result(m, i + 1));
             i = i + 1;
         }
@@ -357,8 +357,8 @@ X HybridRetriever {
         ~ctx = Str.new();
         ~i: u32 = 0;
         W i < results.len() as u32 {
-            ~r = results.get(i as usize);
-            ~source_tag = if r.is_document() { "[DOC]" } else { "[MEM]" };
+            ~r = results.get(i as u64);
+            ~source_tag = I r.is_document() { "[DOC]" } E { "[MEM]" };
             ctx = "{ctx}{source_tag} ({r.source_description()}, score={r.score:.3}):\n{r.content}\n\n";
             i = i + 1;
         }
@@ -372,17 +372,17 @@ X HybridRetriever {
 
 ## Normalize RAG search result scores to [0, 1]
 F normalize_rag_scores(results: &Vec<RagSearchResult>) -> Vec<(u64, f64)> {
-    if results.len() == 0 {
-        return Vec.new();
+    I results.len() == 0 {
+        R Vec.new();
     }
 
     ~min_s = results.get(0).score;
     ~max_s = results.get(0).score;
     ~i: u32 = 1;
     W i < results.len() as u32 {
-        ~s = results.get(i as usize).score;
-        if s < min_s { min_s = s; }
-        if s > max_s { max_s = s; }
+        ~s = results.get(i as u64).score;
+        I s < min_s { min_s = s; }
+        I s > max_s { max_s = s; }
         i = i + 1;
     }
 
@@ -391,8 +391,8 @@ F normalize_rag_scores(results: &Vec<RagSearchResult>) -> Vec<(u64, f64)> {
 
     ~j: u32 = 0;
     W j < results.len() as u32 {
-        ~r = results.get(j as usize);
-        ~norm = if range < 0.000001 { 1.0 } else { (r.score - min_s) / range };
+        ~r = results.get(j as u64);
+        ~norm = I range < 0.000001 { 1.0 } E { (r.score - min_s) / range };
         normalized.push((r.chunk_id, norm));
         j = j + 1;
     }
@@ -401,17 +401,17 @@ F normalize_rag_scores(results: &Vec<RagSearchResult>) -> Vec<(u64, f64)> {
 
 ## Normalize memory search result scores to [0, 1]
 F normalize_memory_scores(results: &Vec<MemorySearchResult>) -> Vec<(u64, f64)> {
-    if results.len() == 0 {
-        return Vec.new();
+    I results.len() == 0 {
+        R Vec.new();
     }
 
     ~min_s = results.get(0).score;
     ~max_s = results.get(0).score;
     ~i: u32 = 1;
     W i < results.len() as u32 {
-        ~s = results.get(i as usize).score;
-        if s < min_s { min_s = s; }
-        if s > max_s { max_s = s; }
+        ~s = results.get(i as u64).score;
+        I s < min_s { min_s = s; }
+        I s > max_s { max_s = s; }
         i = i + 1;
     }
 
@@ -420,8 +420,8 @@ F normalize_memory_scores(results: &Vec<MemorySearchResult>) -> Vec<(u64, f64)> 
 
     ~j: u32 = 0;
     W j < results.len() as u32 {
-        ~r = results.get(j as usize);
-        ~norm = if range < 0.000001 { 1.0 } else { (r.score - min_s) / range };
+        ~r = results.get(j as u64);
+        ~norm = I range < 0.000001 { 1.0 } E { (r.score - min_s) / range };
         normalized.push((r.memory_id, norm));
         j = j + 1;
     }
@@ -431,8 +431,8 @@ F normalize_memory_scores(results: &Vec<MemorySearchResult>) -> Vec<(u64, f64)> 
 ## Sort hybrid results by score descending — O(N log N) merge sort
 F sort_hybrid_results_desc(results: &~Vec<HybridResult>) {
     ~n = results.len() as u32;
-    if n <= 1 {
-        return;
+    I n <= 1 {
+        R;
     }
     ~indices = Vec.new();
     ~aux = Vec.new();
@@ -448,20 +448,20 @@ F sort_hybrid_results_desc(results: &~Vec<HybridResult>) {
         ~left: u32 = 0;
         W left < n {
             ~mid = left + width;
-            if mid > n { mid = n; }
+            I mid > n { mid = n; }
             ~right = left + width * 2;
-            if right > n { right = n; }
+            I right > n { right = n; }
             ~li = left;
             ~ri = mid;
             ~k = left;
             W k < right {
-                if li < mid && (ri >= right ||
-                    results.get(indices.get(li as usize) as usize).score >=
-                    results.get(indices.get(ri as usize) as usize).score) {
-                    aux.set(k as usize, indices.get(li as usize));
+                I li < mid && (ri >= right ||
+                    results.get(indices.get(li as u64) as u64).score >=
+                    results.get(indices.get(ri as u64) as u64).score) {
+                    aux.set(k as u64, indices.get(li as u64));
                     li = li + 1;
-                } else {
-                    aux.set(k as usize, indices.get(ri as usize));
+                } E {
+                    aux.set(k as u64, indices.get(ri as u64));
                     ri = ri + 1;
                 }
                 k = k + 1;
@@ -470,7 +470,7 @@ F sort_hybrid_results_desc(results: &~Vec<HybridResult>) {
         }
         ~c: u32 = 0;
         W c < n {
-            indices.set(c as usize, aux.get(c as usize));
+            indices.set(c as u64, aux.get(c as u64));
             c = c + 1;
         }
         width = width * 2;
@@ -485,17 +485,17 @@ F sort_hybrid_results_desc(results: &~Vec<HybridResult>) {
     }
     ~ci: u32 = 0;
     W ci < n {
-        if !visited.get(ci as usize) && indices.get(ci as usize) != ci {
+        I !visited.get(ci as u64) && indices.get(ci as u64) != ci {
             ~j = ci;
             ~done = false;
             W !done {
-                ~next = indices.get(j as usize);
-                if next == ci {
-                    visited.set(j as usize, true);
+                ~next = indices.get(j as u64);
+                I next == ci {
+                    visited.set(j as u64, true);
                     done = true;
-                } else {
-                    results.swap(j as usize, next as usize);
-                    visited.set(j as usize, true);
+                } E {
+                    results.swap(j as u64, next as u64);
+                    visited.set(j as u64, true);
                     j = next;
                 }
             }

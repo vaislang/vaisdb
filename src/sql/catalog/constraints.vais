@@ -79,12 +79,12 @@ X ConstraintChecker {
     # Check NOT NULL constraints
     # Validates that all non-nullable columns have non-NULL values
     F check_not_null(self, row: &Row) -> Result<(), VaisError> {
-        for i in 0..self.columns.len() {
+        L i: 0..self.columns.len() {
             ~col = &self.columns[i];
-            if !col.nullable {
+            I !col.nullable {
                 ~val = row.get(i);
-                if val.is_null() {
-                    return Err(err_not_null_violation(col.name.clone()));
+                I val.is_null() {
+                    R Err(err_not_null_violation(col.name.clone()));
                 }
             }
         }
@@ -97,10 +97,10 @@ X ConstraintChecker {
     F check_primary_key(self, row: &Row, pool: &~BufferPool) -> Result<(), VaisError> {
         # Find the primary key index
         ~pk_index: Option<&IndexInfo> = None;
-        for idx in &self.indexes {
-            if idx.is_primary {
+        L idx: &self.indexes {
+            I idx.is_primary {
                 pk_index = Some(idx);
-                break;
+                B;
             }
         }
 
@@ -112,14 +112,14 @@ X ConstraintChecker {
             Some(pk_idx) => {
                 # Build composite key from PK columns
                 ~pk_values = Vec.new();
-                for col_name in &pk_idx.columns {
+                L col_name: &pk_idx.columns {
                     # Find column index by name
                     ~col_idx = self.find_column_index(col_name)?;
                     ~val = row.get(col_idx);
 
                     # PK columns cannot be NULL
-                    if val.is_null() {
-                        return Err(err_not_null_violation(col_name.clone()));
+                    I val.is_null() {
+                        R Err(err_not_null_violation(col_name.clone()));
                     }
 
                     pk_values.push(val);
@@ -132,11 +132,11 @@ X ConstraintChecker {
                 ~tree = BTree.new(pk_idx.root_page_id, 0, 4096);
                 ~cursor = search_cursor(&tree, &key_bytes, pool)?;
 
-                if cursor.valid() {
+                I cursor.valid() {
                     # Key already exists = duplicate
                     cursor.close(pool);
                     ~display_key = format_key_values(&pk_idx.columns, &pk_values);
-                    return Err(err_primary_key_violation(
+                    R Err(err_primary_key_violation(
                         pk_idx.columns.join(", "),
                         display_key
                     ));
@@ -152,29 +152,29 @@ X ConstraintChecker {
     # Validates that UNIQUE index column values are not duplicate
     # NULL values are allowed and do not count as duplicates (NULL != NULL in SQL)
     F check_unique(self, row: &Row, pool: &~BufferPool) -> Result<(), VaisError> {
-        for idx in &self.indexes {
+        L idx: &self.indexes {
             # Only check UNIQUE indexes (excluding primary key, already checked)
-            if idx.is_unique && !idx.is_primary {
+            I idx.is_unique && !idx.is_primary {
                 # Build composite key from UNIQUE columns
                 ~unique_values = Vec.new();
                 ~has_null = false;
 
-                for col_name in &idx.columns {
+                L col_name: &idx.columns {
                     ~col_idx = self.find_column_index(col_name)?;
                     ~val = row.get(col_idx);
 
                     # NULL in UNIQUE column: skip this check (NULL != NULL)
-                    if val.is_null() {
+                    I val.is_null() {
                         has_null = true;
-                        break;
+                        B;
                     }
 
                     unique_values.push(val);
                 }
 
                 # If any column is NULL, skip uniqueness check for this index
-                if has_null {
-                    continue;
+                I has_null {
+                    C;
                 }
 
                 # Build index key bytes
@@ -184,11 +184,11 @@ X ConstraintChecker {
                 ~tree = BTree.new(idx.root_page_id, 0, 4096);
                 ~cursor = search_cursor(&tree, &key_bytes, pool)?;
 
-                if cursor.valid() {
+                I cursor.valid() {
                     # Key already exists = duplicate
                     cursor.close(pool);
                     ~display_key = format_key_values(&idx.columns, &unique_values);
-                    return Err(err_unique_violation(
+                    R Err(err_unique_violation(
                         idx.columns.join(", "),
                         display_key
                     ));
@@ -206,17 +206,17 @@ X ConstraintChecker {
     F apply_defaults(self, values: Vec<SqlValue>, specified_columns: &[Str]) -> Result<Row, VaisError> {
         ~result_values = Vec.with_capacity(self.columns.len());
 
-        for i in 0..self.columns.len() {
+        L i: 0..self.columns.len() {
             ~col = &self.columns[i];
 
             # Check if this column was specified by the user
             ~is_specified = specified_columns.len() == 0 || specified_columns.contains(&col.name);
 
-            ~final_value = if is_specified && i < values.len() {
+            ~final_value = I is_specified && i < values.len() {
                 # User provided a value (may be NULL)
                 ~provided_val = &values[i];
 
-                if provided_val.is_null() {
+                I provided_val.is_null() {
                     # User explicitly provided NULL, try to apply default
                     M &col.default_value {
                         Some(ref default_str) => {
@@ -224,18 +224,18 @@ X ConstraintChecker {
                         },
                         None => {
                             # No default, check nullable
-                            if col.nullable {
+                            I col.nullable {
                                 SqlValue.Null
-                            } else {
-                                return Err(err_not_null_violation(col.name.clone()));
+                            } E {
+                                R Err(err_not_null_violation(col.name.clone()));
                             }
                         },
                     }
-                } else {
+                } E {
                     # User provided non-NULL value, use it
                     provided_val.clone()
                 }
-            } else {
+            } E {
                 # Column not specified, apply default
                 M &col.default_value {
                     Some(ref default_str) => {
@@ -243,10 +243,10 @@ X ConstraintChecker {
                     },
                     None => {
                         # No default value specified
-                        if col.nullable {
+                        I col.nullable {
                             SqlValue.Null
-                        } else {
-                            return Err(err_default_error(
+                        } E {
+                            R Err(err_default_error(
                                 col.name.clone(),
                                 "no default value defined and column is NOT NULL"
                             ));
@@ -295,10 +295,10 @@ X ConstraintChecker {
     }
 
     # Helper: Find column index by name
-    F find_column_index(self, col_name: &Str) -> Result<usize, VaisError> {
-        for i in 0..self.columns.len() {
-            if &self.columns[i].name == col_name {
-                return Ok(i);
+    F find_column_index(self, col_name: &Str) -> Result<u64, VaisError> {
+        L i: 0..self.columns.len() {
+            I &self.columns[i].name == col_name {
+                R Ok(i);
             }
         }
         Err(VaisError.new(
@@ -318,7 +318,7 @@ X ConstraintChecker {
 F build_index_key(values: &[&SqlValue]) -> Result<Vec<u8>, VaisError> {
     ~buf = ByteBuffer.new();
 
-    for val in values {
+    L val: values {
         # Serialize each value (includes type tag and data)
         val.serialize(&~buf);
     }
@@ -331,8 +331,8 @@ F build_index_key(values: &[&SqlValue]) -> Result<Vec<u8>, VaisError> {
 F format_key_values(col_names: &[Str], values: &[&SqlValue]) -> Str {
     ~parts = Vec.new();
 
-    for i in 0..col_names.len() {
-        if i < values.len() {
+    L i: 0..col_names.len() {
+        I i < values.len() {
             ~part = "{col_names[i]}={values[i].to_string()}";
             parts.push(part);
         }
@@ -348,8 +348,8 @@ F parse_default_value(default_str: &Str, data_type: &SqlType) -> Result<SqlValue
     ~trimmed = default_str.trim();
 
     # Handle NULL literal
-    if trimmed.to_uppercase() == "NULL" {
-        return Ok(SqlValue.Null);
+    I trimmed.to_uppercase() == "NULL" {
+        R Ok(SqlValue.Null);
     }
 
     # Parse based on target type
@@ -385,9 +385,9 @@ F parse_default_value(default_str: &Str, data_type: &SqlType) -> Result<SqlValue
         },
         SqlType.Varchar { .. } | SqlType.Text => {
             # String literals: strip surrounding quotes if present
-            ~str_val = if trimmed.starts_with("'") && trimmed.ends_with("'") && trimmed.len() >= 2 {
+            ~str_val = I trimmed.starts_with("'") && trimmed.ends_with("'") && trimmed.len() >= 2 {
                 trimmed[1..(trimmed.len() - 1)].to_string()
-            } else {
+            } E {
                 trimmed.to_string()
             };
             Ok(SqlValue.StringVal { v: str_val })
