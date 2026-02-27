@@ -1,12 +1,17 @@
 # SQL Parser Module
 # Tokenizer, AST, and recursive descent parser
 
-pub mod token;
-pub mod ast;
-pub mod parser;
-pub mod prepared;
+# Submodules (auto-discovered by filesystem)
+# token, ast, parser, prepared
 
 U token.{Token, TokenKind, Tokenizer};
-U ast.{Statement, SelectQuery, Expr};
+U ast.{
+    Statement, SelectQuery, Expr,
+    # Security DDL (Phase 10)
+    CreateUserStmt, AlterUserStmt, CreateRoleStmt,
+    GrantStmt, GrantType, RevokeStmt, RevokeType,
+    PrivilegeKind, ObjectKind,
+    CreatePolicyStmt, PolicyCmdScope, PolicyType,
+};
 U parser.{Parser, parse_sql};
 U prepared.{PreparedStatement, PreparedStatementCache};

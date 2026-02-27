@@ -26,6 +26,13 @@ L PAGE_TYPE_INVERTED_META: u8 = 0x42;  # Full-text index metadata
 L PAGE_TYPE_WAL_SEGMENT: u8 = 0x50;    # WAL segment (reserved)
 L PAGE_TYPE_UNDO_LOG: u8 = 0x51;       # Undo log pages
 
+L PAGE_TYPE_SECURITY_USER: u8 = 0x70;     # User catalog pages
+L PAGE_TYPE_SECURITY_ROLE: u8 = 0x71;     # Role catalog pages
+L PAGE_TYPE_SECURITY_GRANT: u8 = 0x72;    # Grant/privilege pages
+L PAGE_TYPE_SECURITY_POLICY: u8 = 0x73;   # RLS policy pages
+L PAGE_TYPE_SECURITY_AUDIT: u8 = 0x74;    # Audit log pages
+L PAGE_TYPE_SECURITY_META: u8 = 0x75;     # Security metadata page
+
 L PAGE_TYPE_OVERFLOW: u8 = 0xFE;       # Overflow continuation page
 L PAGE_TYPE_UNUSED: u8 = 0xFF;         # Unallocated page
 
@@ -35,6 +42,7 @@ L ENGINE_TAG_SQL: u8 = 0x01;
 L ENGINE_TAG_VECTOR: u8 = 0x02;
 L ENGINE_TAG_GRAPH: u8 = 0x03;
 L ENGINE_TAG_FULLTEXT: u8 = 0x04;
+L ENGINE_TAG_SECURITY: u8 = 0x06;
 
 # Get human-readable name for page type
 F page_type_name(page_type: u8) -> Str {
@@ -57,6 +65,12 @@ F page_type_name(page_type: u8) -> Str {
         0x42 => "INVERTED_META",
         0x50 => "WAL_SEGMENT",
         0x51 => "UNDO_LOG",
+        0x70 => "SECURITY_USER",
+        0x71 => "SECURITY_ROLE",
+        0x72 => "SECURITY_GRANT",
+        0x73 => "SECURITY_POLICY",
+        0x74 => "SECURITY_AUDIT",
+        0x75 => "SECURITY_META",
         0xFE => "OVERFLOW",
         0xFF => "UNUSED",
         _ => "UNKNOWN",
@@ -71,6 +85,7 @@ F engine_tag_name(engine_tag: u8) -> Str {
         0x02 => "vector",
         0x03 => "graph",
         0x04 => "fulltext",
+        0x06 => "security",
         _ => "unknown",
     }
 }
@@ -84,6 +99,7 @@ F default_engine_for_page_type(page_type: u8) -> u8 {
         0x30 | 0x31 | 0x32 => ENGINE_TAG_GRAPH,
         0x40 | 0x41 | 0x42 => ENGINE_TAG_FULLTEXT,
         0x50 | 0x51 => ENGINE_TAG_COMMON,
+        0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 => ENGINE_TAG_SECURITY,
         0xFE | 0xFF => ENGINE_TAG_COMMON,
         _ => ENGINE_TAG_COMMON,
     }
@@ -98,6 +114,7 @@ F is_valid_page_type(page_type: u8) -> bool {
         0x30 | 0x31 | 0x32 |
         0x40 | 0x41 | 0x42 |
         0x50 | 0x51 |
+        0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 |
         0xFE | 0xFF => true,
         _ => false,
     }

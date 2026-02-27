@@ -78,6 +78,17 @@ L RAG_MEMORY_INSERT: u8 = 0x54;
 L RAG_MEMORY_DELETE: u8 = 0x55;
 
 # ============================================================================
+# Security Records (0x60-0x6F)
+# ============================================================================
+
+L SECURITY_USER_CREATE: u8 = 0x60;
+L SECURITY_USER_ALTER: u8 = 0x61;
+L SECURITY_USER_DROP: u8 = 0x62;
+L SECURITY_ROLE_CREATE: u8 = 0x63;
+L SECURITY_ROLE_DROP: u8 = 0x64;
+L SECURITY_GRANT_CHANGE: u8 = 0x65;
+
+# ============================================================================
 # Meta Record Payloads
 # ============================================================================
 

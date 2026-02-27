@@ -309,8 +309,31 @@ S ErrorResponse {
 }
 
 X ErrorResponse {
-    # Convert from VaisError
+    # Convert from VaisError (with error sanitization for client safety)
+    # Removes internal file paths, page references, and memory addresses
+    # from error messages before sending to client
     F from_vais_error(err: &VaisError) -> ErrorResponse {
+        ~severity = "ERROR";
+
+        I err.is_fatal() {
+            severity = "FATAL";
+        }
+
+        # Apply sanitization to remove internal details
+        ~sanitizer = security/sanitizer.ErrorSanitizer.new();
+        ~clean_err = sanitizer.sanitize_error(err);
+
+        ErrorResponse {
+            severity,
+            code: clean_err.code.clone(),
+            message: clean_err.message.clone(),
+            detail: clean_err.detail.clone(),
+            hint: clean_err.hint.clone(),
+        }
+    }
+
+    # Convert from VaisError without sanitization (for internal/debug logging)
+    F from_vais_error_raw(err: &VaisError) -> ErrorResponse {
         ~severity = "ERROR";
 
         I err.is_fatal() {

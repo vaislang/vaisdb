@@ -26,6 +26,10 @@ L TokenKind =
     Count | Sum | Avg | Min | Max |
     Row_Number | Rank | Dense_Rank | Over | Partition |
     Window |
+    # Security / Auth keywords (Phase 10)
+    User_Kw | Role_Kw | Grant_Kw | Revoke_Kw |
+    Password_Kw | Login_Kw | Connection_Kw |
+    Policy_Kw | Enable_Kw | Disable_Kw | Row_Kw | Level_Kw |
     # Literals & Identifiers
     IntLit { v: i64 } |
     FloatLit { v: f64 } |
@@ -205,23 +209,22 @@ X Tokenizer {
     # Tokenize entire input into vector of tokens
     F tokenize_all(~self) -> Result<Vec<Token>, VaisError> {
         ~tokens := Vec.new();
-        L {
+        ~at_eof = false;
+        W !at_eof {
             tok := self.next_token()?;
-            is_eof := M tok.kind {
+            at_eof = M tok.kind {
                 TokenKind.Eof => true,
                 _ => false,
             };
             tokens.push(tok);
-            I is_eof {
-                B;
-            }
         }
         Ok(tokens)
     }
 
     # Skip whitespace and comments
     F skip_whitespace_and_comments(~self) {
-        L {
+        ~skipping = true;
+        W skipping {
             ch := self.peek();
             I ch == b' ' || ch == b'\t' || ch == b'\n' || ch == b'\r' {
                 self.skip_whitespace();
@@ -230,15 +233,15 @@ X Tokenizer {
             } E I ch == b'/' && self.peek_ahead(1) == b'*' {
                 self.skip_block_comment();
             } E {
-                B;
+                skipping = false;
             }
         }
     }
 
     # Skip whitespace characters
     F skip_whitespace(~self) {
-        L {
-            I self.is_at_end() { B }
+        ~in_ws = true;
+        W !(self.is_at_end()) && in_ws {
             ch := self.peek();
             I ch == b' ' || ch == b'\t' {
                 self.advance();
@@ -255,7 +258,7 @@ X Tokenizer {
                 self.line += 1;
                 self.col = 1;
             } E {
-                B;
+                in_ws = false;
             }
         }
     }
@@ -267,8 +270,7 @@ X Tokenizer {
         self.advance();
 
         # Read until end of line or EOF
-        L {
-            I self.is_at_end() && self.peek() != b'\n' { B }
+        W !self.is_at_end() && self.peek() != b'\n' {
             self.advance();
         }
     }
@@ -280,18 +282,19 @@ X Tokenizer {
         self.advance();
 
         # Read until */ or EOF
-        L {
-            I self.is_at_end() { B }
+        ~found_end = false;
+        W !(self.is_at_end()) && !found_end {
             I self.peek() == b'*' && self.peek_ahead(1) == b'/' {
                 self.advance();
                 self.advance();
-                B;
+                found_end = true;
+            } E {
+                I self.peek() == b'\n' {
+                    self.line += 1;
+                    self.col = 0;  # Will be incremented to 1 by advance()
+                }
+                self.advance();
             }
-            I self.peek() == b'\n' {
-                self.line += 1;
-                self.col = 0;  # Will be incremented to 1 by advance()
-            }
-            self.advance();
         }
     }
 
@@ -303,8 +306,7 @@ X Tokenizer {
         ~is_float := false;
 
         # Read digits
-        L {
-            I self.is_at_end() && self.is_digit(self.peek()) { B }
+        W !self.is_at_end() && self.is_digit(self.peek()) {
             num_str.push(self.advance());
         }
 
@@ -313,9 +315,7 @@ X Tokenizer {
             is_float = true;
             num_str.push(self.advance());  # consume '.'
 
-            L {
-
-                I self.is_at_end() && self.is_digit(self.peek()) { B }
+            W !self.is_at_end() && self.is_digit(self.peek()) {
                 num_str.push(self.advance());
             }
         }
@@ -336,9 +336,7 @@ X Tokenizer {
                 ));
             }
 
-            L {
-
-                I self.is_at_end() && self.is_digit(self.peek()) { B }
+            W !self.is_at_end() && self.is_digit(self.peek()) {
                 num_str.push(self.advance());
             }
         }
@@ -346,20 +344,22 @@ X Tokenizer {
         num_string := Str.from_utf8_lossy(&num_str);
 
         I is_float {
-            v := num_string.parse_f64().map_err(|_| {
-                VaisError.new(
+            v := M num_string.parse_f64() {
+                Ok(val) => val,
+                Err(_) => R Err(VaisError.new(
                     "VAIS-0101001",
                     "SQL parse error at line {start_line}, col {start_col}: invalid float literal '{num_string}'"
-                )
-            })?;
+                )),
+            };
             Ok(Token.new(TokenKind.FloatLit { v }, start_line, start_col))
         } E {
-            v := num_string.parse_i64().map_err(|_| {
-                VaisError.new(
+            v := M num_string.parse_i64() {
+                Ok(val) => val,
+                Err(_) => R Err(VaisError.new(
                     "VAIS-0101001",
                     "SQL parse error at line {start_line}, col {start_col}: invalid integer literal '{num_string}'"
-                )
-            })?;
+                )),
+            };
             Ok(Token.new(TokenKind.IntLit { v }, start_line, start_col))
         }
     }
@@ -374,7 +374,8 @@ X Tokenizer {
 
         ~str_content := Vec.new();
 
-        L {
+        ~str_closed = false;
+        W !str_closed {
             I self.is_at_end() {
                 R Err(VaisError.new(
                     "VAIS-0101001",
@@ -392,7 +393,7 @@ X Tokenizer {
                     self.advance();
                 } E {
                     # End of string
-                    B;
+                    str_closed = true;
                 }
             } E I ch == b'\n' {
                 # Allow newlines in strings
@@ -412,14 +413,13 @@ X Tokenizer {
     F read_identifier_or_keyword(~self) -> TokenKind {
         ~ident := Vec.new();
 
-        L {
-
-            I self.is_at_end() { B }
+        ~in_ident = true;
+        W !(self.is_at_end()) && in_ident {
             ch := self.peek();
             I self.is_alpha(ch) || self.is_digit(ch) || ch == b'_' {
                 ident.push(self.advance());
             } E {
-                B;
+                in_ident = false;
             }
         }
 
@@ -525,6 +525,19 @@ X Tokenizer {
             "OVER" => TokenKind.Over,
             "PARTITION" => TokenKind.Partition,
             "WINDOW" => TokenKind.Window,
+            # Security / Auth keywords (Phase 10)
+            "USER" => TokenKind.User_Kw,
+            "ROLE" => TokenKind.Role_Kw,
+            "GRANT" => TokenKind.Grant_Kw,
+            "REVOKE" => TokenKind.Revoke_Kw,
+            "PASSWORD" => TokenKind.Password_Kw,
+            "LOGIN" => TokenKind.Login_Kw,
+            "CONNECTION" => TokenKind.Connection_Kw,
+            "POLICY" => TokenKind.Policy_Kw,
+            "ENABLE" => TokenKind.Enable_Kw,
+            "DISABLE" => TokenKind.Disable_Kw,
+            "ROW" => TokenKind.Row_Kw,
+            "LEVEL" => TokenKind.Level_Kw,
             _ => TokenKind.Identifier { v: ident_str },
         }
     }
@@ -545,18 +558,18 @@ X Tokenizer {
         }
 
         ~num_str := Vec.new();
-        L {
-            I self.is_at_end() && self.is_digit(self.peek()) { B }
+        W !self.is_at_end() && self.is_digit(self.peek()) {
             num_str.push(self.advance());
         }
 
         num_string := Str.from_utf8_lossy(&num_str);
-        idx := num_string.parse_u32().map_err(|_| {
-            VaisError.new(
+        idx := M num_string.parse_u32() {
+            Ok(val) => val,
+            Err(_) => R Err(VaisError.new(
                 "VAIS-0101001",
                 "SQL parse error at line {start_line}, col {start_col}: invalid parameter index '{num_string}'"
-            )
-        })?;
+            )),
+        };
 
         Ok(Token.new(TokenKind.Parameter { idx }, start_line, start_col))
     }

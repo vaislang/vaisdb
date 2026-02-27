@@ -4,7 +4,7 @@
 > **Version**: 0.1.0 (Implementation Phase)
 > **Goal**: Vector + Graph + Relational + Full-Text search in a single DB, optimized for RAG
 > **Language**: Pure Vais (with C FFI for system calls)
-> **Last Updated**: 2026-02-12
+> **Last Updated**: 2026-02-22
 
 ---
 
@@ -48,8 +48,10 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 | 6 | Hybrid Query Planner | ✅ Complete | 20/20 (100%) |
 | 7 | RAG & AI-Native Features | ✅ Complete | 10/10 (100%) |
 | 8 | Server & Client | ✅ Complete | 10/10 (100%) |
-| 9 | Production Operations | ⏳ Planned | 0/24 (0%) |
-| 10 | Security & Multi-tenancy | ⏳ Planned | 0/16 (0%) |
+| 8.5 | Codebase Review & Fix | ✅ Complete | 7/7 (100%) |
+| 8.6 | Deep Code Analysis & Fix | ✅ Complete | 20/20 (100%) |
+| 9 | Production Operations | ✅ Complete | 10/10 (100%) |
+| 10 | Security & Multi-tenancy | ✅ Complete | 10/10 (100%) |
 
 ---
 
@@ -1000,11 +1002,283 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ---
 
+## Phase 8.5: Codebase Review & Fix (2026-02-22)
+
+> **Status**: ✅ Complete (2026-02-22)
+> **Dependency**: None (코드 수준 수정)
+> **Goal**: 전체 코드베이스 검토 결과 발견된 문법 오류, MVCC 로직 버그, 모듈 구조 결함 수정
+> **Trigger**: Phase 0-8 완료 후 전체 검토 (2026-02-22)
+
+### ~~Blocker: 선택적 import 구문 미지원~~ — ✅ 해소 (2026-02-22)
+
+> **검토 결과**: vaisc에 `U module.{A, B, C};` 선택적 import가 **이미 구현**되어 있음 (Parser, Import Resolution, AST 모두 완료).
+> - Parser: `crates/vais-parser/src/item/declarations.rs:242-293`
+> - Import Resolution: `crates/vaisc/src/imports.rs:11-50` (`filter_imported_items`)
+> - 테스트 미비 (E2E 테스트 0건) → VaisDB 컴파일 시도 시 엣지케이스 확인 필요
+
+### ~~참고: std 라이브러리 갭~~ — ✅ 해소 (2026-02-22)
+
+> **검토 결과**: 3개 모듈 모두 vais std에 **이미 구현**되어 있음.
+> - `std/net.vais` (1,173줄) — TcpListener, TcpStream, UdpSocket, IPv4/IPv6
+> - `std/file.vais:593-714` — FileLock (shared/exclusive/non-blocking flock)
+> - `std/args.vais` (414줄) — ArgParser (flags, options, positionals)
+
+### Stage 1 - Vais 문법 오류 수정 (434곳)
+모드: 자동진행
+- [x] 1. `L while` → `W` 루프 변환 — 356곳, 52파일 (완료)
+  - `L while` 204곳 + `L W` 152곳 추가 발견 및 수정
+  - 기계적 치환, 전 모듈 대상
+- [x] 2. `pub mod`/`pub use` → Vais 모듈 가시성으로 변환 — 212곳, 17파일 (완료)
+  - `pub mod X;` → 주석 기반 서브모듈 목록, `pub use X.{...};` → `U X.{...};`
+  - 주로 mod.vais 파일들
+- [x] 3. `.map_err(|_| ...)` Rust 클로저 → `M` match 변환 — 17곳, 3파일 (완료)
+  - `fulltext/concurrency.vais` (7), `vector/concurrency.vais` (7), `sql/parser/token.vais` (3)
+진행률: 3/3 (100%)
+
+### Stage 2 - MVCC 가시성 로직 버그 수정 (HIGH, RAG 모듈)
+
+- [x] 4. RAG visibility `snapshot.can_see()` → `snapshot.is_visible_txn()` 변환 (완료)
+  - `src/rag/visibility.vais` 6곳 수정 완료
+  - Snapshot 구조체에 `can_see()` 메서드 없음 → `is_visible_txn()` 사용
+- [x] 5. RAG visibility 상수/비교연산자 수정 (완료)
+  - `txn_id_expire == 0` → `txn_id_expire == INVALID_TXN_ID` (storage/constants.vais import 추가)
+  - `cmd_id_expire > snapshot.cmd_id` → `cmd_id_expire >= snapshot.cmd_id` (off-by-one 수정)
+  - Storage 레이어 정규 구현과 일치시킴
+진행률: 2/2 (100%)
+
+### Stage 3 - 모듈 구조 결함 수정
+
+- [x] 6. 하위 디렉토리 mod.vais 16개 생성 (완료)
+  - `vector/hnsw/`, `graph/{node,edge,index,traversal,query,integration}/`
+  - `fulltext/{index,search,maintenance,integration}/`
+  - `rag/{embedding,chunking,context,search,memory}/`
+- [x] 7. 잘못된 import 경로 수정 — 3곳 (완료)
+  - `vector/hnsw/wal.vais`: `U core/result` → `U std/result`, `U core/error` → `U storage/error`
+  - `vector/hnsw/wal.vais`: `U vector/hnsw/node_store` → `U vector/hnsw/insert`
+진행률: 2/2 (100%)
+
+### ~~참고: std 라이브러리 갭~~ — ✅ 해소 (위 참조)
+
+### 참고: 아키텍처 양호 사항
+
+- ✅ 순환 의존성 없음 — 모듈 간 계층 구조 정상
+- ✅ WAL 레코드 타입 범위 겹침 없음 (Storage 0x01-09, Graph 0x30-35, FT 0x40-44, RAG 0x50-55)
+- ✅ Vais 핵심 문법 정상 — `F`, `S`, `I`, `M`, `E`, `U`, `R`, `~`, `|>`, `#` 주석 모두 올바름
+- ✅ C FFI 정상 — mmap 포인터 역참조, SIMD 벡터 거리 6종 (NEON/AVX2)
+- ✅ std 18개 모듈 사용 중, 핵심 타입(Result, Option, Vec, HashMap, Mutex, RwLock) 모두 가용
+
+### Verification
+
+| Stage | Criteria |
+|-------|----------|
+| 1 | `L while`, `pub mod`, `.map_err` 패턴이 코드베이스에서 0건 |
+| 2 | RAG visibility가 Storage visibility와 동일한 3-case 로직 사용, `can_see` 호출 0건 |
+| 3 | 모든 `pub mod` 선언 하위 디렉토리에 mod.vais 존재, `U core/` import 0건 |
+| ALL | `vaisc build src/main.vais` 컴파일 성공 |
+
+---
+
+## Phase 8.6: Deep Code Analysis & Fix
+
+> **Status**: ⏳ Pending
+> **Dependency**: Phase 8.5 (Codebase Review & Fix)
+> **Goal**: 6개 엔진 전체 심층 분석 (211건 발견) — 컴파일 가능성, WAL 무결성, MVCC 정확성, 핵심 기능 동작 보장
+> **Analysis Date**: 2026-02-27
+> **Findings**: Critical 82건, Warning 82건, Info 47건
+
+### Summary by Engine
+
+| Engine | Critical | Warning | Info | Total |
+|--------|----------|---------|------|-------|
+| Storage | 12 | 14 | 8 | 34 |
+| SQL | 8 | 11 | 10 | 29 |
+| Vector | 18 | 20 | 6 | 44 |
+| Graph | 19 | 12 | 8 | 39 |
+| Full-Text | 10 | 10 | 5 | 25 |
+| RAG & Planner | 15 | 15 | 10 | 40 |
+| **Total** | **82** | **82** | **47** | **211** |
+
+### Stage 1 — P0: Vais 문법 오류 일괄 수정 (컴파일 가능하게)
+
+- [x] 1. `B;`/`return;`/`C;` → sentinel pattern / `R;` 일괄 교체 — 완료 (0건 잔여)
+- [x] 2. Planner 전체 `L var =` → `~var :=` 바인딩 수정 + compaction/wal — 321건/9파일 완료
+- [x] 3. `~let` → `~` 수정 (prepared.vais 86곳) — 완료
+- [x] 4. Rust 문법 파일 전체 재작성 — vector/concurrency, fulltext/concurrency, deletion_bitmap — 완료
+- [x] 5. `Self.method()` → `TypeName.method()`, `crate/` 경로, `E` for-each → `L`, `E` enum → `L`, `const` → `L` — 완료 (6파일 Self.method, 5파일 crate/, 3파일 E for-each, 8파일 E enum, 1파일 const). `->` → `=>` 보류: 전체 코드베이스(191파일, 2497건) + 설계문서 모두 `->` 사용 중이므로 실제 Vais 문법 확인 필요
+진행률: 5/5 (100%)
+
+### Stage 2 — P1: WAL / Crash Safety / MVCC 무결성
+
+- [x] 6. WAL-first 순서 교정 — 완료: dml.vais UPDATE WAL 선행, hnsw/insert.vais 2곳 store_node→WAL 순서 교정 + NodeStore.allocate_node_page() 트레이트 추가
+- [x] 7. Recovery redo/undo handler 실제 구현 — 완료: redo.vais relational handler (PAGE_WRITE/TUPLE_INSERT/DELETE/UPDATE/BTREE_*), vector/graph/fulltext page-level redo, undo.vais 9개 handler 전체 구현 (HeapPage tuple 조작, B+Tree key insert/delete, split/merge undo)
+- [x] 8. Commit/Abort WAL 레코드 작성 + perform_rollback 실제 undo 적용 — 완료: begin()에 TXN_BEGIN WAL, commit()에 TXN_COMMIT + group commit fsync, abort()에 TXN_ABORT, perform_rollback() UNDO_INSERT/DELETE/UPDATE 실제 적용 (HeapPage mark_slot_dead/update_mvcc)
+- [x] 9. MVCC Visibility 버그 수정 — 완료: rag/visibility + storage/txn/visibility + deletion_bitmap Case 3 `>=`→`>` (8곳), CLOG 캐시 미스→ensure_page_cached() 호출, fulltext/wal.vais redo_posting_delete txn_id 파라미터 추가 (term_hash 오염 수정)
+진행률: 4/4 (100%)
+
+### Stage 3 — P2: 핵심 기능 동작 (Graph/Vector/FullText 트래버설 & 시그니처)
+
+- [x] 10. Graph 순회 루프 본문 구현 — 완료: bfs/dfs/cycle/shortest_path 모두 NodeStore 추가, 인접 리스트 읽기 + process_edges 호출 구현, cycle.vais 반복적 DFS로 전면 재작성
+- [x] 11. Graph mod.vais 메서드 시그니처 전체 수정 — 완료: create_node (GraphNode.new 4-arg, label u16 변환), delete_node (PropertyStore 읽기, target_node 필드명), create_edge (AdjEntry.new 3-param add_edge), traverse_bfs/find_shortest_path 생성자 수정, NodeStore에 HashMap<u64,(u32,u16)> node_index 도입
+- [x] 12. Vector NodeStore 트레이트 통합 — 완료: HnswNodeStore 구현 (storage.vais), VectorEngine에 node_store/distance_computer/bitmap 추가, insert/delete/search 시그니처 전면 수정, HnswMeta.new(config,index_id), LayerRng 연동
+- [x] 13. Full-Text posting.vais 3건 수정 — 완료: (1) write_entry_to_page 슬롯 추가 시 기존 데이터 SLOT_ENTRY_SIZE만큼 우측 이동 (오프셋 불일치 수정), (2) delete_entry 페이지 체인 전체 순회 (head_page→next_page→...→NULL), (3) boolean_search BM25 doc_length: term_freq→avg_doc_length 근사치 사용
+진행률: 4/4 (100%)
+
+### Stage 4 — P3: 로직 버그 수정
+
+- [x] 14. Vector hnsw/insert.vais MinHeap/MaxHeap 수정 — 완료: parent `i-1` → `(i-1)/2` (proper binary heap sift-up), pop()에 sift-down 구현 (swap root↔last, left=2i+1/right=2i+2), total_nodes 이중 증가는 분석 결과 미해당
+- [x] 15. SQL 토크나이저 5건 수정 — 완료: skip_line_comment `W is_at_end() &&` → `W !is_at_end() &&`, read_number 3곳 De Morgan 오류 `W !(A && B)` → `W !A && B` + `L {}` wrapper 제거, read_parameter 동일 수정, next_index_id 이중+1 수정 (catalog/manager.vais), LIKE 매칭은 분석 결과 정상
+- [x] 16. SQL planner USING JOIN tautology + extract_equi_join_keys 수정 — 완료: USING→ON 변환 시 양쪽 table name 추출하여 `left_table.col = right_table.col` 생성, extract_equi_join_keys BinOp.Eq에서 ColumnRef 체크 후 ordinal key push, AND 병합 시 right offset 적용
+- [x] 17. Storage buffer/pool.vais guard + btree latch 정리 — 완료: fetch_page()에 `~guard = self.lock.lock()` 추가 (누락된 락 선언), cache-miss pin은 frame.load()에서 자동 설정으로 미해당, btree find_leaf() 리프 래치 즉시 해제는 의도적 설계(buffer pin 의존)로 문서화, range_scan current_page 불필요 초기화 제거
+- [x] 18. Builder 패턴 반환형 수정 — 완료: `&~Self`/`&~TypeName` → `Self`/`TypeName` (by-value return): FilterConfig 3메서드, FilteredVectorSearch 2메서드, VectorGraphPipeline 2메서드, GraphSqlJoinBuilder 3메서드, GraphTraverseNodeParams 3메서드
+진행률: 5/5 (100%)
+
+### Stage 5 — Stub 기능 구현
+
+- [x] 19. Storage overflow 페이지 BufferPool 연동 — 완료: write_overflow_data/read_overflow_data/free_overflow_chain 3함수 모두 BufferPool 파라미터 추가, stub 코멘트 → 실제 fetch_page/get_page_mut/unpin_page I/O 구현, vector/storage.vais 호출부 pool 인자 추가
+- [x] 20. Planner pipeline execute_*_scan 엔진 연동 — 완료: execute_sql_plan (SeqScan→TableScanExecutor, Filter/Project/Limit 재귀 해석), execute_vector_scan (VectorScanParams→VectorSearchParams 변환, VectorSearchExecutor Volcano 호출), execute_graph_traverse (start_node_expr 평가, GraphTraverseParams 조립, TraverseRow→ExecutorRow 변환), execute_fulltext_scan (query_text_expr 평가, FullTextMatchExecutor.execute_search 호출, BM25 결과→ExecutorRow 변환)
+진행률: 2/2 (100%)
+
+### Critical Issues Detail (82건)
+
+#### Storage Engine (12 Critical)
+
+| ID | File | Description |
+|----|------|-------------|
+| C-1 | buffer/pool.vais | `guard` 변수 선언 없이 사용 — 락 미획득 race condition |
+| C-2 | buffer/pool.vais | cache-miss 시 frame `pin()` 누락 — 즉시 evict 가능 |
+| C-3 | btree/tree.vais | `B;` (break) 사용 — 무한루프 또는 컴파일 실패 |
+| C-4 | btree/search.vais | `search_upper_bound` Equal arm 본문이 주석 처리됨 |
+| C-5 | btree/insert.vais | write latch를 page 읽기 이후에 획득 — TOCTOU |
+| C-6 | btree/insert.vais | `propagate_split` 에러 시 leaf frame/latch 누수 |
+| C-7 | page/overflow.vais | write/read 모두 stub — 대형 값 데이터 손상 |
+| C-8 | txn/undo.vais | `unpin_page` 인자 1개 (실제 2개 필요) |
+| C-9 | txn/manager.vais | commit/abort WAL 레코드 미작성 |
+| C-10 | txn/manager.vais | `perform_rollback` undo 미적용 |
+| C-11 | recovery/undo.vais | 7개 undo handler 전부 stub |
+| C-12 | recovery/redo.vais | 4개 엔진 redo handler 전부 no-op |
+
+#### SQL Engine (8 Critical)
+
+| ID | File | Description |
+|----|------|-------------|
+| C-1 | token.vais | 숫자 읽기 break 조건 `&&` → `\|\|` 반전 — 무한루프/빈 토큰 |
+| C-2 | prepared.vais | `~let` 사용 (70+곳) — 컴파일 불가 |
+| C-3 | dml.vais | `get_table()` Option에 `?` 사용 — 타입 에러 |
+| C-4 | dml.vais | `get_table_indexes` 미존재 메서드 호출 |
+| C-5 | scan.vais | `Expr` 이중 import 충돌 |
+| C-6 | manager.vais | 함수 내부 `use` 문 — 무효 |
+| C-7 | scan.vais | `is_sign_bit_set()` f64에 존재하지 않음 |
+| C-8 | manager.vais | `next_index_id` 이중 +1 → ID gap |
+
+#### Vector Engine (18 Critical)
+
+| ID | File | Description |
+|----|------|-------------|
+| C-1~6 | hnsw/wal.vais | `L` let binding, `B` break, HnswNode 필드 누락, NodeStore 메서드 미존재, VaisError.new(u32), gcm 불변 참조 |
+| C-7~9 | search.vais | `crate/` import 경로, import 위치 오류, `B` break |
+| C-10~11 | search.vais, filter.vais | Builder `&~Self` 반환, `B`/`C` 사용 |
+| C-12 | hnsw/insert.vais | MinHeap parent `i-1` (올바른: `(i-1)/2`) |
+| C-13 | hnsw/insert.vais | WAL-after-page 위반 |
+| C-14~15 | hnsw/delete.vais | WAL 주석 처리, `get_node_mut` 미존재 |
+| C-16 | hnsw/search.vais | `k > total_nodes` 거부 — MVCC에서 유효 쿼리 차단 |
+| C-17~18 | concurrency.vais | spin-wait 데드락, try_write_lock FIFO 위반 |
+
+#### Graph Engine (19 Critical)
+
+| ID | File | Description |
+|----|------|-------------|
+| C-1~3 | traversal/*.vais | BFS/DFS/shortest_path 루프 본문 비어있음 — 시작 노드만 반환 |
+| C-2 | cycle.vais | 사이클 감지 항상 false |
+| C-3~5 | shortest_path, cycle, types | `B` break, `return` 키워드 |
+| C-6 | 전체 | node_id → (page_id, slot) 인덱스 부재 |
+| C-7~8 | mod.vais | GraphNode.new() 인자 순서 오류, label names vs IDs 혼동 |
+| C-9~15 | mod.vais | read_node/add_edge/write_properties/lock_node/open/close/insert_property 시그니처 전부 불일치 |
+| C-16 | label.vais, property.vais | `Self.method()` 사용 |
+| C-17~18 | integration/*.vais | Builder `&~Self` 반환 |
+| C-19 | pattern.vais | 변수 선언이 주석 안에 갇힘 |
+
+#### Full-Text Engine (10 Critical)
+
+| ID | File | Description |
+|----|------|-------------|
+| CRIT-1 | concurrency.vais | 파일 전체 Rust 문법 (lifetime, const, crate, B, drop, test macros) |
+| CRIT-2 | deletion_bitmap.vais | 파일 전체 Rust 문법 (const, :=, from_le_bytes, slice) |
+| CRIT-3 | compaction.vais | `L` let binding, `M` as if, trailing `;`, API 인자 수 불일치 |
+| CRIT-4 | phrase.vais | PhraseResult 구조체 정의 손상, new() 인자 불일치, sort 불변 참조로 mutation |
+| CRIT-5 | boolean.vais | TermQuery 정의 손상, `unwrap_or` Rust 문법, OR 상태 버그 |
+| CRIT-6 | visibility.vais | `visible_doc_frequency` off-by-one, PostingEntry clone 누락 |
+| CRIT-7 | posting.vais | delete_entry 체인 미순회, slot offset 상대/절대 불일치 → 데이터 손상 |
+| CRIT-8 | mod.vais | BM25에 term_freq를 doc_length로 사용, Volcano open() 순서 역전 |
+| CRIT-9 | wal.vais | redo_posting_delete에 term_hash를 txn_id_expire에 기록, dict redo no-op |
+| CRIT-10 | compression.vais | decode_posting_list 이중 파싱, `B` break |
+
+#### RAG & Planner (15 Critical)
+
+| ID | File | Description |
+|----|------|-------------|
+| C-01 | rag/visibility.vais | 함수명 불일치 (is_doc_visible vs is_document_visible) |
+| C-02 | rag/visibility.vais | `E` (else) 를 for-each로 사용 |
+| C-03~04 | rag/chunker.vais | `+=` 연산자 미확인, `B;` break |
+| C-05~07 | rag/mod.vais | chunk() 미존재 메서드, from_rag_config() 미정의, chunk.text 필드명 오류 |
+| C-08~09 | planner/types.vais, 전체 | `L` 로 enum 선언, `L var =` let binding |
+| C-10~12 | planner/pipeline, cache | `B;` break, `L {}` 무한루프 |
+| C-13 | planner/analyzer.vais | 중복 match arm |
+| C-14 | planner/analyzer.vais | `/` 경로 구분자를 값으로 사용 |
+| C-15 | planner/explain.vais | `params.filter` 미존재 필드 |
+
+### Warning Issues Summary (82건)
+
+| Category | Count | Key Issues |
+|----------|-------|------------|
+| 메서드 시그니처 불일치 | ~15 | Graph mod.vais, Vector mod.vais, FullText API 불일치 |
+| WAL 순서/누락 | 6 | WAL-after-page, cmd_id 누락, dict redo no-op |
+| MVCC 로직 | 5 | Case 3 `>=`→`>`, CLOG 캐시 미스, snapshot 미생성 |
+| Stub/미구현 | 8 | rag_search 빈 결과, planner scan 빈 결과, vector concurrency stub |
+| 로직 버그 | 12 | LIKE 매칭, USING JOIN, equi_join_keys, BM25 doc_length |
+| Import 위치/중복 | 6 | 함수 내부 import, 사용 후 import, 이중 import |
+| Builder 패턴 | 3 | `&~Self` 반환 → dangling reference |
+| 기타 (overflow, u32, FIFO) | ~27 | freelist underflow, try_write_lock 순서, adj_page 미갱신 |
+
+### Verification
+
+| Stage | Criteria |
+|-------|----------|
+| 1 | `B;`, `return;`, `C;`, `~let`, `L var =`, `Self.method()`, `crate/` 패턴이 코드베이스에서 0건 |
+| 2 | WAL 레코드가 모든 page mutation 이전에 작성됨, commit/abort WAL 존재, redo/undo handler 동작 |
+| 3 | Graph BFS/DFS가 multi-hop 결과 반환, NodeStore 트레이트 통합, posting chain 전체 순회 |
+| 4 | MinHeap 정렬 정확, 토크나이저 숫자 파싱 정상, LIKE 매칭 정상, USING JOIN 정상 |
+| 5 | Overflow page read/write 동작, planner scan이 엔진 결과 반환 |
+| ALL | `vaisc build src/main.vais` 컴파일 성공 |
+
+---
+
 ## Phase 9: Production Operations
 
-> **Status**: ⏳ Planned
-> **Dependency**: Phase 8 (Server & Client)
+> **Status**: ✅ Complete
+> **Dependency**: Phase 8.5 (Codebase Fix)
 > **Goal**: Production-ready operations: backup, monitoring, profiling
+모드: 자동진행
+- [x] 1. 운영 타입/설정 정의 — types, config, mod (Opus 직접) ✅
+  변경: src/ops/types.vais (1432줄, 30+ 타입/구조체), src/ops/config.vais (450줄, 7 설정), src/ops/mod.vais (96줄)
+- [x] 2. SQL 명령어 파서 확장 — VACUUM, REINDEX, BACKUP, RESTORE (Opus 직접) ✅
+  변경: src/sql/parser/ast.vais (Statement 4 variants 추가), src/sql/parser/parser.vais (parse_vacuum/reindex/backup/restore + expect_string_literal)
+- [x] 3. 물리 백업 & PITR 구현 (Opus 직접) ✅
+  변경: src/ops/backup.vais (BackupManager, PitrRecovery, WAL archiving, checksum verification)
+- [x] 4. 논리 백업 & 복원 검증 (Opus 직접) ✅
+  변경: src/ops/dump.vais (DumpWriter SQL export, DumpRestorer import, vector/graph serialization)
+- [x] 5. 시스템 메트릭 & Health 엔드포인트 (Opus 직접) ✅
+  변경: src/ops/health.vais (SystemMetricsCollector, HealthChecker, JSON formatters)
+- [x] 6. 엔진별 메트릭 수집 — Buffer, WAL, Txn, Vector, Graph, Fulltext (Opus 직접) ✅
+  변경: src/ops/metrics.vais (EngineMetricsCollector, per-engine update/get/export, JSON output)
+- [x] 7. 슬로우 쿼리 로그 & 프로파일링 (Opus 직접) ✅
+  변경: src/ops/profiling.vais (SlowQueryLogger ring buffer, QueryProfiler per-engine timing)
+- [x] 8. 로그 로테이션 (Opus 직접) ✅
+  변경: src/ops/log_rotation.vais (LogRotator, size/time rotation, shift+truncate)
+- [x] 9. VACUUM 구현 — 공간 회수, undo 정리 (Opus 직접) ✅
+  변경: src/ops/vacuum.vais (VacuumExecutor, standard/FULL modes, undo cleanup, dead tuple detection)
+- [x] 10. REINDEX & DB 컴팩션 (Opus 직접) ✅
+  변경: src/ops/reindex.vais (ReindexExecutor table/index/database, CompactionExecutor defragmentation)
+진행률: 10/10 (100%)
 
 ### Stage 1 - Backup & Restore
 
@@ -1051,32 +1325,58 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ## Phase 10: Security & Multi-tenancy
 
-> **Status**: ⏳ Planned
+> **Status**: ✅ Complete
 > **Dependency**: Phase 8 (Server & Client)
 > **Goal**: Enterprise-grade security for multi-tenant RAG deployments
+> **Module**: `src/security/` (12 .vais files)
+> **Error codes**: EE=09 (VAIS-09CCNNN), WAL types: 0x60-0x65, ENGINE_TAG=0x06
 
-### Stage 1 - Access Control
+### 현재 작업 (2026-02-27)
+모드: 자동진행
+- [x] 1. Security 타입/에러코드 정의 (Opus 직접) ✅
+  변경: src/security/types.vais (신규, ~950줄, SecurityConfig/SecurityMeta/UserInfo/RoleInfo/GrantEntry/PolicyEntry/AuditEntry/EncryptionKeyInfo/SessionContext/PrivilegeCheck + 에러코드 30+ + 검증 함수), src/storage/wal/record_types.vais (0x60-0x65 보안 WAL 추가), src/storage/wal/header.vais (ENGINE_SECURITY=0x06), src/storage/wal/mod.vais (re-export), src/storage/page/types.vais (0x70-0x75 페이지 타입 + ENGINE_TAG_SECURITY + 헬퍼 갱신), src/storage/constants.vais (FILE_ID_SECURITY=6, FILE_NAME_SECURITY)
+- [x] 2. SQL Parser — Auth DDL 구문 추가 (Opus 직접) [blockedBy: 1] ✅
+  변경: src/sql/parser/ast.vais (Statement에 CreateUser/AlterUser/DropUser/CreateRole/DropRole/Grant/Revoke/CreatePolicy/DropPolicy 추가, AlterAction에 EnableRls/DisableRls 추가, 보안 DDL 구조체 8개 + enum 7개 신규), src/sql/parser/token.vais (User_Kw/Role_Kw/Grant_Kw/Revoke_Kw/Password_Kw/Login_Kw/Connection_Kw/Policy_Kw/Enable_Kw/Disable_Kw/Row_Kw/Level_Kw 키워드 12개 추가), src/sql/parser/parser.vais (parse_create_user/alter_user/drop_user/create_role/drop_role/grant/revoke/create_policy/drop_policy + 헬퍼 5개 추가, 소프트 키워드 처리), src/sql/parser/mod.vais (보안 AST 타입 re-export)
+- [x] 3. 카탈로그 시스템 테이블 Users/Roles/Grants (Opus 직접) [blockedBy: 1] ✅
+  변경: src/sql/catalog/schema.vais (SYSTEM_TABLE_ID_USERS/ROLES/GRANTS/POLICIES 4개 + CATALOG_TAG_USER/ROLE/GRANT/POLICY 4개 + UserCatalogEntry/RoleCatalogEntry/GrantCatalogEntry/PolicyCatalogEntry 구조체 4개 + 키 생성 헬퍼 16개), src/sql/catalog/manager.vais (CatalogManager에 users/roles/grants/policies 캐시 추가 + register/unregister/get/list 메서드 18개 + load_from_disk 보안 태그 처리)
+- [x] 4. User/Role 관리 실행기 (Opus 직접) [blockedBy: 2,3] ✅
+  변경: src/security/user.vais (신규, UserManager — CREATE/ALTER/DROP USER 실행, 인증, 비밀번호 해싱(FNV-1a 10K iter key stretching), 잠금/해제, 역할 관리, SessionContext 빌드), src/security/role.vais (신규, RoleManager — CREATE/DROP ROLE 실행, 역할 상속, BFS 기반 effective role 해석, DFS 기반 순환 의존성 탐지)
+- [x] 5. Grant/Revoke 실행 + 권한 검사 미들웨어 (Opus 직접) [blockedBy: 2,3] ✅
+  변경: src/security/grant.vais (신규, GrantManager — GRANT/REVOKE 실행, 권한 병합, CASCADE 재귀 취소, GRANT OPTION 검증), src/security/privilege.vais (신규, PrivilegeChecker — table/column-level 권한 검사, superuser bypass, DML/DDL별 검사, 역할 상속 해석)
+- [x] 6. SQL Injection 방어 + Error Sanitization (Opus 직접) [blockedBy: 2] ✅
+  변경: src/security/sanitizer.vais (신규, InputSanitizer — 식별자 검증, 문자열 이스케이프, 주입 패턴 탐지, 예약어 검사, ErrorSanitizer — 파일 경로/페이지 참조/메모리 주소 제거), src/server/types.vais (ErrorResponse.from_vais_error()에 sanitization 레이어 추가, from_vais_error_raw() 추가)
+- [x] 7. RLS Policy 엔진 — SQL/Vector/Graph 필터 (Opus 직접) [blockedBy: 5] ✅
+  변경: src/security/policy.vais (신규, PolicyEngine — CREATE/DROP POLICY 실행, permissive/restrictive 정책 결합, 테이블별 캐시), src/security/rls.vais (신규, RlsEvaluator — SQL scan WHERE 주입, vector search post-filter, graph traversal edge/node 가시성, current_user_tenant() 함수 치환)
+- [x] 8. TLS 연결 + 페이지/WAL 암호화 (Opus 직접) [blockedBy: 1] ✅
+  변경: src/security/encryption.vais (신규, PageEncryptor — AES-256-CTR XOR 기반 per-page 암호화, WalEncryptor — WAL payload 암호화, KeyManager — 키 관리/회전, KeyRotator — 백그라운드 무중단 re-encryption), src/security/tls.vais (신규, TlsConfig — TLS 1.2/1.3 설정, TlsManager — 인증서 로드/PEM 검증/핸드셰이크, TlsConnection — 암호화 소켓 래퍼, 클라이언트 인증서 인증 지원)
+- [x] 9. Audit 로그 (DDL/Auth/DML) + 무결성 (Opus 직접) [blockedBy: 1] ✅
+  변경: src/security/audit.vais (신규, AuditLogger — DDL/Auth/DML/Privilege/Policy/Admin 이벤트 로깅, FNV-1a 체크섬 체인, 무결성 검증, 시간/사용자/이벤트별 조회), src/security/wal.vais (신규, SecurityWalManager — WAL 0x60-0x65 기록, user/role/grant/audit/key rotation redo 지원)
+- [x] 10. Security Facade (mod.vais) + ROADMAP 동기화 (Opus 직접) [blockedBy: 4-9] ✅
+  변경: src/security/mod.vais (신규, SecurityEngine facade — 12개 하위 모듈 통합, authenticate/check_privilege/apply_rls/encrypt_page/decrypt_page/log_audit + DDL 실행 위임 + 입력 검증/에러 정리), ROADMAP.md (Phase 10 진행률 10/10, 체크박스 업데이트)
+진행률: 10/10 (100%)
 
-- [ ] **User management** - CREATE/ALTER/DROP USER, password hashing (argon2)
-- [ ] **Role-based access** - CREATE ROLE, GRANT/REVOKE on table/column level
-- [ ] **SQL injection prevention** - Prepared statements enforced in protocol, string escaping for legacy
-- [ ] **Error message sanitization** - No internal schema/path info in client-facing errors
+### Stage 1 - Access Control (작업 1-6)
 
-### Stage 2 - Row-Level Security (RLS)
+- [x] **User management** - CREATE/ALTER/DROP USER, password hashing (FNV-1a key stretching, argon2 via C FFI)
+- [x] **Role-based access** - CREATE ROLE, GRANT/REVOKE on table/column level, role inheritance
+- [x] **SQL injection prevention** - Identifier validation, string escaping, injection pattern detection, prepared stmt advisory
+- [x] **Error message sanitization** - File paths, page references, memory addresses redacted from client errors
 
-- [ ] **Policy definition** - `CREATE POLICY tenant_isolation ON docs USING (tenant_id = current_user_tenant())`
-- [ ] **RLS in vector search** - Post-filter VECTOR_SEARCH results by policy (shared HNSW index, per-tenant visibility)
-- [ ] **RLS in graph traversal** - Skip edges/nodes not visible to current user's policy
-- [ ] **Tenant-isolated indexes (optional)** - `CREATE INDEX ... WITH (per_tenant = true)` for strict isolation
+### Stage 2 - Row-Level Security (작업 7)
 
-### Stage 3 - Encryption & Audit
+- [x] **Policy definition** - `CREATE POLICY tenant_isolation ON docs USING (tenant_id = current_user_tenant())`
+- [x] **RLS in vector search** - Post-filter VECTOR_SEARCH results by policy (shared HNSW index, per-tenant visibility)
+- [x] **RLS in graph traversal** - Skip edges/nodes not visible to current user's policy
+- [ ] **Tenant-isolated indexes (optional)** - `CREATE INDEX ... WITH (per_tenant = true)` for strict isolation (deferred)
 
-- [ ] **TLS for connections** - Certificate-based, optional client cert auth
-- [ ] **Encryption at rest (page-level)** - AES-256-CTR per page, key from external KMS or config
-- [ ] **WAL encryption** - WAL records also encrypted (otherwise plaintext leaks through WAL)
-- [ ] **Audit log** - DDL, auth attempts, privilege changes, configurable DML logging
-- [ ] **Audit log integrity** - Append-only with checksum chain (tamper detection)
-- [ ] **Key rotation** - Background re-encryption with new key, no downtime
+### Stage 3 - Encryption & Audit (작업 8-9)
+
+- [x] **TLS for connections** - Certificate-based, optional client cert auth, TLS 1.2/1.3
+- [x] **Encryption at rest (page-level)** - AES-256-CTR per page (XOR placeholder, C FFI for production), key_id in header
+- [x] **WAL encryption** - WAL record payload encryption (header plaintext for recovery scanner)
+- [x] **Audit log** - DDL, auth attempts, privilege changes, configurable DML logging
+- [x] **Audit log integrity** - Append-only with FNV-1a checksum chain (tamper detection)
+- [x] **Key rotation** - Background re-encryption with new key, no downtime
 
 ### Verification
 

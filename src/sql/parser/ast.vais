@@ -24,7 +24,22 @@ L Statement =
     RollbackTxn |
     SetExpr { target: SetTarget } |
     Prepare { name: Str, stmt: Box<Statement> } |
-    Execute { name: Str, params: Vec<Expr> };
+    Execute { name: Str, params: Vec<Expr> } |
+    # Maintenance / Operations commands (Phase 9)
+    Vacuum { table_name: Option<Str>, full: bool, analyze: bool, skip_locked: bool } |
+    Reindex { target: Option<Str>, concurrently: bool } |
+    Backup { path: Str, label: Option<Str> } |
+    Restore { path: Str, pitr_timestamp: Option<Str>, pitr_lsn: Option<Str> } |
+    # Security / Auth DDL commands (Phase 10)
+    CreateUser { create: CreateUserStmt } |
+    AlterUser { alter: AlterUserStmt } |
+    DropUser { name: Str, if_exists: bool, cascade: bool } |
+    CreateRole { create: CreateRoleStmt } |
+    DropRole { name: Str, if_exists: bool, cascade: bool } |
+    Grant { grant: GrantStmt } |
+    Revoke { revoke: RevokeStmt } |
+    CreatePolicy { create: CreatePolicyStmt } |
+    DropPolicy { name: Str, table_name: Str, if_exists: bool };
 
 # ============================================================================
 # SELECT components
@@ -212,7 +227,9 @@ L AlterAction =
     AddColumn { column: ColumnDef } |
     DropColumn { name: Str } |
     RenameColumn { old_name: Str, new_name: Str } |
-    AlterColumnType { name: Str, new_type: SqlType };
+    AlterColumnType { name: Str, new_type: SqlType } |
+    EnableRls |
+    DisableRls;
 
 # ============================================================================
 # DML statements
@@ -248,3 +265,160 @@ S DeleteStmt {
 L SetTarget =
     Session { key: Str, value: Expr } |
     Global { key: Str, value: Expr };
+
+# ============================================================================
+# Security DDL statements (Phase 10)
+# ============================================================================
+
+# CREATE USER username [WITH] PASSWORD 'pw' [options...]
+S CreateUserStmt {
+    username: Str,
+    password: Str,
+    is_superuser: Option<bool>,        # SUPERUSER / NOSUPERUSER
+    can_login: Option<bool>,           # LOGIN / NOLOGIN
+    connection_limit: Option<i64>,     # CONNECTION LIMIT n
+    in_roles: Vec<Str>,               # IN ROLE role1, role2, ...
+}
+
+X CreateUserStmt {
+    F new(username: Str, password: Str) -> CreateUserStmt {
+        CreateUserStmt {
+            username,
+            password,
+            is_superuser: Option.None,
+            can_login: Option.None,
+            connection_limit: Option.None,
+            in_roles: Vec.new(),
+        }
+    }
+}
+
+# ALTER USER username [SET PASSWORD 'pw'] [RENAME TO name] [options...]
+S AlterUserStmt {
+    username: Str,
+    password: Option<Str>,             # SET PASSWORD 'new_pw'
+    rename_to: Option<Str>,            # RENAME TO new_name
+    is_superuser: Option<bool>,        # SUPERUSER / NOSUPERUSER
+    can_login: Option<bool>,           # LOGIN / NOLOGIN
+    is_locked: Option<bool>,           # LOCK / UNLOCK
+    connection_limit: Option<i64>,     # CONNECTION LIMIT n
+}
+
+X AlterUserStmt {
+    F new(username: Str) -> AlterUserStmt {
+        AlterUserStmt {
+            username,
+            password: Option.None,
+            rename_to: Option.None,
+            is_superuser: Option.None,
+            can_login: Option.None,
+            is_locked: Option.None,
+            connection_limit: Option.None,
+        }
+    }
+}
+
+# CREATE ROLE role_name [IN ROLE parent1, parent2, ...]
+S CreateRoleStmt {
+    role_name: Str,
+    in_roles: Vec<Str>,               # Inherit from these roles
+}
+
+X CreateRoleStmt {
+    F new(role_name: Str) -> CreateRoleStmt {
+        CreateRoleStmt {
+            role_name,
+            in_roles: Vec.new(),
+        }
+    }
+}
+
+# GRANT privileges ON object TO role/user [WITH GRANT OPTION]
+# GRANT ROLE role TO user
+S GrantStmt {
+    grant_type: GrantType,
+}
+
+L GrantType =
+    # GRANT SELECT, INSERT, ... ON table TO role [WITH GRANT OPTION]
+    Privileges {
+        privileges: Vec<PrivilegeKind>,
+        object_type: ObjectKind,
+        object_name: Str,
+        grantee: Str,
+        with_grant_option: bool,
+    } |
+    # GRANT ROLE role_name TO user_or_role
+    RoleMembership {
+        role_name: Str,
+        grantee: Str,
+    };
+
+# REVOKE privileges ON object FROM role/user [CASCADE]
+# REVOKE ROLE role FROM user
+S RevokeStmt {
+    revoke_type: RevokeType,
+}
+
+L RevokeType =
+    # REVOKE SELECT, INSERT, ... ON table FROM role [CASCADE]
+    Privileges {
+        privileges: Vec<PrivilegeKind>,
+        object_type: ObjectKind,
+        object_name: Str,
+        grantee: Str,
+        cascade: bool,
+    } |
+    # REVOKE ROLE role_name FROM user_or_role
+    RoleMembership {
+        role_name: Str,
+        grantee: Str,
+    };
+
+# Individual privilege types
+L PrivilegeKind =
+    Select |
+    Insert |
+    Update |
+    Delete |
+    Create |
+    Drop |
+    Alter |
+    All;
+
+# Object types for GRANT/REVOKE ON
+L ObjectKind =
+    Table |
+    Database |
+    Schema;
+
+# CREATE POLICY name ON table [FOR cmd] [TO role] USING (expr) [WITH CHECK (expr)]
+S CreatePolicyStmt {
+    policy_name: Str,
+    table_name: Str,
+    cmd_scope: PolicyCmdScope,         # FOR ALL | SELECT | INSERT | UPDATE | DELETE
+    role_name: Option<Str>,            # TO role (None = all roles)
+    using_expr: Option<Str>,           # USING (expr) as raw SQL string
+    check_expr: Option<Str>,           # WITH CHECK (expr) as raw SQL string
+    policy_type: PolicyType,           # PERMISSIVE (default) or RESTRICTIVE
+}
+
+X CreatePolicyStmt {
+    F new(policy_name: Str, table_name: Str) -> CreatePolicyStmt {
+        CreatePolicyStmt {
+            policy_name,
+            table_name,
+            cmd_scope: PolicyCmdScope.All,
+            role_name: Option.None,
+            using_expr: Option.None,
+            check_expr: Option.None,
+            policy_type: PolicyType.Permissive,
+        }
+    }
+}
+
+# Policy command scope
+L PolicyCmdScope = All | Select | Insert | Update | Delete;
+
+# Policy type
+L PolicyType = Permissive | Restrictive;

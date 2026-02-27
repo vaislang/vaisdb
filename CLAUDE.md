@@ -22,6 +22,7 @@ src/
 ├── planner/       # Hybrid query planner, cost model, score fusion
 ├── rag/           # Semantic chunking, context preservation, RAG_SEARCH
 ├── server/        # TCP server, wire protocol, connection pool
+├── ops/           # Production operations: backup, metrics, VACUUM, REINDEX
 ├── client/        # Client libraries
 └── main.vais      # Entry point
 ```
@@ -58,4 +59,4 @@ src/
 ## Roadmap Reference
 
 See [ROADMAP.md](ROADMAP.md) for detailed phase breakdown.
-Current phase: Phases 0-8 complete. Next: Phase 9 (Production Operations).
+Current phase: Phases 0-10 complete. All implementation phases finished.

@@ -26,6 +26,7 @@ L FILE_ID_VECTORS: u8 = 1;
 L FILE_ID_GRAPH: u8 = 2;
 L FILE_ID_FULLTEXT: u8 = 3;
 L FILE_ID_UNDO: u8 = 4;
+L FILE_ID_SECURITY: u8 = 6;
 
 # File names within .vaisdb directory
 L FILE_NAME_DATA: Str = "data.vdb";
@@ -34,6 +35,7 @@ L FILE_NAME_GRAPH: Str = "graph.vdb";
 L FILE_NAME_FULLTEXT: Str = "fulltext.vdb";
 L FILE_NAME_UNDO: Str = "undo.vdb";
 L FILE_NAME_META: Str = "meta.vdb";
+L FILE_NAME_SECURITY: Str = "security.vdb";
 L FILE_NAME_LOCK: Str = "lock";
 L DIR_NAME_WAL: Str = "wal";
 L DIR_NAME_TMP: Str = "tmp";

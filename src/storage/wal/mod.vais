@@ -2,29 +2,21 @@
 # Based on Stage 2: WAL Design
 # Unified WAL for all engines with ARIES-style recovery
 
-pub mod header;
-pub mod segment;
-pub mod record_types;
-pub mod record_rel;
-pub mod record_vector;
-pub mod record_graph;
-pub mod record_fulltext;
-pub mod serializer;
-pub mod writer;
-pub mod group_commit;
-pub mod buffer;
-pub mod lsn;
+# Submodules (auto-discovered by filesystem)
+# header, segment, record_types, record_rel, record_vector
+# record_graph, record_fulltext, serializer, writer
+# group_commit, buffer, lsn
 
 # Re-export commonly used types
-pub use header.{WalRecordHeader, ENGINE_META, ENGINE_RELATIONAL, ENGINE_VECTOR, ENGINE_GRAPH, ENGINE_FULLTEXT, ENGINE_RAG};
-pub use segment.{WalSegmentHeader};
-pub use serializer.{WalRecord, WalRecordSerializer};
-pub use writer.{WalWriter};
-pub use group_commit.{GroupCommitManager, GroupCommitConfig, SyncMode};
-pub use lsn.{NULL_LSN, lsn_compare, lsn_segment, lsn_offset, lsn_is_null};
+U header.{WalRecordHeader, ENGINE_META, ENGINE_RELATIONAL, ENGINE_VECTOR, ENGINE_GRAPH, ENGINE_FULLTEXT, ENGINE_RAG, ENGINE_SECURITY};
+U segment.{WalSegmentHeader};
+U serializer.{WalRecord, WalRecordSerializer};
+U writer.{WalWriter};
+U group_commit.{GroupCommitManager, GroupCommitConfig, SyncMode};
+U lsn.{NULL_LSN, lsn_compare, lsn_segment, lsn_offset, lsn_is_null};
 
 # Re-export all record type constants
-pub use record_types.{
+U record_types.{
     # Meta records
     TXN_BEGIN, TXN_COMMIT, TXN_ABORT,
     CHECKPOINT_BEGIN, CHECKPOINT_END,
@@ -52,33 +44,37 @@ pub use record_types.{
     RAG_DOC_INSERT, RAG_DOC_DELETE,
     RAG_CHUNK_INSERT, RAG_CHUNK_DELETE,
     RAG_MEMORY_INSERT, RAG_MEMORY_DELETE,
+
+    # Security records
+    SECURITY_USER_CREATE, SECURITY_USER_ALTER, SECURITY_USER_DROP,
+    SECURITY_ROLE_CREATE, SECURITY_ROLE_DROP, SECURITY_GRANT_CHANGE,
 };
 
 # Re-export payload types
-pub use record_types.{
+U record_types.{
     TxnBeginPayload, TxnCommitPayload, TxnAbortPayload,
     CheckpointBeginPayload, CheckpointEndPayload,
     SchemaChangePayload, ClrPayload,
     PageAllocPayload, PageDeallocPayload, FpiPayload,
 };
 
-pub use record_rel.{
+U record_rel.{
     PageWritePayload, TupleInsertPayload, TupleDeletePayload, TupleUpdatePayload,
     BtreeSplitPayload, BtreeMergePayload, BtreeInsertPayload, BtreeDeletePayload,
 };
 
-pub use record_vector.{
+U record_vector.{
     HnswInsertNodePayload, HnswDeleteNodePayload, HnswUpdateEdgesPayload,
     HnswLayerPromotePayload, VectorDataWritePayload, QuantizationUpdatePayload,
 };
 
-pub use record_graph.{
+U record_graph.{
     GraphNodeInsertPayload, GraphNodeDeletePayload,
     GraphEdgeInsertPayload, GraphEdgeDeletePayload,
     GraphPropertyUpdatePayload, AdjListPageSplitPayload,
 };
 
-pub use record_fulltext.{
+U record_fulltext.{
     PostingListAppendPayload, PostingListDeletePayload,
     DictionaryInsertPayload, DictionaryDeletePayload, TermFreqUpdatePayload,
 };

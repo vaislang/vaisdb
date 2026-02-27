@@ -30,6 +30,15 @@ U sql/catalog/schema.{
     table_key, columns_key_prefix, columns_key_end,
     index_key, index_key_prefix_for_table, index_key_end_for_table,
     FIRST_USER_TABLE_ID, CATALOG_TAG_TABLE, CATALOG_TAG_COLUMN, CATALOG_TAG_INDEX,
+    # Security catalog types (Phase 10)
+    UserCatalogEntry, RoleCatalogEntry, GrantCatalogEntry, PolicyCatalogEntry,
+    user_key, user_key_prefix, user_key_end,
+    role_key, role_key_prefix, role_key_end,
+    grant_key, grant_key_prefix, grant_key_end,
+    grant_key_prefix_for_role, grant_key_end_for_role,
+    policy_key, policy_key_prefix, policy_key_end,
+    policy_key_prefix_for_table, policy_key_end_for_table,
+    CATALOG_TAG_USER, CATALOG_TAG_ROLE, CATALOG_TAG_GRANT, CATALOG_TAG_POLICY,
 };
 
 # ============================================================================
@@ -92,6 +101,11 @@ S CatalogManager {
     columns: HashMap<u32, Vec<ColumnInfo>>,   # In-memory cache: table_id -> columns
     next_table_id: u32,
     next_index_id: u32,
+    # Security catalog caches (Phase 10)
+    users: HashMap<Str, UserCatalogEntry>,    # In-memory cache: username -> user
+    roles: HashMap<Str, RoleCatalogEntry>,    # In-memory cache: role_name -> role
+    grants: Vec<GrantCatalogEntry>,           # All grants (indexed via scan)
+    policies: Vec<PolicyCatalogEntry>,        # All policies (indexed via scan)
 }
 
 X CatalogManager {
@@ -105,6 +119,10 @@ X CatalogManager {
             columns: HashMap.new(),
             next_table_id: FIRST_USER_TABLE_ID,
             next_index_id: 1,
+            users: HashMap.new(),
+            roles: HashMap.new(),
+            grants: Vec.new(),
+            policies: Vec.new(),
         }
     }
 
@@ -135,48 +153,63 @@ X CatalogManager {
 
             # Determine entry type from the first byte of user data (catalog tag)
             ~user_data = tuple.get_data();
-            I user_data.len() == 0 {
-                C;
-            }
+            I user_data.len() > 0 {
+                ~tag = user_data[0];
+                ~buf = ByteBuffer.from_slice(user_data.as_slice());
 
-            ~tag = user_data[0];
-            ~buf = ByteBuffer.from_slice(user_data.as_slice());
-
-            M tag {
-                CATALOG_TAG_TABLE => {
-                    ~info = TableInfo.deserialize(&buf)?;
-                    # Track highest table_id for next_table_id allocation
-                    I info.table_id >= max_table_id {
-                        max_table_id = info.table_id + 1;
-                    }
-                    self.tables.insert(info.name.clone(), info);
-                },
-                CATALOG_TAG_COLUMN => {
-                    ~info = ColumnInfo.deserialize(&buf)?;
-                    ~table_id = info.table_id;
-                    # Add to columns cache, creating the Vec if needed
-                    I !self.columns.contains_key(&table_id) {
-                        self.columns.insert(table_id, Vec.new());
-                    }
-                    ~col_vec = self.columns.get_mut(&table_id)!;
-                    col_vec.push(info);
-                },
-                CATALOG_TAG_INDEX => {
-                    ~info = IndexInfo.deserialize(&buf)?;
-                    # Track highest index_id for next_index_id allocation
-                    I info.index_id >= max_index_id {
-                        max_index_id = info.index_id + 1;
-                    }
-                    self.indexes.insert(info.name.clone(), info);
-                },
-                _ => {
-                    # Unknown catalog entry type, skip
-                },
+                M tag {
+                    CATALOG_TAG_TABLE => {
+                        ~info = TableInfo.deserialize(&buf)?;
+                        # Track highest table_id for next_table_id allocation
+                        I info.table_id >= max_table_id {
+                            max_table_id = info.table_id + 1;
+                        }
+                        self.tables.insert(info.name.clone(), info);
+                    },
+                    CATALOG_TAG_COLUMN => {
+                        ~info = ColumnInfo.deserialize(&buf)?;
+                        ~table_id = info.table_id;
+                        # Add to columns cache, creating the Vec if needed
+                        I !self.columns.contains_key(&table_id) {
+                            self.columns.insert(table_id, Vec.new());
+                        }
+                        ~col_vec = self.columns.get_mut(&table_id)!;
+                        col_vec.push(info);
+                    },
+                    CATALOG_TAG_INDEX => {
+                        ~info = IndexInfo.deserialize(&buf)?;
+                        # Track highest index_id for next_index_id allocation
+                        I info.index_id >= max_index_id {
+                            max_index_id = info.index_id + 1;
+                        }
+                        self.indexes.insert(info.name.clone(), info);
+                    },
+                    # Security catalog entries (Phase 10)
+                    CATALOG_TAG_USER => {
+                        ~entry = UserCatalogEntry.deserialize(&buf)?;
+                        self.users.insert(entry.username.clone(), entry);
+                    },
+                    CATALOG_TAG_ROLE => {
+                        ~entry = RoleCatalogEntry.deserialize(&buf)?;
+                        self.roles.insert(entry.role_name.clone(), entry);
+                    },
+                    CATALOG_TAG_GRANT => {
+                        ~entry = GrantCatalogEntry.deserialize(&buf)?;
+                        self.grants.push(entry);
+                    },
+                    CATALOG_TAG_POLICY => {
+                        ~entry = PolicyCatalogEntry.deserialize(&buf)?;
+                        self.policies.push(entry);
+                    },
+                    _ => {
+                        # Unknown catalog entry type, skip
+                    },
+                }
             }
         }
 
         self.next_table_id = max_table_id;
-        self.next_index_id = max_index_id + 1;
+        self.next_index_id = max_index_id;
 
         # Sort column lists by column_index for consistent ordering
         L (_, col_vec): self.columns.iter_mut() {
@@ -520,6 +553,289 @@ X CatalogManager {
     # Check if an index exists
     F index_exists(self, name: &Str) -> bool {
         self.indexes.contains_key(name)
+    }
+
+    # ========================================================================
+    # Security Catalog: User Operations (Phase 10)
+    # ========================================================================
+
+    # Register a user in the catalog
+    F register_user(
+        ~self,
+        entry: UserCatalogEntry,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        I self.users.contains_key(&entry.username) {
+            R Err(VaisError.new("VAIS-0902001", "User '{entry.username}' already exists"));
+        }
+
+        ~buf = ByteBuffer.with_capacity(128);
+        entry.serialize(&buf);
+        ~bytes = buf.to_vec();
+        ~catalog_key = entry.to_catalog_key();
+        self.insert_catalog_entry(&catalog_key, &bytes, pool, gcm, txn_id)?;
+
+        self.users.insert(entry.username.clone(), entry);
+        Ok(())
+    }
+
+    # Remove a user from the catalog
+    F unregister_user(
+        ~self,
+        username: &Str,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        I !self.users.contains_key(username) {
+            R Err(VaisError.new("VAIS-0910001", "User '{username}' not found"));
+        }
+
+        ~catalog_key = user_key(username);
+        self.delete_catalog_entry(&catalog_key, pool, gcm, txn_id)?;
+        self.users.remove(username);
+        Ok(())
+    }
+
+    # Look up a user by username
+    F get_user(self, username: &Str) -> Option<&UserCatalogEntry> {
+        self.users.get(username)
+    }
+
+    # Check if a user exists
+    F user_exists(self, username: &Str) -> bool {
+        self.users.contains_key(username)
+    }
+
+    # List all users
+    F all_users(self) -> Vec<&UserCatalogEntry> {
+        ~result = Vec.new();
+        L (_, entry): self.users.iter() {
+            result.push(entry);
+        }
+        result
+    }
+
+    # ========================================================================
+    # Security Catalog: Role Operations (Phase 10)
+    # ========================================================================
+
+    # Register a role in the catalog
+    F register_role(
+        ~self,
+        entry: RoleCatalogEntry,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        I self.roles.contains_key(&entry.role_name) {
+            R Err(VaisError.new("VAIS-0902002", "Role '{entry.role_name}' already exists"));
+        }
+
+        ~buf = ByteBuffer.with_capacity(128);
+        entry.serialize(&buf);
+        ~bytes = buf.to_vec();
+        ~catalog_key = entry.to_catalog_key();
+        self.insert_catalog_entry(&catalog_key, &bytes, pool, gcm, txn_id)?;
+
+        self.roles.insert(entry.role_name.clone(), entry);
+        Ok(())
+    }
+
+    # Remove a role from the catalog
+    F unregister_role(
+        ~self,
+        role_name: &Str,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        I !self.roles.contains_key(role_name) {
+            R Err(VaisError.new("VAIS-0910002", "Role '{role_name}' not found"));
+        }
+
+        ~catalog_key = role_key(role_name);
+        self.delete_catalog_entry(&catalog_key, pool, gcm, txn_id)?;
+        self.roles.remove(role_name);
+        Ok(())
+    }
+
+    # Look up a role by name
+    F get_role(self, role_name: &Str) -> Option<&RoleCatalogEntry> {
+        self.roles.get(role_name)
+    }
+
+    # Check if a role exists
+    F role_exists(self, role_name: &Str) -> bool {
+        self.roles.contains_key(role_name)
+    }
+
+    # List all roles
+    F all_roles(self) -> Vec<&RoleCatalogEntry> {
+        ~result = Vec.new();
+        L (_, entry): self.roles.iter() {
+            result.push(entry);
+        }
+        result
+    }
+
+    # ========================================================================
+    # Security Catalog: Grant Operations (Phase 10)
+    # ========================================================================
+
+    # Register a grant in the catalog
+    F register_grant(
+        ~self,
+        entry: GrantCatalogEntry,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        ~buf = ByteBuffer.with_capacity(128);
+        entry.serialize(&buf);
+        ~bytes = buf.to_vec();
+        ~catalog_key = entry.to_catalog_key();
+        self.insert_catalog_entry(&catalog_key, &bytes, pool, gcm, txn_id)?;
+
+        self.grants.push(entry);
+        Ok(())
+    }
+
+    # Remove a grant from the catalog (by role_id + object_name)
+    F unregister_grant(
+        ~self,
+        role_id: u64,
+        object_name: &Str,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        ~catalog_key = grant_key(role_id, object_name);
+        self.delete_catalog_entry(&catalog_key, pool, gcm, txn_id)?;
+
+        # Remove from in-memory cache (find and remove matching entry)
+        ~i: u64 = 0;
+        W i < self.grants.len() {
+            I self.grants[i].role_id == role_id && self.grants[i].object_name == *object_name {
+                self.grants.remove(i);
+                R Ok(());
+            }
+            i = i + 1;
+        }
+
+        Ok(())
+    }
+
+    # Get all grants for a specific role
+    F get_grants_for_role(self, role_id: u64) -> Vec<&GrantCatalogEntry> {
+        ~result = Vec.new();
+        L entry: &self.grants {
+            I entry.role_id == role_id {
+                result.push(entry);
+            }
+        }
+        result
+    }
+
+    # Get all grants on a specific object
+    F get_grants_for_object(self, object_name: &Str) -> Vec<&GrantCatalogEntry> {
+        ~result = Vec.new();
+        L entry: &self.grants {
+            I entry.object_name == *object_name {
+                result.push(entry);
+            }
+        }
+        result
+    }
+
+    # List all grants
+    F all_grants(self) -> &Vec<GrantCatalogEntry> {
+        &self.grants
+    }
+
+    # ========================================================================
+    # Security Catalog: Policy Operations (Phase 10)
+    # ========================================================================
+
+    # Register a policy in the catalog
+    F register_policy(
+        ~self,
+        entry: PolicyCatalogEntry,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        # Check for duplicate policy name on same table
+        L existing: &self.policies {
+            I existing.table_name == entry.table_name && existing.policy_name == entry.policy_name {
+                R Err(VaisError.new(
+                    "VAIS-0902003",
+                    "Policy '{entry.policy_name}' already exists on table '{entry.table_name}'"
+                ));
+            }
+        }
+
+        ~buf = ByteBuffer.with_capacity(128);
+        entry.serialize(&buf);
+        ~bytes = buf.to_vec();
+        ~catalog_key = entry.to_catalog_key();
+        self.insert_catalog_entry(&catalog_key, &bytes, pool, gcm, txn_id)?;
+
+        self.policies.push(entry);
+        Ok(())
+    }
+
+    # Remove a policy from the catalog (by table_name + policy_name)
+    F unregister_policy(
+        ~self,
+        table_name: &Str,
+        policy_name: &Str,
+        pool: &~BufferPool,
+        gcm: &~GroupCommitManager,
+        txn_id: u64,
+    ) -> Result<(), VaisError> {
+        ~catalog_key = policy_key(table_name, policy_name);
+        self.delete_catalog_entry(&catalog_key, pool, gcm, txn_id)?;
+
+        # Remove from in-memory cache
+        ~i: u64 = 0;
+        W i < self.policies.len() {
+            I self.policies[i].table_name == *table_name && self.policies[i].policy_name == *policy_name {
+                self.policies.remove(i);
+                R Ok(());
+            }
+            i = i + 1;
+        }
+
+        Ok(())
+    }
+
+    # Get all policies for a specific table
+    F get_policies_for_table(self, table_name: &Str) -> Vec<&PolicyCatalogEntry> {
+        ~result = Vec.new();
+        L entry: &self.policies {
+            I entry.table_name == *table_name {
+                result.push(entry);
+            }
+        }
+        result
+    }
+
+    # Look up a specific policy by table + name
+    F get_policy(self, table_name: &Str, policy_name: &Str) -> Option<&PolicyCatalogEntry> {
+        L entry: &self.policies {
+            I entry.table_name == *table_name && entry.policy_name == *policy_name {
+                R Some(entry);
+            }
+        }
+        None
+    }
+
+    # List all policies
+    F all_policies(self) -> &Vec<PolicyCatalogEntry> {
+        &self.policies
     }
 
     # ========================================================================
