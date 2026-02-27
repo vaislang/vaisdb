@@ -255,12 +255,15 @@ describe("100K Insert/Search/Delete") {
         ~inserted: u32 = 0;
 
         # Insert until leaf is full
-        L i: 0..100000u32 {
+        ~i: u32 = 0;
+        ~leaf_full = false;
+        W i < 100000u32 && !leaf_full {
             ~key = encode_i64_key(i as i64);
             M leaf.insert(&key, i) {
                 Ok(()) => { inserted += 1; },
-                Err(_) => B,  # Leaf full
+                Err(_) => { leaf_full = true; },  # Leaf full
             }
+            i += 1;
         }
 
         assert_true(inserted > 0);

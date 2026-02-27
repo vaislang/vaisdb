@@ -52,6 +52,10 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 | 8.6 | Deep Code Analysis & Fix | ✅ Complete | 20/20 (100%) |
 | 9 | Production Operations | ✅ Complete | 10/10 (100%) |
 | 10 | Security & Multi-tenancy | ✅ Complete | 10/10 (100%) |
+| 11 | Test Suite | ✅ Complete | 6/6 (100%) |
+| 12 | Benchmarks | 📋 Planned | 0/4 (0%) |
+| 13 | Documentation | 📋 Planned | 0/3 (0%) |
+| 14 | Code Quality | 📋 Planned | 0/3 (0%) |
 
 ---
 
@@ -1385,6 +1389,70 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 | 1 | Unauthorized user cannot read/write, injection attempts rejected |
 | 2 | Tenant A cannot see Tenant B's data in SQL, vector search, or graph traversal |
 | 3 | Encrypted DB file unreadable without key, audit log detects tampering |
+
+---
+
+## Phase 11: Test Suite (2026-02-27)
+
+> **Status**: ✅ Complete
+> **Dependency**: Phase 0-10 complete
+> **Goal**: Comprehensive unit + integration tests for all engines (currently 5.5% coverage → target 80%+)
+> **Completed**: 2026-02-28
+
+모드: 자동진행
+- [x] 1. SQL 파서/실행기 단위 테스트 (Sonnet 위임) ✅ 2026-02-28
+  변경: tests/sql/test_types.vais (859L: SqlType/SqlValue/Row encoding/NULL 시맨틱/캐스팅/집계 테스트)
+- [x] 2. Vector 엔진 단위 테스트 (Sonnet 위임) [∥1] ✅ 2026-02-28
+  변경: tests/vector/test_vector.vais (477L: 거리함수/HNSW타입/배치계산/삼각부등식 테스트)
+- [x] 3. Graph 엔진 단위 테스트 (Sonnet 위임) [∥1,2] ✅ 2026-02-28
+  변경: tests/graph/test_graph.vais (572L: GraphConfig/AdjEntry/GraphNode/PropertyMap 직렬화 테스트)
+- [x] 4. FullText 엔진 단위 테스트 (Sonnet 위임) [∥1,2,3] ✅ 2026-02-28
+  변경: tests/fulltext/test_fulltext.vais (756L: Tokenizer/BM25/VByte/PostingEntry/DictEntry 테스트)
+- [x] 5. Planner/RAG 단위 테스트 (Sonnet 위임) [∥1,2,3,4] ✅ 2026-02-28
+  변경: tests/planner/test_planner.vais (1374L: HybridCost/FusionMethod/PlanCache/RagConfig/ChunkInfo 118케이스)
+- [x] 6. 크로스엔진 통합 테스트 (Opus 직접) [blockedBy: 1-5] ✅ 2026-02-28
+  변경: tests/integration/test_cross_engine.vais (815L: ScoreFusion/MVCC일관성/FNV-1a해시/QueryProfile 54케이스)
+진행률: 6/6 (100%)
+
+---
+
+## Phase 12: Benchmarks (2026-02-27)
+
+> **Status**: 📋 Planned
+> **Dependency**: Phase 11
+> **Goal**: Performance measurement infrastructure + per-engine benchmarks matching ROADMAP targets
+
+- [ ] 7. 벤치마크 하니스 & 타이밍 유틸 (Sonnet 위임)
+- [ ] 8. Storage/SQL 벤치마크 (Sonnet 위임) [blockedBy: 7]
+- [ ] 9. Vector/Graph/FullText 벤치마크 (Sonnet 위임) [blockedBy: 7, ∥8]
+- [ ] 10. 하이브리드 쿼리 벤치마크 (Opus 직접) [blockedBy: 8,9]
+진행률: 0/4 (0%)
+
+---
+
+## Phase 13: Documentation (2026-02-27)
+
+> **Status**: 📋 Planned
+> **Dependency**: None (can run parallel with Phase 11-12)
+> **Goal**: User-facing documentation (Getting Started, API reference, operations guide)
+
+- [ ] 11. Getting Started & SQL API 레퍼런스 (Sonnet 위임)
+- [ ] 12. 엔진별 기능 문서 - Vector/Graph/FT/RAG (Sonnet 위임) [∥11]
+- [ ] 13. 운영 가이드 - 보안/백업/모니터링 (Sonnet 위임) [∥11,12]
+진행률: 0/3 (0%)
+
+---
+
+## Phase 14: Code Quality (2026-02-27)
+
+> **Status**: 📋 Planned
+> **Dependency**: None (can run parallel with Phase 11-13)
+> **Goal**: Module organization, TODO cleanup, doc comments, placeholder implementation
+
+- [ ] 14. mod.vais 정리 & TODO 79개 정리 (Sonnet 위임)
+- [ ] 15. 공개 API 문서주석 보강 (Sonnet 위임) [∥14]
+- [ ] 16. Placeholder 코드 구현/제거 (Opus 직접) [blockedBy: 14]
+진행률: 0/3 (0%)
 
 ---
 
