@@ -130,7 +130,7 @@ X TraversalConfig {
             None => true,
             Some(ref types) => {
                 ~i: u64 = 0;
-                L while i < types.len() {
+                W i < types.len() {
                     I types[i] == edge_type {
                         R true;
                     }
@@ -148,6 +148,7 @@ X TraversalConfig {
 
 S BfsTraversal {
     pool: &BufferPool,
+    node_store: &NodeStore,
     snapshot: Snapshot,
     clog: &Clog,
 }
@@ -155,11 +156,13 @@ S BfsTraversal {
 X BfsTraversal {
     F new(
         pool: &BufferPool,
+        node_store: &NodeStore,
         snapshot: Snapshot,
         clog: &Clog
     ) -> BfsTraversal {
         BfsTraversal {
             pool,
+            node_store,
             snapshot,
             clog,
         }
@@ -204,39 +207,33 @@ X BfsTraversal {
         result.add_step(TraversalStep.root(start_node));
 
         # BFS loop
-        L while queue.len() > 0 {
+        W queue.len() > 0 {
             # Dequeue from front (shift)
             ~current = queue.remove(0);
             ~current_node = current.0;
             ~current_depth = current.1;
 
-            # Check depth limit
-            I config.max_depth > 0 && current_depth >= config.max_depth {
-                C            }
+            # Check depth limit -- skip expansion if at max depth
+            I config.max_depth == 0 || current_depth < config.max_depth {
+                # Look up node to get adjacency page IDs
+                ~node = self.node_store.read_node(current_node)?;
 
-            # NOTE: In production, need to:
-            # 1. Look up current_node in node index to get (page_id, slot_index)
-            # 2. Read GraphNode via NodeStore.read_node(page_id, slot_index)
-            # 3. Extract out_adj_page and in_adj_page
-            # 4. Read adjacency entries based on config.direction
-            #
-            # For this implementation, we document the interface but cannot
-            # complete without a node index. The caller would need to provide
-            # a mapping of node_id -> adjacency page IDs.
+                # Process outgoing edges
+                I config.direction == DIRECTION_OUTGOING || config.direction == DIRECTION_BOTH {
+                    I node.out_adj_page != NULL_PAGE {
+                        ~out_entries = adj_mgr.read_all_entries(node.out_adj_page)?;
+                        self.process_edges(&out_entries, current_node, current_depth, config, &queue, &visited, &result);
+                    }
+                }
 
-            # Process adjacency lists based on direction
-            # This is a placeholder - in real usage, caller must provide adj pages
-
-            # Example: if we had node index:
-            # ~node = node_store.read_node(node_page_id, node_slot_index)?;
-            # ~out_entries = if config.direction == DIRECTION_OUTGOING || config.direction == DIRECTION_BOTH {
-            #     adj_mgr.read_all_entries(node.out_adj_page)?
-            # } else { Vec.new() };
-            # ~in_entries = if config.direction == DIRECTION_INCOMING || config.direction == DIRECTION_BOTH {
-            #     adj_mgr.read_all_entries(node.in_adj_page)?
-            # } else { Vec.new() };
-            # self.process_edges(&out_entries, current_node, current_depth, config, &queue, &visited, &result);
-            # self.process_edges(&in_entries, current_node, current_depth, config, &queue, &visited, &result);
+                # Process incoming edges
+                I config.direction == DIRECTION_INCOMING || config.direction == DIRECTION_BOTH {
+                    I node.in_adj_page != NULL_PAGE {
+                        ~in_entries = adj_mgr.read_all_entries(node.in_adj_page)?;
+                        self.process_edges(&in_entries, current_node, current_depth, config, &queue, &visited, &result);
+                    }
+                }
+            }
         }
 
         Ok(result)
@@ -245,7 +242,7 @@ X BfsTraversal {
     # Helper: check if node is already visited
     F is_visited(visited: &Vec<u64>, node_id: u64) -> bool {
         ~i: u64 = 0;
-        L while i < visited.len() {
+        W i < visited.len() {
             I visited[i] == node_id {
                 R true;
             }
@@ -268,40 +265,31 @@ X BfsTraversal {
         ~next_depth = current_depth + 1;
 
         ~i: u64 = 0;
-        L while i < entries.len() {
+        W i < entries.len() {
             ~entry = &entries[i];
 
-            # Check MVCC visibility
-            I !is_adj_entry_visible(entry, &self.snapshot, self.clog) {
-                i += 1;
-                C            }
+            # Check MVCC visibility, edge type filter, and already-visited
+            I is_adj_entry_visible(entry, &self.snapshot, self.clog)
+                && config.is_edge_type_allowed(entry.edge_type) {
+                ~target = entry.target_node;
+                I !BfsTraversal.is_visited(visited, target) {
+                    # Mark as visited
+                    visited.push(target);
 
-            # Check edge type filter
-            I !config.is_edge_type_allowed(entry.edge_type) {
-                i += 1;
-                C            }
+                    # Add to queue
+                    queue.push((target, next_depth));
 
-            # Check if target node already visited
-            ~target = entry.target_node;
-            I BfsTraversal.is_visited(visited, target) {
-                i += 1;
-                C            }
-
-            # Mark as visited
-            visited.push(target);
-
-            # Add to queue
-            queue.push((target, next_depth));
-
-            # Add to result
-            ~step = TraversalStep.from_edge(
-                target,
-                next_depth,
-                current_node,
-                entry.edge_id,
-                entry.edge_type
-            );
-            result.add_step(step);
+                    # Add to result
+                    ~step = TraversalStep.from_edge(
+                        target,
+                        next_depth,
+                        current_node,
+                        entry.edge_id,
+                        entry.edge_type
+                    );
+                    result.add_step(step);
+                }
+            }
 
             i += 1;
         }

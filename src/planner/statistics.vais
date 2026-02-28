@@ -108,15 +108,18 @@ X TableColumnStats {
 
         # Binary search for bucket containing value
         ~bucket_idx = 0u64;
+        ~found_bucket = false;
         L i: 0..self.histogram.len() {
-            M compare_values(value, &self.histogram[i]) {
-                Ok(cmp) => {
-                    I cmp < 0 {
-                        bucket_idx = i;
-                        B;
-                    }
-                },
-                Err(_) => R 0.3,  # Cannot compare, use default
+            I !found_bucket {
+                M compare_values(value, &self.histogram[i]) {
+                    Ok(cmp) => {
+                        I cmp < 0 {
+                            bucket_idx = i;
+                            found_bucket = true;
+                        }
+                    },
+                    Err(_) => R 0.3,  # Cannot compare, use default
+                }
             }
         }
 
@@ -255,9 +258,8 @@ X StatisticsCollector {
         ~columns = catalog.get_columns(table_info.table_id);
         ~column_info: Option<&ColumnInfo> = None;
         L col: columns {
-            I &col.name == column_name {
+            I column_info.is_none() && &col.name == column_name {
                 column_info = Some(col);
-                B;
             }
         }
         M column_info {
@@ -550,12 +552,11 @@ F compare_values(a: &SqlValue, b: &SqlValue) -> Result<i32, VaisError> {
 }
 
 # ============================================================================
-# Time Utilities (Placeholder)
+# Time Utilities
 # ============================================================================
 
-# Get current time in milliseconds (placeholder for std/time integration)
+# Get current time in milliseconds
+# FUTURE(std/time): Use std/time.now_millis() when available
 F current_time_millis() -> u64 {
-    # In a full implementation, would call std/time.now_millis()
-    # For now, R 0 as placeholder
     0
 }

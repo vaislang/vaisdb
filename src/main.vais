@@ -26,8 +26,8 @@ F main() -> i64 {
     println("  Vector + Graph + Relational + Full-Text");
     println("");
 
-    # TODO: Parse CLI arguments when std/args is available
-    # For now, default to server mode
+    # FUTURE(std/args): Parse CLI arguments for --port, --data-dir, --embedded, --help
+    # Currently defaults to server mode
 
     # Create default server configuration
     ~config = ServerConfig.default();
@@ -53,8 +53,8 @@ F main() -> i64 {
                     println("");
                     println("Ready for connections.");
 
-                    # TODO: Block on accept loop when std/net is available
-                    # For now, just report success
+                    # FUTURE(std/net): Block on accept loop
+                    # Currently reports success and exits
                 },
                 Err(e) => {
                     println("Failed to start server: {e.message}");

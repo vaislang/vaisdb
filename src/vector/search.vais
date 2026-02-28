@@ -6,16 +6,16 @@ U std/option.{Option, Some, None};
 U std/vec.Vec;
 U std/string.Str;
 
-U crate/error.{VaisError, error_code};
-U crate/sql/executor/mod.{ExecContext, ExecutorRow, ExecStats};
-U crate/sql/types.{SqlValue, Expr};
-U crate/sql/row.Row;
-U crate/hnsw/search.{knn_search, SearchResult, SearchResultEntry};
-U crate/hnsw/delete.{mvcc_filtered_search, MvccSearchResult};
-U crate/hnsw/meta.HnswMeta;
-U crate/hnsw/distance.{DistanceComputer, create_distance_computer};
-U crate/storage/buffer_pool.BufferPool;
-U crate/sql/catalog/manager.CatalogManager;
+U storage/error.{VaisError, error_code};
+U sql/executor/mod.{ExecContext, ExecutorRow, ExecStats};
+U sql/types.{SqlValue, Expr};
+U sql/row.Row;
+U vector/hnsw/search.{knn_search, SearchResult, SearchResultEntry};
+U vector/hnsw/delete.{mvcc_filtered_search, MvccSearchResult};
+U vector/hnsw/types.HnswMeta;
+U vector/distance.{DistanceComputer, create_distance_computer};
+U storage/buffer/pool.BufferPool;
+U sql/catalog/manager.CatalogManager;
 
 # Error codes: EE=02 (vector), CC=03 (search)
 # 02-03-007: Invalid VECTOR_SEARCH arguments
@@ -74,20 +74,22 @@ X VectorSearchExecutor {
         ~column_idx = 0u64;
 
         L col: table_meta.columns.iter() {
-            M col.col_type {
-                SqlValue.VectorVal { .. } => {
-                    I col.name == self.params.column_name {
-                        column_found = true;
-                        column_idx = col.column_id as u64;
-                        # Find associated HNSW index
-                        index_meta := self.ctx.catalog.get_vector_index(
-                            self.params.table_id,
-                            col.column_id
-                        ).ok_or(error_code(2, 3, 7, "No HNSW index found for column"))?;
-                        vector_index_id = index_meta.index_id;
-                        B                    }
-                },
-                _ => {}
+            I !column_found {
+                M col.col_type {
+                    SqlValue.VectorVal { .. } => {
+                        I col.name == self.params.column_name {
+                            column_found = true;
+                            column_idx = col.column_id as u64;
+                            # Find associated HNSW index
+                            index_meta := self.ctx.catalog.get_vector_index(
+                                self.params.table_id,
+                                col.column_id
+                            ).ok_or(error_code(2, 3, 7, "No HNSW index found for column"))?;
+                            vector_index_id = index_meta.index_id;
+                        }
+                    },
+                    _ => {}
+                }
             }
         }
 
@@ -327,15 +329,8 @@ F execute_vector_search(
     executor.open()?;
 
     ~results = Vec.new();
-    L {
-        M executor.next()? {
-            Some(exec_row) => {
-                # Extract VectorSearchRow from ExecutorRow
-                # (This path is simplified - normally we'd convert back)
-                # For standalone execution, we access internal results directly
-                B            },
-            None => B        }
-    }
+    # Trigger materialization by calling next once
+    executor.next()?;
 
     M executor.results {
         Some(materialized) => Ok(materialized),
@@ -344,8 +339,8 @@ F execute_vector_search(
 }
 
 # Helper imports for row loading (would be in actual implementation)
-U crate/storage/heap_page.HeapPage;
-U crate/sql/visibility.is_visible;
+U storage/page/heap.HeapPage;
+U storage/txn/visibility.is_tuple_visible;
 
 # VectorSearchBuilder: fluent API for constructing searches
 S VectorSearchBuilder {
@@ -405,12 +400,6 @@ X VectorSearchBuilder {
     }
 }
 
-# Export public API
-pub use {
-    VectorSearchParams,
-    VectorSearchRow,
-    VectorSearchExecutor,
-    VectorSearchBuilder,
-    parse_vector_search_args,
-    execute_vector_search,
-};
+# Public API: VectorSearchParams, VectorSearchRow,
+# VectorSearchExecutor, VectorSearchBuilder,
+# parse_vector_search_args, execute_vector_search

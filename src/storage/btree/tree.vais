@@ -62,8 +62,11 @@ X BTree {
     }
 
     # Find the leaf page containing the given key
-    # Returns the buffer pool frame_id (page is pinned, read latch held on leaf)
-    # Uses latch crabbing: acquire child read latch, then release parent
+    # Returns the buffer pool frame_id (page is pinned in buffer pool)
+    # Uses latch crabbing through internal nodes (acquire child, release parent)
+    # Note: leaf read latch is acquired and immediately released — the buffer pin
+    # provides logical protection for read-only callers. Write callers (insert/delete)
+    # acquire their own write latch on the leaf independently.
     F find_leaf(self, key: &[u8], pool: &~BufferPool) -> Result<u32, VaisError> {
         ~current_page = self.root_page_id;
         ~parent_guard: Option<LatchGuard> = None;
@@ -100,9 +103,9 @@ X BTree {
             None => {},
         }
 
-        # The leaf latch will be released by the caller (via unpin_page or cursor close)
-        # We store the guard — caller is responsible for the leaf latch lifecycle
-        # For now, release here since the buffer pin provides logical protection
+        # Leaf read latch released immediately — the buffer pin (pin_count >= 1)
+        # prevents eviction, ensuring page data stability for read-only callers.
+        # Write callers (btree_insert, btree_delete) acquire independent write latches.
         leaf_guard.release();
 
         pool.fetch_page(self.file_id, current_page)
@@ -116,10 +119,9 @@ X BTree {
 
         # Find starting leaf (find_leaf handles internal node latch crabbing)
         ~frame_id = self.find_leaf(start_key, pool)?;
-        ~current_page = self.root_page_id;  # Will be updated from leaf header
         ~page_data = pool.get_page(frame_id);
         ~leaf = BTreeLeafNode.from_page_data(page_data, self.page_size)?;
-        current_page = leaf.header.page_id;
+        ~current_page = leaf.header.page_id;
         ~current_guard = LatchGuard.new_read(&self.latch_table, current_page);
 
         # Find starting position within leaf
@@ -127,8 +129,9 @@ X BTree {
 
         # Scan current leaf from start position
         ~i = start_idx;
-        L {
-            L while i < leaf.entry_count() as u64 {
+        ~has_next = true;
+        W has_next {
+            W i < leaf.entry_count() as u64 {
                 ~key = leaf.get_key(i).to_vec();
                 I key_greater_than(&key, end_key) {
                     current_guard.release();
@@ -145,19 +148,19 @@ X BTree {
             I next == NULL_PAGE {
                 current_guard.release();
                 pool.unpin_page(frame_id, false);
-                B;
+                has_next = false;
+            } E {
+                # Acquire next leaf's read latch before releasing current
+                ~next_guard = LatchGuard.new_read(&self.latch_table, next);
+                current_guard.release();
+                pool.unpin_page(frame_id, false);
+
+                frame_id = pool.fetch_page(self.file_id, next)?;
+                page_data = pool.get_page(frame_id);
+                leaf = BTreeLeafNode.from_page_data(page_data, self.page_size)?;
+                current_guard = next_guard;
+                i = 0;
             }
-
-            # Acquire next leaf's read latch before releasing current
-            ~next_guard = LatchGuard.new_read(&self.latch_table, next);
-            current_guard.release();
-            pool.unpin_page(frame_id, false);
-
-            frame_id = pool.fetch_page(self.file_id, next)?;
-            page_data = pool.get_page(frame_id);
-            leaf = BTreeLeafNode.from_page_data(page_data, self.page_size)?;
-            current_guard = next_guard;
-            i = 0;
         }
 
         Ok(results)

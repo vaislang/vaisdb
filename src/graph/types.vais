@@ -264,7 +264,7 @@ X EdgeTypeTable {
     F get_or_create(~self, type_name: &Str) -> Result<u16, VaisError> {
         # Search existing
         ~i: u64 = 0;
-        L while i < self.types.len() {
+        W i < self.types.len() {
             I self.types[i] == *type_name {
                 R Ok(i as u16);
             }
@@ -293,7 +293,7 @@ X EdgeTypeTable {
     F serialize(self, buf: &~ByteBuffer) {
         buf.put_u16_le(self.types.len() as u16);
         ~i: u64 = 0;
-        L while i < self.types.len() {
+        W i < self.types.len() {
             buf.put_string(&self.types[i]);
             i += 1;
         }
@@ -304,7 +304,7 @@ X EdgeTypeTable {
         ~count = buf.get_u16_le()? as u64;
         ~types = Vec.with_capacity(count);
         ~i: u64 = 0;
-        L while i < count {
+        W i < count {
             types.push(buf.get_string()?);
             i += 1;
         }
@@ -450,7 +450,7 @@ X GraphNode {
 
         # Labels (variable)
         ~i: u64 = 0;
-        L while i < self.labels.len() {
+        W i < self.labels.len() {
             buf.put_u16_le(self.labels[i]);
             i += 1;
         }
@@ -475,7 +475,7 @@ X GraphNode {
         # Labels
         ~labels = Vec.with_capacity(label_count);
         ~i: u64 = 0;
-        L while i < label_count {
+        W i < label_count {
             labels.push(buf.get_u16_le()?);
             i += 1;
         }
@@ -520,7 +520,7 @@ X GraphNode {
     # Has label
     F has_label(self, label_id: u16) -> bool {
         ~i: u64 = 0;
-        L while i < self.labels.len() {
+        W i < self.labels.len() {
             I self.labels[i] == label_id {
                 R true;
             }
@@ -584,7 +584,7 @@ X PropertyValue {
             PROP_TYPE_BYTES => {
                 buf.put_u32_le(self.bytes_val.len() as u32);
                 ~i: u64 = 0;
-                L while i < self.bytes_val.len() {
+                W i < self.bytes_val.len() {
                     buf.put_u8(self.bytes_val[i]);
                     i += 1;
                 }
@@ -606,7 +606,7 @@ X PropertyValue {
                 ~len = buf.get_u32_le()? as u64;
                 ~data = Vec.with_capacity(len);
                 ~i: u64 = 0;
-                L while i < len {
+                W i < len {
                     data.push(buf.get_u8()?);
                     i += 1;
                 }
@@ -654,10 +654,10 @@ X PropertyMap {
     F set(~self, key: Str, value: PropertyValue) {
         # Update existing or add new
         ~i: u64 = 0;
-        L while i < self.entries.len() {
+        W i < self.entries.len() {
             I self.entries[i].key == key {
                 self.entries[i].value = value;
-                return;
+                R;
             }
             i += 1;
         }
@@ -666,7 +666,7 @@ X PropertyMap {
 
     F get(self, key: &Str) -> Option<&PropertyValue> {
         ~i: u64 = 0;
-        L while i < self.entries.len() {
+        W i < self.entries.len() {
             I self.entries[i].key == *key {
                 R Some(&self.entries[i].value);
             }
@@ -677,7 +677,7 @@ X PropertyMap {
 
     F remove(~self, key: &Str) -> bool {
         ~i: u64 = 0;
-        L while i < self.entries.len() {
+        W i < self.entries.len() {
             I self.entries[i].key == *key {
                 self.entries.remove(i);
                 R true;
@@ -699,7 +699,7 @@ X PropertyMap {
     F serialize(self, buf: &~ByteBuffer) {
         buf.put_u32_le(self.entries.len() as u32);
         ~i: u64 = 0;
-        L while i < self.entries.len() {
+        W i < self.entries.len() {
             self.entries[i].serialize(buf);
             i += 1;
         }
@@ -710,7 +710,7 @@ X PropertyMap {
         ~count = buf.get_u32_le()? as u64;
         ~entries = Vec.with_capacity(count);
         ~i: u64 = 0;
-        L while i < count {
+        W i < count {
             entries.push(PropertyEntry.deserialize(buf)?);
             i += 1;
         }

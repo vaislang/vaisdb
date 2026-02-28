@@ -95,7 +95,7 @@ X RagLock {
     ## Try to acquire read lock without blocking
     ## Returns None if lock is held by writer
     F try_read_lock(self) -> Option<RwLockReadGuard> {
-        L result = self.lock.try_read();
+        ~result := self.lock.try_read();
         M result {
             Some(guard) => {
                 self.stats.inc_read();
@@ -111,7 +111,7 @@ X RagLock {
     ## Try to acquire write lock without blocking
     ## Returns None if lock is held by any reader or writer
     F try_write_lock(self) -> Option<RwLockWriteGuard> {
-        L result = self.lock.try_write();
+        ~result := self.lock.try_write();
         M result {
             Some(guard) => {
                 self.stats.inc_write();
@@ -148,7 +148,7 @@ X DocumentLockManager {
     ## stripe_count should be power of 2 for efficient modulo
     F new(stripe_count: u64) -> DocumentLockManager {
         ~locks = Vec.new();
-        L i = 0;
+        ~i := 0;
         W i < stripe_count {
             locks.push(RagLock.new());
             i = i + 1;
@@ -158,7 +158,7 @@ X DocumentLockManager {
 
     ## Get lock for document ID
     F get_lock(self, doc_id: u64) -> &RagLock {
-        L stripe = (doc_id % self.stripe_count as u64) as u64;
+        ~stripe := (doc_id % self.stripe_count as u64) as u64;
         &self.locks[stripe]
     }
 
@@ -185,8 +185,8 @@ X DocumentLockManager {
     ## Get aggregate statistics across all stripes
     F get_aggregate_stats(self) -> RagConcurrencyStats {
         ~total = RagConcurrencyStats.new();
-        E lock in &self.locks {
-            L stats = lock.get_stats();
+        L lock: &self.locks {
+            ~stats := lock.get_stats();
             total.read_count.fetch_add(stats.get_read_count());
             total.write_count.fetch_add(stats.get_write_count());
             total.contention_count.fetch_add(stats.get_contention_count());
@@ -196,7 +196,7 @@ X DocumentLockManager {
 
     ## Reset statistics for all stripes
     F reset_all_stats(self) {
-        E lock in &self.locks {
+        L lock: &self.locks {
             lock.reset_stats();
         }
     }
@@ -214,7 +214,7 @@ X ChunkLockManager {
     ## Create new chunk lock manager
     F new(stripe_count: u64) -> ChunkLockManager {
         ~locks = Vec.new();
-        L i = 0;
+        ~i := 0;
         W i < stripe_count {
             locks.push(RagLock.new());
             i = i + 1;
@@ -224,7 +224,7 @@ X ChunkLockManager {
 
     ## Get lock for chunk ID
     F get_lock(self, chunk_id: u64) -> &RagLock {
-        L stripe = (chunk_id % self.stripe_count as u64) as u64;
+        ~stripe := (chunk_id % self.stripe_count as u64) as u64;
         &self.locks[stripe]
     }
 
@@ -251,8 +251,8 @@ X ChunkLockManager {
     ## Get aggregate statistics across all stripes
     F get_aggregate_stats(self) -> RagConcurrencyStats {
         ~total = RagConcurrencyStats.new();
-        E lock in &self.locks {
-            L stats = lock.get_stats();
+        L lock: &self.locks {
+            ~stats := lock.get_stats();
             total.read_count.fetch_add(stats.get_read_count());
             total.write_count.fetch_add(stats.get_write_count());
             total.contention_count.fetch_add(stats.get_contention_count());
@@ -262,7 +262,7 @@ X ChunkLockManager {
 
     ## Reset statistics for all stripes
     F reset_all_stats(self) {
-        E lock in &self.locks {
+        L lock: &self.locks {
             lock.reset_stats();
         }
     }
@@ -280,7 +280,7 @@ X MemoryLockManager {
     ## Create new memory lock manager
     F new(stripe_count: u64) -> MemoryLockManager {
         ~locks = Vec.new();
-        L i = 0;
+        ~i := 0;
         W i < stripe_count {
             locks.push(RagLock.new());
             i = i + 1;
@@ -290,7 +290,7 @@ X MemoryLockManager {
 
     ## Get lock for memory ID
     F get_lock(self, memory_id: u64) -> &RagLock {
-        L stripe = (memory_id % self.stripe_count as u64) as u64;
+        ~stripe := (memory_id % self.stripe_count as u64) as u64;
         &self.locks[stripe]
     }
 
@@ -317,8 +317,8 @@ X MemoryLockManager {
     ## Get aggregate statistics across all stripes
     F get_aggregate_stats(self) -> RagConcurrencyStats {
         ~total = RagConcurrencyStats.new();
-        E lock in &self.locks {
-            L stats = lock.get_stats();
+        L lock: &self.locks {
+            ~stats := lock.get_stats();
             total.read_count.fetch_add(stats.get_read_count());
             total.write_count.fetch_add(stats.get_write_count());
             total.contention_count.fetch_add(stats.get_contention_count());
@@ -328,7 +328,7 @@ X MemoryLockManager {
 
     ## Reset statistics for all stripes
     F reset_all_stats(self) {
-        E lock in &self.locks {
+        L lock: &self.locks {
             lock.reset_stats();
         }
     }

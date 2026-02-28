@@ -1,18 +1,7 @@
 # Page Management Module
 # Unified page format for all 4 engines
 
-pub mod types;
-pub mod flags;
-pub mod header;
-pub mod meta;
-pub mod bootstrap;
-pub mod file_header;
-pub mod database;
-pub mod freelist;
-pub mod allocator;
-pub mod overflow;
-pub mod heap;
-pub mod slot;
-pub mod mvcc;
-pub mod tuple;
-pub mod manager;
+# Submodules (auto-discovered by filesystem)
+# types, flags, header, meta, bootstrap, file_header
+# database, freelist, allocator, overflow, heap, slot
+# mvcc, tuple, manager

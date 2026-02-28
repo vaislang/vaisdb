@@ -11,7 +11,7 @@ U rag/memory/types.{MemoryEntry};
 
 ## Check if a chunk is visible to the given snapshot
 ## Uses the unified 3-case visibility:
-## Case 1: created_by == current_txn → visible if cmd_id <= snapshot.cmd_id AND (not expired OR expire_cmd_id > snapshot.cmd_id)
+## Case 1: created_by == current_txn → visible if cmd_id < snapshot.cmd_id AND (not expired OR expire_cmd_id > snapshot.cmd_id)
 ## Case 2: created_by != current_txn → visible if is_committed(created_by) AND (not expired OR is_committed(expired_by) is false)
 ## Case 3: expired_by == current_txn → visible if expire_cmd_id > snapshot.cmd_id
 F is_chunk_visible(
@@ -36,19 +36,19 @@ F is_chunk_visible(
         I txn_id_expire == snapshot.txn_id {
             R cmd_id_expire > snapshot.cmd_id;
         }
-        R txn_id_expire == 0;  # Not expired = visible
+        R txn_id_expire == INVALID_TXN_ID;  # Not expired = visible
     }
 
     # Case 2: Created by another transaction
     I !clog.is_committed(txn_id_create) {
         R false;  # Creator not committed
     }
-    I !snapshot.can_see(txn_id_create) {
+    I !snapshot.is_visible_txn(txn_id_create) {
         R false;  # Created after our snapshot
     }
 
     # Check expiration
-    I txn_id_expire == 0 {
+    I txn_id_expire == INVALID_TXN_ID {
         R true;  # Not expired
     }
 
@@ -64,7 +64,7 @@ F is_chunk_visible(
     I !clog.is_committed(txn_id_expire) {
         R true;  # Expirer not committed yet
     }
-    !snapshot.can_see(txn_id_expire)
+    !snapshot.is_visible_txn(txn_id_expire)
 }
 
 ## Check if a document is visible to the given snapshot
@@ -91,19 +91,19 @@ F is_document_visible(
         I txn_id_expire == snapshot.txn_id {
             R cmd_id_expire > snapshot.cmd_id;
         }
-        R txn_id_expire == 0;  # Not expired = visible
+        R txn_id_expire == INVALID_TXN_ID;  # Not expired = visible
     }
 
     # Case 2: Created by another transaction
     I !clog.is_committed(txn_id_create) {
         R false;  # Creator not committed
     }
-    I !snapshot.can_see(txn_id_create) {
+    I !snapshot.is_visible_txn(txn_id_create) {
         R false;  # Created after our snapshot
     }
 
     # Check expiration
-    I txn_id_expire == 0 {
+    I txn_id_expire == INVALID_TXN_ID {
         R true;  # Not expired
     }
 
@@ -119,7 +119,7 @@ F is_document_visible(
     I !clog.is_committed(txn_id_expire) {
         R true;  # Expirer not committed yet
     }
-    !snapshot.can_see(txn_id_expire)
+    !snapshot.is_visible_txn(txn_id_expire)
 }
 
 ## Check if a memory entry is visible to the given snapshot
@@ -146,19 +146,19 @@ F is_memory_visible(
         I txn_id_expire == snapshot.txn_id {
             R cmd_id_expire > snapshot.cmd_id;
         }
-        R txn_id_expire == 0;  # Not expired = visible
+        R txn_id_expire == INVALID_TXN_ID;  # Not expired = visible
     }
 
     # Case 2: Created by another transaction
     I !clog.is_committed(txn_id_create) {
         R false;  # Creator not committed
     }
-    I !snapshot.can_see(txn_id_create) {
+    I !snapshot.is_visible_txn(txn_id_create) {
         R false;  # Created after our snapshot
     }
 
     # Check expiration
-    I txn_id_expire == 0 {
+    I txn_id_expire == INVALID_TXN_ID {
         R true;  # Not expired
     }
 
@@ -174,7 +174,7 @@ F is_memory_visible(
     I !clog.is_committed(txn_id_expire) {
         R true;  # Expirer not committed yet
     }
-    !snapshot.can_see(txn_id_expire)
+    !snapshot.is_visible_txn(txn_id_expire)
 }
 
 ## Filter chunks to only those visible to snapshot
@@ -184,7 +184,7 @@ F filter_visible_chunks(
     clog: &Clog,
 ) -> Vec<ChunkMeta> {
     ~visible = Vec.new();
-    E chunk in chunks {
+    L chunk: chunks {
         I is_chunk_visible(
             chunk.txn_id_create,
             chunk.txn_id_expire,
@@ -206,7 +206,7 @@ F filter_visible_documents(
     clog: &Clog,
 ) -> Vec<DocumentMeta> {
     ~visible = Vec.new();
-    E doc in documents {
+    L doc: documents {
         I is_document_visible(
             doc.txn_id_create,
             doc.txn_id_expire,
@@ -228,7 +228,7 @@ F filter_visible_memories(
     clog: &Clog,
 ) -> Vec<MemoryEntry> {
     ~visible = Vec.new();
-    E mem in memories {
+    L mem: memories {
         I is_memory_visible(
             mem.txn_id_create,
             mem.txn_id_expire,
@@ -254,7 +254,7 @@ F is_chunk_gc_candidate(
     clog: &Clog,
 ) -> bool {
     # Must be expired
-    I chunk.txn_id_expire == 0 {
+    I chunk.txn_id_expire == INVALID_TXN_ID {
         R false;
     }
 
@@ -284,7 +284,7 @@ F is_document_gc_candidate(
     clog: &Clog,
 ) -> bool {
     # Must be expired
-    I doc.txn_id_expire == 0 {
+    I doc.txn_id_expire == INVALID_TXN_ID {
         R false;
     }
 
@@ -314,7 +314,7 @@ F is_memory_gc_candidate(
     clog: &Clog,
 ) -> bool {
     # Must be expired
-    I mem.txn_id_expire == 0 {
+    I mem.txn_id_expire == INVALID_TXN_ID {
         R false;
     }
 
@@ -344,7 +344,7 @@ F collect_chunk_gc_candidates(
     clog: &Clog,
 ) -> Vec<u64> {
     ~candidates = Vec.new();
-    E chunk in chunks {
+    L chunk: chunks {
         I is_chunk_gc_candidate(chunk, gc_horizon, clog) {
             candidates.push(chunk.chunk_id);
         }
@@ -359,7 +359,7 @@ F collect_document_gc_candidates(
     clog: &Clog,
 ) -> Vec<u64> {
     ~candidates = Vec.new();
-    E doc in documents {
+    L doc: documents {
         I is_document_gc_candidate(doc, gc_horizon, clog) {
             candidates.push(doc.doc_id);
         }
@@ -374,7 +374,7 @@ F collect_memory_gc_candidates(
     clog: &Clog,
 ) -> Vec<u64> {
     ~candidates = Vec.new();
-    E mem in memories {
+    L mem: memories {
         I is_memory_gc_candidate(mem, gc_horizon, clog) {
             candidates.push(mem.memory_id);
         }

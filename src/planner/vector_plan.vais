@@ -91,7 +91,7 @@ F classify_predicates(
 # ============================================================================
 
 # Determine optimal filter strategy based on selectivity
-E FilterStrategy {
+L FilterStrategy {
     PreFilter,           # Scan bitmap first, then HNSW on matching IDs
     PostFilter,          # HNSW first, then apply filter to candidates
     Hybrid { oversample_factor: f64 },  # Pre-filter + oversample ef_search

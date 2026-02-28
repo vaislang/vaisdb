@@ -171,11 +171,14 @@ F decompress_key_with_restarts(
 
     # Find the nearest restart point at or before index
     ~restart_idx: u64 = 0;
+    ~found_restart = false;
     L i: 0..restart_points.len() {
-        I restart_points[i] as u64 <= index {
-            restart_idx = restart_points[i] as u64;
-        } E {
-            B;
+        I !found_restart {
+            I restart_points[i] as u64 <= index {
+                restart_idx = restart_points[i] as u64;
+            } E {
+                found_restart = true;
+            }
         }
     }
 

@@ -10,12 +10,12 @@ U std/option.Option;
 U std/vec.Vec;
 U std/str.Str;
 
-U crate/error.VaisError;
-U crate/sql/types.{SqlValue, SqlType, agg_count_value, agg_sum, agg_avg_accumulate, agg_avg_finalize, agg_min, agg_max, group_key_hash, order_by_compare};
-U crate/sql/row.Row;
-U crate/sql/parser/ast.{OrderByItem, Expr};
-U crate/sql/executor/mod.{ExecutorRow, ExecStats};
-U crate/sql/executor/expr_eval.{eval_expr, EvalContext};
+U storage/error.VaisError;
+U sql/types.{SqlValue, SqlType, agg_count_value, agg_sum, agg_avg_accumulate, agg_avg_finalize, agg_min, agg_max, group_key_hash, order_by_compare};
+U sql/row.Row;
+U sql/parser/ast.{OrderByItem, Expr};
+U sql/executor/mod.{ExecutorRow, ExecStats};
+U sql/executor/expr_eval.{eval_expr, EvalContext};
 
 # ============================================================================
 # SortExecutor - Multi-key in-memory sort with ORDER BY
@@ -47,13 +47,14 @@ X SortExecutor {
 
         # Materialize all input rows
         ~rows = Vec.new();
-        L {
+        ~has_more = true;
+        W has_more {
             M self.input.next()? {
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     rows.push(exec_row.get_row().clone());
                 },
-                Option.None => { B; },
+                Option.None => { has_more = false; },
             }
         }
 
@@ -146,7 +147,7 @@ X AggGroup {
     F new(key_values: Vec<SqlValue>, agg_count: u64) -> AggGroup {
         ~accumulators = Vec.with_capacity(agg_count);
         L _: 0..agg_count {
-            accumulators.push(AggAccumulator.Count { count: 0 });  # Placeholder
+            accumulators.push(AggAccumulator.Count { count: 0 });  # Default; overwritten by caller
         }
 
         AggGroup {
@@ -218,9 +219,10 @@ X AggregateExecutor {
         }
 
         # Process all input rows
-        L {
+        ~has_more = true;
+        W has_more {
             M self.input.next()? {
-                Option.None => { B; },
+                Option.None => { has_more = false; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
@@ -259,22 +261,26 @@ X AggregateExecutor {
                         };
 
                         # Check DISTINCT
+                        ~should_skip = false;
                         I spec.is_distinct {
                             M &~distinct_sets[i] {
                                 Option.Some(set) => {
                                     # Hash the value for DISTINCT tracking
                                     ~val_hash = group_key_hash(&[arg_val.clone()]);
                                     I set.contains(&val_hash) {
-                                        C;  # Already seen this value
+                                        should_skip = true;  # Already seen this value
+                                    } E {
+                                        set.insert(val_hash);
                                     }
-                                    set.insert(val_hash);
                                 },
                                 Option.None => {},
                             }
                         }
 
                         # Update accumulator
-                        self.update_accumulator(group, i, &spec.func_name, &arg_val)?;
+                        I !should_skip {
+                            self.update_accumulator(group, i, &spec.func_name, &arg_val)?;
+                        }
                     }
                 },
             }
@@ -550,14 +556,13 @@ X DistinctExecutor {
                     ~hash = group_key_hash(&values);
 
                     # Check if already seen
-                    I self.seen.contains(&hash) {
-                        C;  # Duplicate, skip
+                    I !self.seen.contains(&hash) {
+                        # New row, record and return
+                        self.seen.insert(hash);
+                        self.stats.add_produced();
+                        R Result.Ok(Option.Some(exec_row));
                     }
-
-                    # New row, record and return
-                    self.seen.insert(hash);
-                    self.stats.add_produced();
-                    R Result.Ok(Option.Some(exec_row));
+                    # Duplicate: skip, continue loop
                 },
             }
         }

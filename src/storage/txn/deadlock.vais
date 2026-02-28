@@ -31,9 +31,8 @@ X WaitForGraph {
                 # Add holder to waiting list if not already present
                 ~found = false;
                 L txn: waiting_for.iter() {
-                    I *txn == holder {
+                    I !found && *txn == holder {
                         found = true;
-                        B;
                     }
                 }
                 I !found {
@@ -189,10 +188,11 @@ X WaitForGraph {
         ~waiters = Vec.new();
 
         L (waiter, waiting_for): self.edges.iter() {
+            ~holder_found = false;
             L holder: waiting_for.iter() {
-                I *holder == txn_id {
+                I !holder_found && *holder == txn_id {
                     waiters.push(*waiter);
-                    B;
+                    holder_found = true;
                 }
             }
         }

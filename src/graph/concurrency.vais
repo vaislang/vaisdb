@@ -147,7 +147,7 @@ X LockSlot {
 
         # Search for existing lock
         ~i: u64 = 0;
-        L while i < self.locks.len() {
+        W i < self.locks.len() {
             I self.locks[i].node_id == node_id {
                 self.slot_lock.write_unlock();
                 R &~self.locks[i];
@@ -166,7 +166,7 @@ X LockSlot {
     F find_lock(self, node_id: u64) -> Option<&NodeLock> {
         self.slot_lock.read_lock();
         ~i: u64 = 0;
-        L while i < self.locks.len() {
+        W i < self.locks.len() {
             I self.locks[i].node_id == node_id {
                 ~result = Some(&self.locks[i]);
                 self.slot_lock.read_unlock();
@@ -193,7 +193,7 @@ X GraphLockManager {
     F new(capacity: u32) -> GraphLockManager {
         ~slots = Vec.with_capacity(capacity as u64);
         ~i: u32 = 0;
-        L while i < capacity {
+        W i < capacity {
             slots.push(LockSlot.new());
             i += 1;
         }
@@ -536,16 +536,16 @@ F lock_nodes_ordered(
     # Sort node IDs to ensure consistent lock ordering
     ~sorted_ids = Vec.with_capacity(node_ids.len());
     ~i: u64 = 0;
-    L while i < node_ids.len() {
+    W i < node_ids.len() {
         sorted_ids.push(node_ids[i]);
         i += 1;
     }
 
     # Simple bubble sort for small arrays
     ~j: u64 = 0;
-    L while j < sorted_ids.len() {
+    W j < sorted_ids.len() {
         ~k: u64 = 0;
-        L while k < sorted_ids.len() - 1 - j {
+        W k < sorted_ids.len() - 1 - j {
             I sorted_ids[k] > sorted_ids[k + 1] {
                 ~temp = sorted_ids[k];
                 sorted_ids[k] = sorted_ids[k + 1];
@@ -559,7 +559,7 @@ F lock_nodes_ordered(
     # Acquire locks in sorted order
     ~guards = Vec.with_capacity(sorted_ids.len());
     ~idx: u64 = 0;
-    L while idx < sorted_ids.len() {
+    W idx < sorted_ids.len() {
         ~guard = I exclusive {
             manager.lock_node_exclusive(sorted_ids[idx])?
         } E {

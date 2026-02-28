@@ -6,63 +6,57 @@
 # Module exports
 # ============================================================================
 
+# Submodules (auto-discovered by filesystem)
+# types, tokenizer, visibility, wal, concurrency
+# index, search, ddl, maintenance, integration
+
 # Core types
-pub mod types;
-pub use types.{
+U types.{
     FullTextConfig, FullTextMeta, PostingEntry, PostingPageHeader,
     DictEntry, TokenInfo, DocumentStats, FULLTEXT_FORMAT_VERSION,
     err_fulltext_engine_closed, err_fulltext_index_not_found,
     err_fulltext_term_not_found, err_fulltext_doc_not_found,
 };
-pub use storage/hash.{fnv1a_hash};
+U storage/hash.{fnv1a_hash};
 
 # Tokenizer
-pub mod tokenizer;
-pub use tokenizer.{Tokenizer, TermFreqInfo};
+U tokenizer.{Tokenizer, TermFreqInfo};
 
 # Visibility functions
-pub mod visibility;
-pub use visibility.{
+U visibility.{
     is_posting_visible, filter_visible_postings,
     count_visible_postings, filter_visible_postings_for_doc,
 };
 
 # WAL manager
-pub mod wal;
-pub use wal.{FullTextWalManager};
+U wal.{FullTextWalManager};
 
 # Concurrency control
-pub mod concurrency;
-pub use concurrency.{FullTextLock, FullTextReadGuard, FullTextWriteGuard, ConcurrencyStats};
+U concurrency.{FullTextLock, FullTextReadGuard, FullTextWriteGuard, ConcurrencyStats};
 
 # Inverted index (dictionary + posting lists + compression + deletion bitmap)
-pub mod index;
-pub use index/dictionary.{DictionaryIndex};
-pub use index/posting.{PostingStore, PostingSlot};
-pub use index/compression.{vbyte_encode, vbyte_decode, delta_encode_doc_ids, delta_decode_doc_ids};
-pub use index/deletion_bitmap.{DeletionBitmap};
+U index/dictionary.{DictionaryIndex};
+U index/posting.{PostingStore, PostingSlot};
+U index/compression.{vbyte_encode, vbyte_decode, delta_encode_doc_ids, delta_decode_doc_ids};
+U index/deletion_bitmap.{DeletionBitmap};
 
 # Search (BM25, phrase, boolean, SQL M function)
-pub mod search;
-pub use search/bm25.{BM25Scorer};
-pub use search/doc_freq.{DocFreqTracker};
-pub use search/phrase.{PhraseSearcher, PhraseResult};
-pub use search/boolean.{BooleanQueryParser, BooleanQueryExecutor, Query, BooleanQuery, TermQuery, PhraseQuery};
-pub use search/match_fn.{FullTextMatchExecutor, FullTextMatchResult};
+U search/bm25.{BM25Scorer};
+U search/doc_freq.{DocFreqTracker};
+U search/phrase.{PhraseSearcher, PhraseResult};
+U search/boolean.{BooleanQueryParser, BooleanQueryExecutor, Query, BooleanQuery, TermQuery, PhraseQuery};
+U search/match_fn.{FullTextMatchExecutor, FullTextMatchResult};
 
 # DDL operations
-pub mod ddl;
-pub use ddl.{FullTextDDL, BuildResult, IndexEntry};
+U ddl.{FullTextDDL, BuildResult, IndexEntry};
 
 # Maintenance (compaction, GC)
-pub mod maintenance;
-pub use maintenance/compaction.{PostingListCompactor, CompactionResult, CompactionStats};
+U maintenance/compaction.{PostingListCompactor, CompactionResult, CompactionStats};
 
 # Integration with other engines
-pub mod integration;
-pub use integration/fusion.{ScoreFusionMethod, ScoredDoc, fuse_results, normalize_scores};
-pub use integration/vector_hybrid.{HybridSearchPipeline, HybridSearchConfig};
-pub use integration/sql.{FullTextRowSource};
+U integration/fusion.{ScoreFusionMethod, ScoredDoc, fuse_results, normalize_scores};
+U integration/vector_hybrid.{HybridSearchPipeline, HybridSearchConfig};
+U integration/sql.{FullTextRowSource};
 
 # Dependencies
 U std/option.{Option, Some, None};
@@ -107,8 +101,8 @@ X FullTextEngine {
     # Constructor
     # ========================================================================
 
-    # Create new FullTextEngine instance (does not load from disk)
-    # Call open() to load metadata and dictionary
+    ## Create new FullTextEngine instance (does not load from disk)
+    ## Call open() to load metadata and dictionary
     F new(
         config: FullTextConfig,
         pool: &BufferPool,
@@ -149,7 +143,7 @@ X FullTextEngine {
     # Lifecycle — Open/Close
     # ========================================================================
 
-    # Open engine: load meta page, dictionary index
+    ## Open engine: load meta page, dictionary index
     F open(~self) -> Result<(), VaisError> {
         I self.is_open {
             R Ok(());
@@ -175,7 +169,7 @@ X FullTextEngine {
         Ok(())
     }
 
-    # Close engine: flush dirty pages, release resources
+    ## Close engine: flush dirty pages, release resources
     F close(~self) -> Result<(), VaisError> {
         I !self.is_open {
             R Ok(());
@@ -196,7 +190,7 @@ X FullTextEngine {
     # Document Indexing — Index/Delete documents
     # ========================================================================
 
-    # Index a document: tokenize → insert postings → update dictionary → WAL
+    ## Index a document: tokenize, insert postings, update dictionary, WAL-log
     F index_document(
         ~self,
         txn_id: u64,
@@ -217,7 +211,7 @@ X FullTextEngine {
 
         # Process each unique term
         ~i: u64 = 0;
-        L W i < term_freqs.len() {
+        W i < term_freqs.len() {
             ~tf_info = &term_freqs[i];
             ~term_hash = fnv1a_hash(&tf_info.term);
 
@@ -290,7 +284,7 @@ X FullTextEngine {
         })
     }
 
-    # Delete a document from the index: expire postings → update stats
+    ## Delete a document from the index: expire postings, update stats
     F delete_document(
         ~self,
         txn_id: u64,
@@ -309,7 +303,7 @@ X FullTextEngine {
         ~total_expired_tokens: u64 = 0;
 
         ~i: u64 = 0;
-        L W i < dict_entries.len() {
+        W i < dict_entries.len() {
             ~de = &dict_entries[i];
 
             # Read all entries from this posting list
@@ -317,7 +311,7 @@ X FullTextEngine {
 
             # Find and expire entries for this doc_id
             ~j: u64 = 0;
-            L W j < postings.len() {
+            W j < postings.len() {
                 I postings[j].doc_id == doc_id && postings[j].is_active() {
                     # WAL-log posting delete
                     self.wal_mgr.log_posting_delete(
@@ -362,7 +356,7 @@ X FullTextEngine {
     # Search Operations
     # ========================================================================
 
-    # Search using BM25 scoring: tokenize query → lookup postings → score → rank
+    ## Search using BM25 scoring: tokenize query, lookup postings, score, rank
     F search(
         ~self,
         query_text: &Str,
@@ -393,10 +387,11 @@ X FullTextEngine {
         # Collect results
         executor.open();
         ~results = Vec.new();
-        L {
+        ~has_more = true;
+        W has_more {
             M executor.next() {
                 Some(~result) => results.push(result),
-                None => B,
+                None => { has_more = false; },
             }
         }
         executor.close();
@@ -404,7 +399,7 @@ X FullTextEngine {
         Ok(results)
     }
 
-    # Phrase search: find exact phrase matches
+    ## Phrase search: find exact phrase matches
     F phrase_search(
         ~self,
         query_text: &Str,
@@ -422,7 +417,7 @@ X FullTextEngine {
         ~tokens = self.tokenizer.tokenize(query_text);
         ~terms = Vec.new();
         ~i: u64 = 0;
-        L W i < tokens.len() {
+        W i < tokens.len() {
             terms.push(tokens[i].term.clone());
             i += 1;
         }
@@ -434,7 +429,7 @@ X FullTextEngine {
         # Collect posting entries per term
         ~posting_entries_per_term: Vec<Vec<PostingEntry>> = Vec.new();
         i = 0;
-        L W i < terms.len() {
+        W i < terms.len() {
             ~dict_entry = self.dict_index.lookup_term(&terms[i], self.pool)?;
             M dict_entry {
                 Some(~de) => {
@@ -466,7 +461,7 @@ X FullTextEngine {
         Ok(results)
     }
 
-    # Boolean query search
+    ## Boolean query search (AND/OR/NOT with optional quoted phrases)
     F boolean_search(
         ~self,
         query_str: &Str,
@@ -485,10 +480,10 @@ X FullTextEngine {
 
         # For each term in the query, run a BM25 search and collect results
         ~term_results: Vec<(Str, Vec<(u64, f64)>)> = Vec.new();
-        ~query_terms = Self.extract_terms_from_query(&query);
+        ~query_terms = FullTextEngine.extract_terms_from_query(&query);
 
         ~i: u64 = 0;
-        L W i < query_terms.len() {
+        W i < query_terms.len() {
             ~term = &query_terms[i];
             ~dict_entry = self.dict_index.lookup_term(term, self.pool)?;
             M dict_entry {
@@ -497,13 +492,20 @@ X FullTextEngine {
                     ~visible = filter_visible_postings(&entries, snapshot, clog);
 
                     # Score each visible entry
+                    # Use avg_doc_length as doc_length approximation since
+                    # PostingEntry does not store per-document token counts
+                    ~approx_doc_length = I self.meta.avg_doc_length > 0.0 {
+                        self.meta.avg_doc_length as u32
+                    } E {
+                        1
+                    };
                     ~scored: Vec<(u64, f64)> = Vec.new();
                     ~j: u64 = 0;
-                    L W j < visible.len() {
+                    W j < visible.len() {
                         ~score = self.bm25_scorer.score(
                             visible[j].term_freq,
                             de.doc_freq,
-                            visible[j].term_freq,  # approximate doc_length
+                            approx_doc_length,
                             self.meta.avg_doc_length,
                             self.meta.total_docs,
                         );
@@ -527,10 +529,10 @@ X FullTextEngine {
         ~sorted = results;
         # Simple selection sort
         ~k: u64 = 0;
-        L W k < sorted.len() {
+        W k < sorted.len() {
             ~max_idx = k;
             ~m: u64 = k + 1;
-            L W m < sorted.len() {
+            W m < sorted.len() {
                 I sorted[m].1 > sorted[max_idx].1 {
                     max_idx = m;
                 }
@@ -551,7 +553,7 @@ X FullTextEngine {
         # Convert to ScoredDoc
         ~scored_docs = Vec.new();
         i = 0;
-        L W i < sorted.len() {
+        W i < sorted.len() {
             scored_docs.push(ScoredDoc { doc_id: sorted[i].0, score: sorted[i].1 });
             i += 1;
         }
@@ -559,7 +561,7 @@ X FullTextEngine {
         Ok(scored_docs)
     }
 
-    # Hybrid search: BM25 + vector similarity fusion
+    ## Hybrid search: BM25 + vector similarity fusion
     F hybrid_search(
         ~self,
         query_text: &Str,
@@ -578,7 +580,7 @@ X FullTextEngine {
         # Convert to ScoredDoc
         ~bm25_results = Vec.new();
         ~i: u64 = 0;
-        L W i < bm25_match_results.len() {
+        W i < bm25_match_results.len() {
             bm25_results.push(ScoredDoc {
                 doc_id: bm25_match_results[i].doc_id,
                 score: bm25_match_results[i].score,
@@ -597,7 +599,7 @@ X FullTextEngine {
     # Maintenance Operations
     # ========================================================================
 
-    # Run posting list compaction (GC)
+    ## Run posting list compaction (GC)
     F compact(
         ~self,
         low_water_mark: u64,
@@ -621,7 +623,7 @@ X FullTextEngine {
         # Build (term_hash, head_page) pairs
         ~term_pages: Vec<(u64, u32)> = Vec.new();
         ~i: u64 = 0;
-        L W i < dict_entries.len() {
+        W i < dict_entries.len() {
             term_pages.push((dict_entries[i].term_hash, dict_entries[i].posting_head_page));
             i += 1;
         }
@@ -635,27 +637,27 @@ X FullTextEngine {
     # Statistics / Accessors
     # ========================================================================
 
-    # Get total document count
+    ## Get total document count
     F total_docs(self) -> u64 {
         self.meta.total_docs
     }
 
-    # Get total term count
+    ## Get total term count
     F total_terms(self) -> u64 {
         self.meta.total_terms
     }
 
-    # Get average document length
+    ## Get average document length
     F avg_doc_length(self) -> f64 {
         self.meta.avg_doc_length
     }
 
-    # Get concurrency stats
+    ## Get concurrency stats
     F concurrency_stats(self) -> ConcurrencyStats {
         self.lock.get_stats()
     }
 
-    # Check if engine is open
+    ## Check if engine is open
     F is_engine_open(self) -> bool {
         self.is_open
     }
@@ -673,31 +675,31 @@ X FullTextEngine {
             },
             Query.Phrase(~pq) => {
                 ~i: u64 = 0;
-                L W i < pq.terms.len() {
+                W i < pq.terms.len() {
                     terms.push(pq.terms[i].clone());
                     i += 1;
                 }
             },
             Query.Boolean(~bq) => {
                 ~i: u64 = 0;
-                L W i < bq.clauses.len() {
+                W i < bq.clauses.len() {
                     ~clause_query = M &bq.clauses[i] {
                         BooleanClause.Must(~q) => q,
                         BooleanClause.Should(~q) => q,
                         BooleanClause.MustNot(~q) => q,
                     };
-                    ~sub_terms = Self.extract_terms_from_query(clause_query);
+                    ~sub_terms = FullTextEngine.extract_terms_from_query(clause_query);
                     ~j: u64 = 0;
-                    L W j < sub_terms.len() {
+                    W j < sub_terms.len() {
                         # Deduplicate
                         ~found = false;
                         ~k: u64 = 0;
-                        L W k < terms.len() {
+                        W k < terms.len() && !found {
                             I terms[k] == sub_terms[j] {
                                 found = true;
-                                B;
+                            } E {
+                                k += 1;
                             }
-                            k += 1;
                         }
                         I !found {
                             terms.push(sub_terms[j].clone());

@@ -195,17 +195,12 @@ S EmbeddedDatabase {
 
 X EmbeddedDatabase {
     # Open or create an embedded database
-    # TODO: implement actual file I/O using std/file
+    # FUTURE(std/file): Implement actual file I/O, directory creation, file locking, storage init
     F open(config: EmbeddedConfig) -> Result<EmbeddedDatabase, VaisError> {
         # Validate configuration
         config.validate()?;
 
-        # TODO: Check if data_dir exists, create if needed (requires std/file)
-        # TODO: Acquire file lock to prevent concurrent access (requires std/file.flock)
-        # TODO: Open/create meta.vdb, validate magic number and version
-        # TODO: Initialize storage subsystems (PageManager, WAL, BufferPool)
-
-        # Placeholder: just set state and validate
+        # Placeholder: set state without actual file operations
         ~db = EmbeddedDatabase {
             data_dir: config.data_dir.clone(),
             is_open: true,
@@ -221,26 +216,17 @@ X EmbeddedDatabase {
             R Err(err_embedded_not_open());
         }
 
-        # TODO: Flush buffer pool
-        # TODO: Checkpoint WAL
-        # TODO: Release file lock
-        # TODO: Close all file handles
-
+        # FUTURE(std/file): Flush buffer pool, checkpoint WAL, release file lock, close handles
         self.is_open = false;
         R Ok(());
     }
 
     # Execute a query and return result set
-    # Placeholder: actual execution requires integration with sql/executor
+    # FUTURE(integration): Parse SQL -> plan query -> execute plan -> convert to EmbeddedResult
     F query(~self, sql: &Str) -> Result<EmbeddedResult, VaisError> {
         I !self.is_open {
             R Err(err_embedded_not_open());
         }
-
-        # TODO: Parse SQL (src/sql/parser/parser.vais)
-        # TODO: Plan query (src/planner/mod.vais)
-        # TODO: Execute plan (src/planner/pipeline.vais)
-        # TODO: Convert result to EmbeddedResult
 
         # Placeholder: return empty result
         ~columns = Vec.new();
@@ -249,16 +235,11 @@ X EmbeddedDatabase {
     }
 
     # Execute a statement (INSERT/UPDATE/DELETE) and return affected rows
-    # Placeholder: actual execution requires integration with sql/executor
+    # FUTURE(integration): Parse SQL -> plan query -> execute plan -> return row count
     F execute(~self, sql: &Str) -> Result<u64, VaisError> {
         I !self.is_open {
             R Err(err_embedded_not_open());
         }
-
-        # TODO: Parse SQL (src/sql/parser/parser.vais)
-        # TODO: Plan query (src/planner/mod.vais)
-        # TODO: Execute plan (src/planner/pipeline.vais)
-        # TODO: Return affected row count
 
         # Placeholder: return 0
         R Ok(0);
@@ -283,22 +264,15 @@ X EmbeddedDatabase {
 # File locking functions
 
 # Acquire exclusive file lock on data directory
-# TODO: implement using std/file.flock
+# FUTURE(std/file.flock): Open .vaisdb.lock, call flock(LOCK_EX | LOCK_NB)
 F acquire_file_lock(data_dir: &Str) -> Result<(), VaisError> {
-    # TODO: Open .vaisdb.lock file in data_dir
-    # TODO: Call flock(fd, LOCK_EX | LOCK_NB)
-    # TODO: Return error if already locked
-
     # Placeholder: always succeed
     R Ok(());
 }
 
 # Release file lock on data directory
-# TODO: implement using std/file.flock
+# FUTURE(std/file.flock): Call flock(LOCK_UN), close .vaisdb.lock
 F release_file_lock(data_dir: &Str) -> Result<(), VaisError> {
-    # TODO: Call flock(fd, LOCK_UN)
-    # TODO: Close .vaisdb.lock file
-
     # Placeholder: always succeed
     R Ok(());
 }

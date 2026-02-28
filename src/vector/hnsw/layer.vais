@@ -199,7 +199,7 @@ X LayerManager {
 
         # Initialize pinned layers for each layer 1..=max_layer
         ~layer = 1;
-        L while layer <= meta.max_layer {
+        W layer <= meta.max_layer {
             self.pinned_layers.push(PinnedLayer.new(layer));
             layer += 1;
         }
@@ -219,10 +219,8 @@ X LayerManager {
         # 3. If node.max_layer >= 1, add to appropriate pinned layers
         # 4. Track total memory usage
 
-        # Placeholder for node loading logic
-        # This would be implemented once we have the node page format defined
-        # For now, we return success assuming upper layers will be populated
-        # through add_pinned_node() calls during index construction
+        # FUTURE(integration): Load nodes from HNSW node pages and populate pinned layers
+        # Currently relies on add_pinned_node() calls during index construction
 
         Ok(())
     }
@@ -273,7 +271,7 @@ X LayerManager {
         I layer > self.max_pinned_layer {
             # Need to add new layers
             ~l = self.max_pinned_layer + 1;
-            L while l <= layer {
+            W l <= layer {
                 self.pinned_layers.push(PinnedLayer.new(l));
                 l += 1;
             }
@@ -282,7 +280,7 @@ X LayerManager {
 
         # Add node to all layers from 1 to node.max_layer
         ~l = 1;
-        L while l <= node.max_layer {
+        W l <= node.max_layer {
             I l <= self.max_pinned_layer {
                 ~layer_idx = (l - 1) as u64;
 
@@ -306,12 +304,12 @@ X LayerManager {
     # Removes from all layers where it exists
     F remove_pinned_node(~self, node_id: u64, layer: u8) {
         I layer == 0 || layer > self.max_pinned_layer {
-            return;
+            R;
         }
 
         # Remove from all layers from 1 to layer
         ~l = 1;
-        L while l <= layer {
+        W l <= layer {
             I l <= self.max_pinned_layer {
                 ~layer_idx = (l - 1) as u64;
 
@@ -387,7 +385,7 @@ X LayerManager {
 
         # Pinned layer stats (layers 1+)
         ~layer = 1;
-        L while layer <= self.max_pinned_layer {
+        W layer <= self.max_pinned_layer {
             ~layer_idx = (layer - 1) as u64;
             ~pinned_layer = &self.pinned_layers[layer_idx];
 

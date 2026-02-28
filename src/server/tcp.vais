@@ -46,7 +46,7 @@ S TcpServer {
     state: ServerState,
     total_queries: AtomicU64,
     total_connections: AtomicU64,
-    # TODO: TcpListener handle when std/net is available
+    # FUTURE(std/net): TcpListener handle
 }
 
 X TcpServer {
@@ -73,12 +73,9 @@ X TcpServer {
     }
 
     # Start the server (bind and listen)
-    # TODO: implement TCP listen when std/net is available
+    # FUTURE(std/net): Bind address, accept loop, startup logging
     F start(~self) -> Result<(), VaisError> {
-        # TODO: Bind to self.config.bind_address:self.config.port
-        # TODO: Start accept loop in background thread
-        # TODO: Log startup message
-
+        # Placeholder: transition state without actual TCP bind
         self.state = ServerState.Running;
         Ok(())
     }
@@ -95,10 +92,7 @@ X TcpServer {
             i += 1;
         }
 
-        # TODO: Close TcpListener
-        # TODO: Wait for in-flight queries to complete (with timeout)
-        # TODO: Flush WAL and checkpoint
-
+        # FUTURE(std/net): Close TcpListener, drain in-flight queries, flush WAL + checkpoint
         self.state = ServerState.Stopped;
         Ok(())
     }

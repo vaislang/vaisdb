@@ -69,7 +69,7 @@ X PropertyIndex {
         pool: &~BufferPool,
         allocator: &PageAllocator,
     ) -> Result<(), VaisError> {
-        ~key = Self.encode_property_key(prop_key_id, value, entity_id)?;
+        ~key = PropertyIndex.encode_property_key(prop_key_id, value, entity_id)?;
 
         # TID is not meaningful for property index, use entity_id as dummy
         ~tid = (entity_id & 0xFFFFFFFF) as u32;
@@ -95,7 +95,7 @@ X PropertyIndex {
         gcm: &~GroupCommitManager,
         pool: &~BufferPool,
     ) -> Result<(), VaisError> {
-        ~key = Self.encode_property_key(prop_key_id, value, entity_id)?;
+        ~key = PropertyIndex.encode_property_key(prop_key_id, value, entity_id)?;
 
         # Delete from B+Tree
         btree_delete(&self.tree, &key, txn_id, gcm, pool)?;
@@ -114,20 +114,20 @@ X PropertyIndex {
         ~results = Vec.new();
 
         # Create start key: [prop_key_id][encoded_value]
-        ~value_encoded = Self.encode_property_value(value)?;
-        ~start_key = Self.encode_property_prefix(prop_key_id, &value_encoded);
+        ~value_encoded = PropertyIndex.encode_property_value(value)?;
+        ~start_key = PropertyIndex.encode_property_prefix(prop_key_id, &value_encoded);
 
         # Create end key: [prop_key_id][encoded_value][0xFF...] (max entity_id)
-        ~end_key = Self.encode_property_key_internal(prop_key_id, &value_encoded, 0xFFFFFFFFFFFFFFFF);
+        ~end_key = PropertyIndex.encode_property_key_internal(prop_key_id, &value_encoded, 0xFFFFFFFFFFFFFFFF);
 
         # Range scan
         ~entries = self.tree.range_scan(&start_key, &end_key, pool)?;
 
         # Extract entity_ids from keys
         ~i: u64 = 0;
-        L while i < entries.len() {
+        W i < entries.len() {
             ~key = &entries[i].0;
-            M Self.decode_property_key(key) {
+            M PropertyIndex.decode_property_key(key) {
                 Some((~decoded_prop_key_id, ~_value, ~entity_id)) => {
                     I decoded_prop_key_id == prop_key_id {
                         results.push(entity_id);
@@ -155,23 +155,23 @@ X PropertyIndex {
         ~results = Vec.new();
 
         # Encode min and max values
-        ~min_encoded = Self.encode_property_value(min_value)?;
-        ~max_encoded = Self.encode_property_value(max_value)?;
+        ~min_encoded = PropertyIndex.encode_property_value(min_value)?;
+        ~max_encoded = PropertyIndex.encode_property_value(max_value)?;
 
         # Create start key: [prop_key_id][min_value]
-        ~start_key = Self.encode_property_prefix(prop_key_id, &min_encoded);
+        ~start_key = PropertyIndex.encode_property_prefix(prop_key_id, &min_encoded);
 
         # Create end key: [prop_key_id][max_value][0xFF...]
-        ~end_key = Self.encode_property_key_internal(prop_key_id, &max_encoded, 0xFFFFFFFFFFFFFFFF);
+        ~end_key = PropertyIndex.encode_property_key_internal(prop_key_id, &max_encoded, 0xFFFFFFFFFFFFFFFF);
 
         # Range scan
         ~entries = self.tree.range_scan(&start_key, &end_key, pool)?;
 
         # Extract entity_ids
         ~i: u64 = 0;
-        L while i < entries.len() {
+        W i < entries.len() {
             ~key = &entries[i].0;
-            M Self.decode_property_key(key) {
+            M PropertyIndex.decode_property_key(key) {
                 Some((~decoded_prop_key_id, ~_value, ~entity_id)) => {
                     I decoded_prop_key_id == prop_key_id {
                         results.push(entity_id);
@@ -193,8 +193,8 @@ X PropertyIndex {
         value: &PropertyValue,
         entity_id: u64,
     ) -> Result<Vec<u8>, VaisError> {
-        ~value_bytes = Self.encode_property_value(value)?;
-        Ok(Self.encode_property_key_internal(prop_key_id, &value_bytes, entity_id))
+        ~value_bytes = PropertyIndex.encode_property_value(value)?;
+        Ok(PropertyIndex.encode_property_key_internal(prop_key_id, &value_bytes, entity_id))
     }
 
     # Internal: encode with pre-encoded value bytes
@@ -212,7 +212,7 @@ X PropertyIndex {
 
         # Append encoded value
         ~i: u64 = 0;
-        L while i < value_bytes.len() {
+        W i < value_bytes.len() {
             key.push(value_bytes[i]);
             i += 1;
         }
@@ -220,7 +220,7 @@ X PropertyIndex {
         # Encode entity_id (u64 BE)
         ~entity_bytes = encode_u64_key(entity_id);
         i = 0;
-        L while i < entity_bytes.len() {
+        W i < entity_bytes.len() {
             key.push(entity_bytes[i]);
             i += 1;
         }
@@ -239,7 +239,7 @@ X PropertyIndex {
 
         # Append encoded value
         ~i: u64 = 0;
-        L while i < value_bytes.len() {
+        W i < value_bytes.len() {
             key.push(value_bytes[i]);
             i += 1;
         }
@@ -261,7 +261,7 @@ X PropertyIndex {
                 # Encode i64 with sign-flip for correct sort order
                 ~int_bytes = encode_i64_key(value.int_val);
                 ~i: u64 = 0;
-                L while i < int_bytes.len() {
+                W i < int_bytes.len() {
                     encoded.push(int_bytes[i]);
                     i += 1;
                 }
@@ -295,7 +295,7 @@ X PropertyIndex {
                 encoded.push((len & 0xFF) as u8);
 
                 ~i: u64 = 0;
-                L while i < str_bytes.len() {
+                W i < str_bytes.len() {
                     encoded.push(str_bytes[i]);
                     i += 1;
                 }
@@ -311,7 +311,7 @@ X PropertyIndex {
                 encoded.push((len & 0xFF) as u8);
 
                 ~i: u64 = 0;
-                L while i < value.bytes_val.len() {
+                W i < value.bytes_val.len() {
                     encoded.push(value.bytes_val[i]);
                     i += 1;
                 }

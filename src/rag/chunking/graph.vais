@@ -160,7 +160,7 @@ X ChunkGraphManager {
         }
 
         # Create edges between all pairs in same section
-        E section_nodes in sections.values() {
+        L section_nodes: sections.values() {
             ~a: u32 = 0;
             W a < section_nodes.len() as u32 {
                 ~b = a + 1;

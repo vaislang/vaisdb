@@ -60,7 +60,7 @@ X LabelIndex {
         pool: &~BufferPool,
         allocator: &PageAllocator,
     ) -> Result<(), VaisError> {
-        ~key = Self.encode_label_key(label_id, node_id);
+        ~key = LabelIndex.encode_label_key(label_id, node_id);
 
         # TID is not meaningful for label index, use page_id as dummy value
         ~tid = (node_id & 0xFFFFFFFF) as u32;
@@ -85,7 +85,7 @@ X LabelIndex {
         gcm: &~GroupCommitManager,
         pool: &~BufferPool,
     ) -> Result<(), VaisError> {
-        ~key = Self.encode_label_key(label_id, node_id);
+        ~key = LabelIndex.encode_label_key(label_id, node_id);
 
         # Delete from B+Tree
         btree_delete(&self.tree, &key, txn_id, gcm, pool)?;
@@ -103,20 +103,20 @@ X LabelIndex {
         ~results = Vec.new();
 
         # Create prefix key for the label (start of range)
-        ~prefix_key = Self.encode_label_prefix(label_id);
+        ~prefix_key = LabelIndex.encode_label_prefix(label_id);
 
         # Create end key (next label_id)
         ~next_label = label_id + 1;
-        ~end_key = Self.encode_label_prefix(next_label);
+        ~end_key = LabelIndex.encode_label_prefix(next_label);
 
         # Range scan: [prefix_key, end_key)
         ~entries = self.tree.range_scan(&prefix_key, &end_key, pool)?;
 
         # Extract node_ids from keys
         ~i: u64 = 0;
-        L while i < entries.len() {
+        W i < entries.len() {
             ~key = &entries[i].0;
-            M Self.decode_label_key(key) {
+            M LabelIndex.decode_label_key(key) {
                 Some((~decoded_label_id, ~node_id)) => {
                     I decoded_label_id == label_id {
                         results.push(node_id);
@@ -139,7 +139,7 @@ X LabelIndex {
         label_id: u16,
         pool: &~BufferPool,
     ) -> Result<bool, VaisError> {
-        ~key = Self.encode_label_key(label_id, node_id);
+        ~key = LabelIndex.encode_label_key(label_id, node_id);
 
         M self.tree.search(&key, pool)? {
             Some(_) => Ok(true),
@@ -158,7 +158,7 @@ X LabelIndex {
         # Encode node_id as big-endian u64
         ~node_bytes = encode_u64_key(node_id);
         ~i: u64 = 0;
-        L while i < node_bytes.len() {
+        W i < node_bytes.len() {
             key.push(node_bytes[i]);
             i += 1;
         }

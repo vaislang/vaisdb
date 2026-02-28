@@ -38,11 +38,7 @@ F err_graph_plan_failed(reason: Str) -> VaisError {
 # ============================================================================
 
 # Analyze query intent to choose BFS vs DFS
-E TraversalHint {
-    PreferBFS,    # Shortest path, bounded depth, level-order
-    PreferDFS,    # Exhaustive search, cycle detection, deep paths
-    NoPreference, # Either works, choose based on cost
-}
+L TraversalHint = PreferBFS | PreferDFS | NoPreference;
 
 # Detect traversal hint from query parameters
 F detect_traversal_hint(params: &GraphTraverseNodeParams) -> TraversalHint {

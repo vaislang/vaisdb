@@ -54,11 +54,11 @@ X RagChunkInsertPayload {
             ));
         }
         ~buf = ByteBuffer.from_bytes(data);
-        L chunk_id = buf.get_u64_le();
-        L doc_id = buf.get_u64_le();
-        L page_id = buf.get_u32_le();
-        L chunk_offset = buf.get_u32_le();
-        L chunk_length = buf.get_u32_le();
+        ~chunk_id := buf.get_u64_le();
+        ~doc_id := buf.get_u64_le();
+        ~page_id := buf.get_u32_le();
+        ~chunk_offset := buf.get_u32_le();
+        ~chunk_length := buf.get_u32_le();
         Ok(RagChunkInsertPayload { chunk_id, doc_id, page_id, chunk_offset, chunk_length })
     }
 }
@@ -85,8 +85,8 @@ X RagChunkDeletePayload {
             ));
         }
         ~buf = ByteBuffer.from_bytes(data);
-        L chunk_id = buf.get_u64_le();
-        L doc_id = buf.get_u64_le();
+        ~chunk_id := buf.get_u64_le();
+        ~doc_id := buf.get_u64_le();
         Ok(RagChunkDeletePayload { chunk_id, doc_id })
     }
 }
@@ -117,10 +117,10 @@ X RagDocumentInsertPayload {
             ));
         }
         ~buf = ByteBuffer.from_bytes(data);
-        L doc_id = buf.get_u64_le();
-        L page_id = buf.get_u32_le();
-        L chunk_count = buf.get_u32_le();
-        L total_length = buf.get_u64_le();
+        ~doc_id := buf.get_u64_le();
+        ~page_id := buf.get_u32_le();
+        ~chunk_count := buf.get_u32_le();
+        ~total_length := buf.get_u64_le();
         Ok(RagDocumentInsertPayload { doc_id, page_id, chunk_count, total_length })
     }
 }
@@ -145,7 +145,7 @@ X RagDocumentDeletePayload {
             ));
         }
         ~buf = ByteBuffer.from_bytes(data);
-        L doc_id = buf.get_u64_le();
+        ~doc_id := buf.get_u64_le();
         Ok(RagDocumentDeletePayload { doc_id })
     }
 }
@@ -176,10 +176,10 @@ X RagEmbeddingUpdatePayload {
             ));
         }
         ~buf = ByteBuffer.from_bytes(data);
-        L chunk_id = buf.get_u64_le();
-        L vector_page_id = buf.get_u32_le();
-        L vector_offset = buf.get_u32_le();
-        L dimension = buf.get_u16_le();
+        ~chunk_id := buf.get_u64_le();
+        ~vector_page_id := buf.get_u32_le();
+        ~vector_offset := buf.get_u32_le();
+        ~dimension := buf.get_u16_le();
         Ok(RagEmbeddingUpdatePayload { chunk_id, vector_page_id, vector_offset, dimension })
     }
 }
@@ -212,11 +212,11 @@ X RagMemoryWritePayload {
             ));
         }
         ~buf = ByteBuffer.from_bytes(data);
-        L memory_id = buf.get_u64_le();
-        L page_id = buf.get_u32_le();
-        L memory_offset = buf.get_u32_le();
-        L memory_length = buf.get_u32_le();
-        L turn_index = buf.get_u32_le();
+        ~memory_id := buf.get_u64_le();
+        ~page_id := buf.get_u32_le();
+        ~memory_offset := buf.get_u32_le();
+        ~memory_length := buf.get_u32_le();
+        ~turn_index := buf.get_u32_le();
         Ok(RagMemoryWritePayload { memory_id, page_id, memory_offset, memory_length, turn_index })
     }
 }
@@ -243,14 +243,14 @@ X RagWalManager {
         chunk_offset: u32,
         chunk_length: u32,
     ) -> Result<u64, VaisError> {
-        L payload = RagChunkInsertPayload {
+        ~payload := RagChunkInsertPayload {
             chunk_id,
             doc_id,
             page_id,
             chunk_offset,
             chunk_length,
         };
-        L bytes = payload.serialize();
+        ~bytes := payload.serialize();
         self.gcm.append_record(
             txn_id,
             RAG_CHUNK_INSERT,
@@ -266,8 +266,8 @@ X RagWalManager {
         chunk_id: u64,
         doc_id: u64,
     ) -> Result<u64, VaisError> {
-        L payload = RagChunkDeletePayload { chunk_id, doc_id };
-        L bytes = payload.serialize();
+        ~payload := RagChunkDeletePayload { chunk_id, doc_id };
+        ~bytes := payload.serialize();
         self.gcm.append_record(
             txn_id,
             RAG_CHUNK_DELETE,
@@ -285,13 +285,13 @@ X RagWalManager {
         chunk_count: u32,
         total_length: u64,
     ) -> Result<u64, VaisError> {
-        L payload = RagDocumentInsertPayload {
+        ~payload := RagDocumentInsertPayload {
             doc_id,
             page_id,
             chunk_count,
             total_length,
         };
-        L bytes = payload.serialize();
+        ~bytes := payload.serialize();
         self.gcm.append_record(
             txn_id,
             RAG_DOCUMENT_INSERT,
@@ -306,8 +306,8 @@ X RagWalManager {
         txn_id: u64,
         doc_id: u64,
     ) -> Result<u64, VaisError> {
-        L payload = RagDocumentDeletePayload { doc_id };
-        L bytes = payload.serialize();
+        ~payload := RagDocumentDeletePayload { doc_id };
+        ~bytes := payload.serialize();
         self.gcm.append_record(
             txn_id,
             RAG_DOCUMENT_DELETE,
@@ -325,13 +325,13 @@ X RagWalManager {
         vector_offset: u32,
         dimension: u16,
     ) -> Result<u64, VaisError> {
-        L payload = RagEmbeddingUpdatePayload {
+        ~payload := RagEmbeddingUpdatePayload {
             chunk_id,
             vector_page_id,
             vector_offset,
             dimension,
         };
-        L bytes = payload.serialize();
+        ~bytes := payload.serialize();
         self.gcm.append_record(
             txn_id,
             RAG_EMBEDDING_UPDATE,
@@ -350,14 +350,14 @@ X RagWalManager {
         memory_length: u32,
         turn_index: u32,
     ) -> Result<u64, VaisError> {
-        L payload = RagMemoryWritePayload {
+        ~payload := RagMemoryWritePayload {
             memory_id,
             page_id,
             memory_offset,
             memory_length,
             turn_index,
         };
-        L bytes = payload.serialize();
+        ~bytes := payload.serialize();
         self.gcm.append_record(
             txn_id,
             RAG_MEMORY_WRITE,
@@ -375,27 +375,27 @@ X RagWalManager {
     ) -> Result<(), VaisError> {
         M record_type {
             RAG_CHUNK_INSERT => {
-                L p = RagChunkInsertPayload.deserialize(payload)?;
+                ~p := RagChunkInsertPayload.deserialize(payload)?;
                 self.redo_chunk_insert(&p, pool)
             }
             RAG_CHUNK_DELETE => {
-                L p = RagChunkDeletePayload.deserialize(payload)?;
+                ~p := RagChunkDeletePayload.deserialize(payload)?;
                 self.redo_chunk_delete(&p, pool)
             }
             RAG_DOCUMENT_INSERT => {
-                L p = RagDocumentInsertPayload.deserialize(payload)?;
+                ~p := RagDocumentInsertPayload.deserialize(payload)?;
                 self.redo_document_insert(&p, pool)
             }
             RAG_DOCUMENT_DELETE => {
-                L p = RagDocumentDeletePayload.deserialize(payload)?;
+                ~p := RagDocumentDeletePayload.deserialize(payload)?;
                 self.redo_document_delete(&p, pool)
             }
             RAG_EMBEDDING_UPDATE => {
-                L p = RagEmbeddingUpdatePayload.deserialize(payload)?;
+                ~p := RagEmbeddingUpdatePayload.deserialize(payload)?;
                 self.redo_embedding_update(&p, pool)
             }
             RAG_MEMORY_WRITE => {
-                L p = RagMemoryWritePayload.deserialize(payload)?;
+                ~p := RagMemoryWritePayload.deserialize(payload)?;
                 self.redo_memory_write(&p, pool)
             }
             _ => {
@@ -415,27 +415,27 @@ X RagWalManager {
     ) -> Result<(), VaisError> {
         M record_type {
             RAG_CHUNK_INSERT => {
-                L p = RagChunkInsertPayload.deserialize(payload)?;
+                ~p := RagChunkInsertPayload.deserialize(payload)?;
                 self.undo_chunk_insert(&p, pool)
             }
             RAG_CHUNK_DELETE => {
-                L p = RagChunkDeletePayload.deserialize(payload)?;
+                ~p := RagChunkDeletePayload.deserialize(payload)?;
                 self.undo_chunk_delete(&p, pool)
             }
             RAG_DOCUMENT_INSERT => {
-                L p = RagDocumentInsertPayload.deserialize(payload)?;
+                ~p := RagDocumentInsertPayload.deserialize(payload)?;
                 self.undo_document_insert(&p, pool)
             }
             RAG_DOCUMENT_DELETE => {
-                L p = RagDocumentDeletePayload.deserialize(payload)?;
+                ~p := RagDocumentDeletePayload.deserialize(payload)?;
                 self.undo_document_delete(&p, pool)
             }
             RAG_EMBEDDING_UPDATE => {
-                L p = RagEmbeddingUpdatePayload.deserialize(payload)?;
+                ~p := RagEmbeddingUpdatePayload.deserialize(payload)?;
                 self.undo_embedding_update(&p, pool)
             }
             RAG_MEMORY_WRITE => {
-                L p = RagMemoryWritePayload.deserialize(payload)?;
+                ~p := RagMemoryWritePayload.deserialize(payload)?;
                 self.undo_memory_write(&p, pool)
             }
             _ => {
@@ -453,10 +453,10 @@ X RagWalManager {
     # Redo chunk insert: restore chunk data to its page at the recorded offset
     F redo_chunk_insert(self, payload: &RagChunkInsertPayload, pool: &~BufferPool) -> Result<(), VaisError> {
         ~frame = pool.pin_page(FILE_ID_RAG, payload.page_id)?;
-        L page_data = frame.get_page_data_mut();
+        ~page_data := frame.get_page_data_mut();
 
         # Validate offset + length within page bounds
-        L end = payload.chunk_offset as u64 + payload.chunk_length as u64;
+        ~end := payload.chunk_offset as u64 + payload.chunk_length as u64;
         I end > page_data.len() {
             pool.unpin_page(FILE_ID_RAG, payload.page_id, false);
             R Err(VaisError.WalCorruption(
@@ -465,8 +465,8 @@ X RagWalManager {
         }
 
         # Write chunk_id at the chunk offset as a marker (8 bytes LE)
-        L offset = payload.chunk_offset as u64;
-        L id_bytes = payload.chunk_id.to_le_bytes();
+        ~offset := payload.chunk_offset as u64;
+        ~id_bytes := payload.chunk_id.to_le_bytes();
         L i: 0..8 {
             page_data[offset + i] = id_bytes[i];
         }
@@ -487,18 +487,18 @@ X RagWalManager {
     # Redo document insert: restore document metadata to its page
     F redo_document_insert(self, payload: &RagDocumentInsertPayload, pool: &~BufferPool) -> Result<(), VaisError> {
         ~frame = pool.pin_page(FILE_ID_RAG, payload.page_id)?;
-        L page_data = frame.get_page_data_mut();
+        ~page_data := frame.get_page_data_mut();
 
         # Write document header: doc_id (8B) + chunk_count (4B) + total_length (8B) = 20B
-        L id_bytes = payload.doc_id.to_le_bytes();
+        ~id_bytes := payload.doc_id.to_le_bytes();
         L i: 0..8 {
             page_data[i] = id_bytes[i];
         }
-        L cc_bytes = payload.chunk_count.to_le_bytes();
+        ~cc_bytes := payload.chunk_count.to_le_bytes();
         L i: 0..4 {
             page_data[8 + i] = cc_bytes[i];
         }
-        L tl_bytes = payload.total_length.to_le_bytes();
+        ~tl_bytes := payload.total_length.to_le_bytes();
         L i: 0..8 {
             page_data[12 + i] = tl_bytes[i];
         }
@@ -517,12 +517,12 @@ X RagWalManager {
     # Redo embedding update: restore embedding vector page data
     F redo_embedding_update(self, payload: &RagEmbeddingUpdatePayload, pool: &~BufferPool) -> Result<(), VaisError> {
         ~frame = pool.pin_page(FILE_ID_RAG, payload.vector_page_id)?;
-        L page_data = frame.get_page_data_mut();
+        ~page_data := frame.get_page_data_mut();
 
         # Validate vector offset is within page bounds
         # Each dimension is 4 bytes (f32), total size = dimension * 4
-        L vector_size = payload.dimension as u64 * 4;
-        L end = payload.vector_offset as u64 + vector_size;
+        ~vector_size := payload.dimension as u64 * 4;
+        ~end := payload.vector_offset as u64 + vector_size;
         I end > page_data.len() {
             pool.unpin_page(FILE_ID_RAG, payload.vector_page_id, false);
             R Err(VaisError.WalCorruption(
@@ -539,10 +539,10 @@ X RagWalManager {
     # Redo memory write: restore memory entry data to its page
     F redo_memory_write(self, payload: &RagMemoryWritePayload, pool: &~BufferPool) -> Result<(), VaisError> {
         ~frame = pool.pin_page(FILE_ID_RAG, payload.page_id)?;
-        L page_data = frame.get_page_data_mut();
+        ~page_data := frame.get_page_data_mut();
 
         # Validate offset + length within page bounds
-        L end = payload.memory_offset as u64 + payload.memory_length as u64;
+        ~end := payload.memory_offset as u64 + payload.memory_length as u64;
         I end > page_data.len() {
             pool.unpin_page(FILE_ID_RAG, payload.page_id, false);
             R Err(VaisError.WalCorruption(
@@ -551,12 +551,12 @@ X RagWalManager {
         }
 
         # Write memory_id (8B) + turn_index (4B) at the memory offset as header
-        L offset = payload.memory_offset as u64;
-        L id_bytes = payload.memory_id.to_le_bytes();
+        ~offset := payload.memory_offset as u64;
+        ~id_bytes := payload.memory_id.to_le_bytes();
         L i: 0..8 {
             page_data[offset + i] = id_bytes[i];
         }
-        L ti_bytes = payload.turn_index.to_le_bytes();
+        ~ti_bytes := payload.turn_index.to_le_bytes();
         L i: 0..4 {
             page_data[offset + 8 + i] = ti_bytes[i];
         }
@@ -572,9 +572,9 @@ X RagWalManager {
     # Undo chunk insert: remove chunk from page (zero out the slot)
     F undo_chunk_insert(self, payload: &RagChunkInsertPayload, pool: &~BufferPool) -> Result<(), VaisError> {
         ~frame = pool.pin_page(FILE_ID_RAG, payload.page_id)?;
-        L page_data = frame.get_page_data_mut();
+        ~page_data := frame.get_page_data_mut();
 
-        L end = payload.chunk_offset as u64 + payload.chunk_length as u64;
+        ~end := payload.chunk_offset as u64 + payload.chunk_length as u64;
         I end > page_data.len() {
             pool.unpin_page(FILE_ID_RAG, payload.page_id, false);
             R Err(VaisError.WalCorruption(
@@ -583,7 +583,7 @@ X RagWalManager {
         }
 
         # Zero out the chunk region to remove it
-        L offset = payload.chunk_offset as u64;
+        ~offset := payload.chunk_offset as u64;
         L i: 0..payload.chunk_length as u64 {
             page_data[offset + i] = 0;
         }
@@ -603,7 +603,7 @@ X RagWalManager {
     # Undo document insert: remove document metadata from page
     F undo_document_insert(self, payload: &RagDocumentInsertPayload, pool: &~BufferPool) -> Result<(), VaisError> {
         ~frame = pool.pin_page(FILE_ID_RAG, payload.page_id)?;
-        L page_data = frame.get_page_data_mut();
+        ~page_data := frame.get_page_data_mut();
 
         # Zero out document header (20 bytes)
         L i: 0..20 {
@@ -631,9 +631,9 @@ X RagWalManager {
     # Undo memory write: remove memory entry from page (zero out)
     F undo_memory_write(self, payload: &RagMemoryWritePayload, pool: &~BufferPool) -> Result<(), VaisError> {
         ~frame = pool.pin_page(FILE_ID_RAG, payload.page_id)?;
-        L page_data = frame.get_page_data_mut();
+        ~page_data := frame.get_page_data_mut();
 
-        L end = payload.memory_offset as u64 + payload.memory_length as u64;
+        ~end := payload.memory_offset as u64 + payload.memory_length as u64;
         I end > page_data.len() {
             pool.unpin_page(FILE_ID_RAG, payload.page_id, false);
             R Err(VaisError.WalCorruption(
@@ -642,7 +642,7 @@ X RagWalManager {
         }
 
         # Zero out the memory region
-        L offset = payload.memory_offset as u64;
+        ~offset := payload.memory_offset as u64;
         L i: 0..payload.memory_length as u64 {
             page_data[offset + i] = 0;
         }

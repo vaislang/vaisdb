@@ -1,30 +1,6 @@
 # Storage Engine
 # Page manager, WAL, buffer pool, B+Tree index, transaction management
 
-# Foundation modules
-pub mod constants;
-pub mod error;
-pub mod bytes;
-pub mod checksum;
-pub mod hash;
-
-# Page management
-pub mod page;
-
-# I/O layer
-pub mod io;
-
-# Write-Ahead Log
-pub mod wal;
-
-# Buffer pool
-pub mod buffer;
-
-# B+Tree index
-pub mod btree;
-
-# Transaction management (MVCC, undo, CLOG)
-pub mod txn;
-
-# Crash recovery
-pub mod recovery;
+# Submodules (auto-discovered by filesystem)
+# constants, error, bytes, checksum, hash
+# page, io, wal, buffer, btree, txn, recovery

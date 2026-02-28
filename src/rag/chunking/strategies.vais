@@ -46,58 +46,54 @@ F split_fixed_size(
     ~pos: u64 = 0;
     ~last_word_end: u64 = 0;  # Last valid word boundary
 
-    L while pos < len {
+    W pos < len {
         # Skip whitespace
         I is_whitespace(bytes[pos]) {
             I pos > chunk_start && !is_whitespace(bytes[pos - 1]) {
                 last_word_end = pos;
             }
             pos += 1;
-            C;
-        }
-
-        # Start of a word
-        ~word_start = pos;
-        L while pos < len && !is_whitespace(bytes[pos]) {
-            pos += 1;
-        }
-
-        # Completed a word
-        token_count += 1;
-        last_word_end = pos;
-
-        # Check if we should create a chunk
-        I token_count >= target_size {
-            # Use word boundary if available and meets min_size
-            ~chunk_end = last_word_end;
-            ~chunk_tokens = count_tokens_in_range(content, chunk_start, chunk_end);
-
-            # If chunk is too small, try to include more words
-            I chunk_tokens < min_size && pos < len {
-                # Continue to next word
-                C;
+        } E {
+            # Start of a word
+            ~word_start = pos;
+            W pos < len && !is_whitespace(bytes[pos]) {
+                pos += 1;
             }
 
-            # If chunk exceeds max_size, we may need to split mid-word
-            I chunk_tokens > max_size {
-                # Try to find a smaller boundary
-                ~fallback_end = find_max_boundary(content, chunk_start, last_word_end, max_size);
-                I fallback_end > chunk_start {
-                    chunk_end = fallback_end;
+            # Completed a word
+            token_count += 1;
+            last_word_end = pos;
+
+            # Check if we should create a chunk
+            I token_count >= target_size {
+                # Use word boundary if available and meets min_size
+                ~chunk_end = last_word_end;
+                ~chunk_tokens = count_tokens_in_range(content, chunk_start, chunk_end);
+
+                # If chunk is too small, keep going (don't emit chunk yet)
+                I !(chunk_tokens < min_size && pos < len) {
+                    # If chunk exceeds max_size, we may need to split mid-word
+                    I chunk_tokens > max_size {
+                        # Try to find a smaller boundary
+                        ~fallback_end = find_max_boundary(content, chunk_start, last_word_end, max_size);
+                        I fallback_end > chunk_start {
+                            chunk_end = fallback_end;
+                        }
+                    }
+
+                    boundaries.push(ChunkBoundary.new(chunk_start as u32, chunk_end as u32));
+                    chunk_start = chunk_end;
+
+                    # Skip any whitespace at start of next chunk
+                    W chunk_start < len && is_whitespace(bytes[chunk_start]) {
+                        chunk_start += 1;
+                    }
+
+                    pos = chunk_start;
+                    token_count = 0;
+                    last_word_end = chunk_start;
                 }
             }
-
-            boundaries.push(ChunkBoundary.new(chunk_start as u32, chunk_end as u32));
-            chunk_start = chunk_end;
-
-            # Skip any whitespace at start of next chunk
-            L while chunk_start < len && is_whitespace(bytes[chunk_start]) {
-                chunk_start += 1;
-            }
-
-            pos = chunk_start;
-            token_count = 0;
-            last_word_end = chunk_start;
         }
     }
 
@@ -141,7 +137,7 @@ F split_sentence_boundary(
     ~chunk_start: u64 = 0;
     ~i: u64 = 0;
 
-    L while i < sentence_ends.len() {
+    W i < sentence_ends.len() {
         ~sentence_end = sentence_ends[i];
         ~chunk_tokens = count_tokens_in_range(content, chunk_start, sentence_end);
 
@@ -158,7 +154,7 @@ F split_sentence_boundary(
                 );
 
                 ~j: u64 = 0;
-                L while j < fixed_chunks.len() {
+                W j < fixed_chunks.len() {
                     boundaries.push(ChunkBoundary.new(
                         (chunk_start + fixed_chunks[j].start_byte as u64) as u32,
                         (chunk_start + fixed_chunks[j].end_byte as u64) as u32,
@@ -177,7 +173,7 @@ F split_sentence_boundary(
                     boundaries.push(ChunkBoundary.new(chunk_start as u32, prev_end as u32));
                     chunk_start = prev_end;
                     # Don't increment i, process this sentence in next iteration
-                    C;
+                    i -= 1;
                 } E {
                     # Edge case: first sentence, just split it
                     boundaries.push(ChunkBoundary.new(chunk_start as u32, sentence_end as u32));
@@ -230,7 +226,7 @@ F split_paragraph_boundary(
     ~chunk_start: u64 = 0;
     ~i: u64 = 0;
 
-    L while i < paragraph_ends.len() {
+    W i < paragraph_ends.len() {
         ~para_end = paragraph_ends[i];
         ~chunk_tokens = count_tokens_in_range(content, chunk_start, para_end);
 
@@ -251,7 +247,7 @@ F split_paragraph_boundary(
                     );
 
                     ~j: u64 = 0;
-                    L while j < sentence_chunks.len() {
+                    W j < sentence_chunks.len() {
                         boundaries.push(ChunkBoundary.new(
                             (para_start + sentence_chunks[j].start_byte as u64) as u32,
                             (para_start + sentence_chunks[j].end_byte as u64) as u32,
@@ -294,7 +290,7 @@ F find_sentence_boundaries(content: &Str) -> Vec<u64> {
     ~len = bytes.len();
     ~i: u64 = 0;
 
-    L while i < len {
+    W i < len {
         ~b = bytes[i];
 
         # Check for sentence terminators
@@ -303,23 +299,24 @@ F find_sentence_boundaries(content: &Str) -> Vec<u64> {
             ~j = i + 1;
 
             # Skip additional punctuation (e.g., "..." or "?!")
-            L while j < len && (bytes[j] == 46 || bytes[j] == 33 || bytes[j] == 63) {
+            W j < len && (bytes[j] == 46 || bytes[j] == 33 || bytes[j] == 63) {
                 j += 1;
             }
 
             # Check for whitespace or end of text
             I j >= len || is_whitespace(bytes[j]) {
                 # Skip trailing whitespace to find actual content end
-                L while j < len && is_whitespace(bytes[j]) {
+                W j < len && is_whitespace(bytes[j]) {
                     j += 1;
                 }
                 boundaries.push(j);
                 i = j;
-                C;
+            } E {
+                i += 1;
             }
+        } E {
+            i += 1;
         }
-
-        i += 1;
     }
 
     boundaries
@@ -332,14 +329,14 @@ F find_paragraph_boundaries(content: &Str) -> Vec<u64> {
     ~len = bytes.len();
     ~i: u64 = 0;
 
-    L while i < len {
+    W i < len {
         # Look for \n\n (with possible \r)
         I bytes[i] == 10 {  # \n
             ~j = i + 1;
 
             # Skip whitespace including additional newlines
             ~newline_count = 1;
-            L while j < len && (bytes[j] == 10 || bytes[j] == 13 || bytes[j] == 32 || bytes[j] == 9) {
+            W j < len && (bytes[j] == 10 || bytes[j] == 13 || bytes[j] == 32 || bytes[j] == 9) {
                 I bytes[j] == 10 {
                     newline_count += 1;
                 }
@@ -350,11 +347,12 @@ F find_paragraph_boundaries(content: &Str) -> Vec<u64> {
             I newline_count >= 2 {
                 boundaries.push(j);
                 i = j;
-                C;
+            } E {
+                i += 1;
             }
+        } E {
+            i += 1;
         }
-
-        i += 1;
     }
 
     boundaries
@@ -371,7 +369,7 @@ F count_tokens_in_range(content: &Str, start: u64, end: u64) -> u32 {
     ~pos = start;
     ~in_word = false;
 
-    L while pos < end && pos < bytes.len() {
+    W pos < end && pos < bytes.len() {
         I is_whitespace(bytes[pos]) {
             in_word = false;
         } E {
@@ -393,30 +391,29 @@ F find_max_boundary(content: &Str, start: u64, end: u64, max_size: u32) -> u64 {
     ~token_count: u32 = 0;
     ~last_boundary = start;
 
-    L while pos < end && pos < bytes.len() {
+    W pos < end && pos < bytes.len() {
         # Skip whitespace
         I is_whitespace(bytes[pos]) {
             last_boundary = pos;
             pos += 1;
-            C;
-        }
-
-        # Start of word
-        L while pos < end && pos < bytes.len() && !is_whitespace(bytes[pos]) {
-            pos += 1;
-        }
-
-        token_count += 1;
-
-        I token_count >= max_size {
-            # Use last boundary before exceeding max
-            I last_boundary > start {
-                R last_boundary;
+        } E {
+            # Start of word
+            W pos < end && pos < bytes.len() && !is_whitespace(bytes[pos]) {
+                pos += 1;
             }
-            R pos;  # No good boundary, use current position
-        }
 
-        last_boundary = pos;
+            token_count += 1;
+
+            I token_count >= max_size {
+                # Use last boundary before exceeding max
+                I last_boundary > start {
+                    R last_boundary;
+                }
+                R pos;  # No good boundary, use current position
+            }
+
+            last_boundary = pos;
+        }
     }
 
     end

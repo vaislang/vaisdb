@@ -35,7 +35,7 @@ X DirtyTracker {
             I entry.frame_id == frame_id {
                 # Already dirty, keep the earlier first_dirty_lsn
                 drop(guard);
-                return;
+                R;
             }
         }
 
@@ -53,12 +53,14 @@ X DirtyTracker {
         ~guard = self.lock.lock();
 
         ~i: u64 = 0;
-        L while i < self.entries.len() {
+        ~removed = false;
+        W i < self.entries.len() && !removed {
             I self.entries[i].frame_id == frame_id {
                 self.entries.swap_remove(i);
-                B;
+                removed = true;
+            } E {
+                i += 1;
             }
-            i += 1;
         }
 
         drop(guard);

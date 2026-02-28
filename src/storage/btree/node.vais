@@ -142,7 +142,7 @@ X BTreeInternalNode {
         ~lo: u64 = 0;
         ~hi: u64 = self.entries.len();
 
-        L while lo < hi {
+        W lo < hi {
             ~mid = lo + (hi - lo) / 2;
             ~mid_key = self.get_key(mid);
             M compare_keys(key, mid_key) {
@@ -182,11 +182,14 @@ X BTreeInternalNode {
 
         # Find insertion position (maintain sorted order)
         ~pos: u64 = 0;
+        ~pos_found = false;
         L i: 0..self.entries.len() {
-            I key_less_than(key, self.get_key(i)) {
-                B;
+            I !pos_found && key_less_than(key, self.get_key(i)) {
+                pos_found = true;
             }
-            pos = i + 1;
+            I !pos_found {
+                pos = i + 1;
+            }
         }
 
         # Write key data at the end of page (growing from bottom)
@@ -445,7 +448,7 @@ X BTreeLeafNode {
         ~lo: u64 = 0;
         ~hi: u64 = self.entries.len();
 
-        L while lo < hi {
+        W lo < hi {
             ~mid = lo + (hi - lo) / 2;
             ~mid_key = self.get_key(mid);
             M compare_keys(key, mid_key) {
@@ -462,7 +465,7 @@ X BTreeLeafNode {
         ~lo: u64 = 0;
         ~hi: u64 = self.entries.len();
 
-        L while lo < hi {
+        W lo < hi {
             ~mid = lo + (hi - lo) / 2;
             ~mid_key = self.get_key(mid);
             M compare_keys(key, mid_key) {

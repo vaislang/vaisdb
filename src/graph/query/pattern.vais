@@ -117,7 +117,7 @@ X PatternNode {
         M self.labels {
             Some(ref required_labels) => {
                 ~i: u64 = 0;
-                L while i < required_labels.len() {
+                W i < required_labels.len() {
                     # In production, would use label_index to check if node has label
                     # For now, simplified check
                     i += 1;
@@ -269,7 +269,7 @@ X GraphPattern {
     # Get node pattern by alias
     F get_node_by_alias(self, alias: &Str) -> Option<&PatternNode> {
         ~i: u64 = 0;
-        L while i < self.nodes.len() {
+        W i < self.nodes.len() {
             I self.nodes[i].alias == *alias {
                 R Some(&self.nodes[i]);
             }
@@ -307,7 +307,7 @@ X PatternMatch {
     # Get bound node ID for variable
     F get_binding(self, var_name: &Str) -> Option<u64> {
         ~i: u64 = 0;
-        L while i < self.bindings.len() {
+        W i < self.bindings.len() {
             I self.bindings[i].0 == *var_name {
                 R Some(self.bindings[i].1);
             }
@@ -330,7 +330,7 @@ X PatternMatch {
     F clone_bindings(self) -> Vec<(Str, u64)> {
         ~result = Vec.with_capacity(self.bindings.len());
         ~i: u64 = 0;
-        L while i < self.bindings.len() {
+        W i < self.bindings.len() {
             result.push((self.bindings[i].0.clone(), self.bindings[i].1));
             i += 1;
         }
@@ -408,7 +408,7 @@ X PatternMatcher {
 
         # For each start candidate, try to M the rest of the pattern
         ~i: u64 = 0;
-        L while i < start_candidates.len() {
+        W i < start_candidates.len() {
             ~start_node = start_candidates[i];
 
             # Initialize M with first binding
@@ -427,7 +427,7 @@ X PatternMatcher {
 
             # Add all successful extensions to results
             ~j: u64 = 0;
-            L while j < match_result.len() {
+            W j < match_result.len() {
                 matches.push(match_result[j]);
                 j += 1;
             }
@@ -454,7 +454,7 @@ X PatternMatcher {
             ~complete_match = PatternMatch.new();
             ~bindings = current_match.clone_bindings();
             ~i: u64 = 0;
-            L while i < bindings.len() {
+            W i < bindings.len() {
                 complete_match.bind(bindings[i].0.clone(), bindings[i].1);
                 i += 1;
             }
@@ -482,7 +482,7 @@ X PatternMatcher {
         # Try extending M with each neighbor
         ~matches = Vec.new();
         ~i: u64 = 0;
-        L while i < neighbors.len() {
+        W i < neighbors.len() {
             ~neighbor_id = neighbors[i];
 
             # Check if neighbor matches node pattern
@@ -498,7 +498,7 @@ X PatternMatcher {
                 # Create extended M ~extended_match = PatternMatch.new();
                 ~bindings = current_match.clone_bindings();
                 ~j: u64 = 0;
-                L while j < bindings.len() {
+                W j < bindings.len() {
                     extended_match.bind(bindings[j].0.clone(), bindings[j].1);
                     j += 1;
                 }
@@ -516,7 +516,7 @@ X PatternMatcher {
 
                 # Add all further matches
                 ~k: u64 = 0;
-                L while k < further_matches.len() {
+                W k < further_matches.len() {
                     matches.push(further_matches[k]);
                     k += 1;
                 }
@@ -556,7 +556,7 @@ X PatternMatcher {
 
             # Filter by edge type and visibility
             # ~i: u64 = 0;
-            # L while i < adj_entries.len() {
+            # W i < adj_entries.len() {
             #     ~entry = &adj_entries[i];
             #     if is_adj_entry_visible(entry, snapshot, clog) {
             #         M edge_pattern.edge_type {
@@ -596,7 +596,7 @@ X PatternMatcher {
         ~min_hops = edge_pattern.effective_min_hops();
         ~max_hops = edge_pattern.effective_max_hops();
 
-        L while queue.len() > 0 {
+        W queue.len() > 0 {
             ~current = queue.remove(0);
             ~current_node = current.0;
             ~current_depth = current.1;
@@ -606,21 +606,19 @@ X PatternMatcher {
                 reachable.push(current_node);
             }
 
-            # Stop expanding if at max depth
-            I current_depth >= max_hops {
-                C            }
-
-            # Expand neighbors
-            # In production: read adjacency list and filter by edge type
-            # ~neighbors = self.get_filtered_neighbors(current_node, edge_pattern, snapshot, clog)?;
-            # ~i: u64 = 0;
-            # L while i < neighbors.len() {
-            #     if !self.is_visited(&visited, neighbors[i]) {
-            #         visited.push(neighbors[i]);
-            #         queue.push((neighbors[i], current_depth + 1));
-            #     }
-            #     i += 1;
-            # }
+            # Expand neighbors if not at max depth
+            I current_depth < max_hops {
+                # In production: read adjacency list and filter by edge type
+                # ~neighbors = self.get_filtered_neighbors(current_node, edge_pattern, snapshot, clog)?;
+                # ~i: u64 = 0;
+                # W i < neighbors.len() {
+                #     if !self.is_visited(&visited, neighbors[i]) {
+                #         visited.push(neighbors[i]);
+                #         queue.push((neighbors[i], current_depth + 1));
+                #     }
+                #     i += 1;
+                # }
+            }
         }
 
         Ok(reachable)
@@ -653,7 +651,7 @@ X PatternMatcher {
     # Helper: check if node is in visited set
     F is_visited(self, visited: &Vec<u64>, node_id: u64) -> bool {
         ~i: u64 = 0;
-        L while i < visited.len() {
+        W i < visited.len() {
             I visited[i] == node_id {
                 R true;
             }

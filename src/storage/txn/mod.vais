@@ -1,13 +1,6 @@
 # Transaction Management Module
 # MVCC visibility, CLOG, undo log, transaction manager
 
-pub mod snapshot;
-pub mod clog;
-pub mod visibility;
-pub mod undo;
-pub mod undo_entry;
-pub mod rollback;
-pub mod manager;
-pub mod att;
-pub mod conflict;
-pub mod deadlock;
+# Submodules (auto-discovered by filesystem)
+# snapshot, clog, visibility, undo, undo_entry
+# rollback, manager, att, conflict, deadlock

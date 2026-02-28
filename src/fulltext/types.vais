@@ -304,7 +304,7 @@ X PostingEntry {
 
         # Positions
         ~i: u64 = 0;
-        L W i < self.positions.len() {
+        W i < self.positions.len() {
             buf.put_u32_le(self.positions[i]);
             i += 1;
         }
@@ -329,7 +329,7 @@ X PostingEntry {
         # Positions
         ~positions = Vec.with_capacity(position_count);
         ~i: u64 = 0;
-        L W i < position_count {
+        W i < position_count {
             positions.push(buf.get_u32_le()?);
             i += 1;
         }

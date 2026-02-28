@@ -9,6 +9,7 @@ U storage/page/header.{PageHeader};
 U storage/page/types.{PAGE_TYPE_OVERFLOW, ENGINE_TAG_COMMON};
 U storage/page/allocator.{PageAllocator};
 U storage/page/freelist.{FreelistBitmap};
+U storage/buffer/pool.{BufferPool};
 
 # Overflow chain metadata
 # Stored inline with the main tuple/data
@@ -99,10 +100,8 @@ X OverflowPage {
     }
 }
 
-# Write large data across multiple overflow pages
-# Returns the first overflow page_id
-# NOTE: In real implementation, this would use buffer pool for I/O
-# This is a simplified version showing the algorithm
+# Write large data across multiple overflow pages via buffer pool
+# Returns the first overflow page_id in the chain
 F write_overflow_data(
     data: &[u8],
     page_size: u32,
@@ -110,7 +109,8 @@ F write_overflow_data(
     allocator: &~PageAllocator,
     bitmap: &~FreelistBitmap,
     page_lsn: u64,
-    txn_id: u64
+    txn_id: u64,
+    pool: &~BufferPool,
 ) -> Result<u32, VaisError> {
     ~max_per_page = max_data_per_page(page_size) as u64;
     ~num_pages = (data.len() + max_per_page - 1) / max_per_page;
@@ -128,11 +128,14 @@ F write_overflow_data(
 
     ~first_page_id = page_ids[0];
 
-    # Write each overflow page
+    # Write each overflow page via buffer pool
     L i: 0..num_pages {
         ~start_offset = i * max_per_page;
         ~end_offset = (start_offset + max_per_page).min(data.len());
-        ~chunk = &data[start_offset..end_offset];
+        ~chunk_data = Vec.with_capacity(end_offset - start_offset);
+        L j: start_offset..end_offset {
+            chunk_data.push(data[j]);
+        }
 
         ~page_id = page_ids[i];
         ~next_page = I i + 1 < num_pages {
@@ -141,47 +144,56 @@ F write_overflow_data(
             NULL_PAGE  # Last page in chain
         };
 
-        # In real implementation, would allocate page buffer and write via buffer pool
-        # Here we just show the structure:
-        # let page_buffer = allocate_page_buffer(page_size);
-        # let overflow_page = OverflowPage.new(chunk.to_vec());
-        # overflow_page.write_to_page(&page_buffer, page_id, next_page, page_lsn, txn_id);
-        # buffer_pool.write_page(file_id, page_id, &page_buffer);
+        # Fetch page frame from buffer pool, write overflow data, mark dirty
+        ~frame_id = pool.fetch_page(file_id, page_id)?;
+        ~page_buf = pool.get_page_mut(frame_id);
+        ~overflow_page = OverflowPage.new(chunk_data);
+        overflow_page.write_to_page(page_buf, page_id, next_page, page_lsn, txn_id);
+        pool.unpin_page(frame_id, true);
     }
 
     Ok(first_page_id)
 }
 
-# Read data from overflow page chain
+# Read data from overflow page chain via buffer pool
 # Returns the complete data concatenated from all pages
-# NOTE: In real implementation, this would use buffer pool for I/O
 F read_overflow_data(
     first_page_id: u32,
     file_id: u8,
     page_size: u32,
-    expected_total_len: u32
+    expected_total_len: u32,
+    pool: &~BufferPool,
 ) -> Result<Vec<u8>, VaisError> {
     ~result = Vec.with_capacity(expected_total_len as u64);
     ~current_page_id = first_page_id;
     ~max_iterations = 1000;  # Safety limit to prevent infinite loops
     ~iteration = 0u32;
 
-    L while current_page_id != NULL_PAGE {
+    W current_page_id != NULL_PAGE {
         I iteration >= max_iterations {
             R Err(err_internal("Overflow chain too long or circular"));
         }
         iteration += 1;
 
-        # In real implementation, would read via buffer pool:
-        # let page_buffer = buffer_pool.read_page(file_id, current_page_id)?;
-        # let overflow_page = OverflowPage.read_from_page(&page_buffer, page_size)?;
-        # let header = PageHeader.read_from_page(&page_buffer)?;
-        #
-        # result.extend_from_slice(&overflow_page.data);
-        # current_page_id = header.next_page;
+        # Read page via buffer pool
+        ~frame_id = pool.fetch_page(file_id, current_page_id)?;
+        ~page_data = pool.get_page(frame_id);
 
-        # For now, just break (this is a placeholder)
-        B;
+        # Parse overflow page body
+        ~overflow_page = OverflowPage.read_from_page(page_data, page_size)?;
+
+        # Read next_page pointer from page header
+        ~header = PageHeader.read_from_page(page_data)?;
+
+        # Append data from this page
+        L k: 0..overflow_page.data.len() {
+            result.push(overflow_page.data[k]);
+        }
+
+        # Follow chain
+        current_page_id = header.next_page;
+
+        pool.unpin_page(frame_id, false);
     }
 
     # Verify we read the expected amount
@@ -195,22 +207,23 @@ F read_overflow_data(
     Ok(result)
 }
 
-# Free entire overflow page chain
-# Deallocates all pages in the chain
+# Free entire overflow page chain via buffer pool
+# Reads chain to collect page IDs, zeros them out, then deallocates
 F free_overflow_chain(
     first_page_id: u32,
     file_id: u8,
     allocator: &~PageAllocator,
     bitmap: &~FreelistBitmap,
-    page_size: u32
+    page_size: u32,
+    pool: &~BufferPool,
 ) -> Result<(), VaisError> {
     ~current_page_id = first_page_id;
     ~max_iterations = 1000;  # Safety limit
     ~iteration = 0u32;
     ~pages_to_free = Vec.new();
 
-    # Collect all page IDs in chain
-    L while current_page_id != NULL_PAGE {
+    # Collect all page IDs in chain by reading next_page pointers
+    W current_page_id != NULL_PAGE {
         I iteration >= max_iterations {
             R Err(err_internal("Overflow chain too long or circular"));
         }
@@ -218,22 +231,27 @@ F free_overflow_chain(
 
         pages_to_free.push(current_page_id);
 
-        # In real implementation, read next_page from header:
-        # let page_buffer = buffer_pool.read_page(file_id, current_page_id)?;
-        # let header = PageHeader.read_from_page(&page_buffer)?;
-        # current_page_id = header.next_page;
-
-        # For now, just break
-        B;
+        # Read next_page from page header via buffer pool
+        ~frame_id = pool.fetch_page(file_id, current_page_id)?;
+        ~page_data = pool.get_page(frame_id);
+        ~header = PageHeader.read_from_page(page_data)?;
+        current_page_id = header.next_page;
+        pool.unpin_page(frame_id, false);
     }
 
-    # Zero out and deallocate all pages
-    L page_id: pages_to_free {
-        # In real implementation, zero out page data:
-        # let page_buffer = allocate_page_buffer(page_size);
-        # zero_page_buffer(&page_buffer);
-        # buffer_pool.write_page(file_id, page_id, &page_buffer);
+    # Zero out page data and deallocate all pages
+    L i: 0..pages_to_free.len() {
+        ~page_id = pages_to_free[i];
 
+        # Zero out the page data via buffer pool
+        ~frame_id = pool.fetch_page(file_id, page_id)?;
+        ~page_buf = pool.get_page_mut(frame_id);
+        L j: 0..page_size as u64 {
+            page_buf[j] = 0;
+        }
+        pool.unpin_page(frame_id, true);
+
+        # Return page to freelist
         allocator.deallocate_page(file_id, page_id, bitmap)?;
     }
 

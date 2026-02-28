@@ -183,7 +183,7 @@ F alter_add_column(
     # For now, we store default as a string representation in ColumnInfo.default_value
     # A full implementation would evaluate the Expr and store the SqlValue
     ~default_str = M &column_def.default_value {
-        Some(_) => Some("DEFAULT_EXPR".to_string()),  # Placeholder; should eval expr
+        Some(_) => Some("DEFAULT_EXPR".to_string()),  # FUTURE(sql/executor): Evaluate default expression
         None => None,
     };
 
@@ -244,10 +244,9 @@ F alter_drop_column(
     ~found = false;
     ~col_info: Option<ColumnInfo> = None;
     L col: columns {
-        I &col.name == column_name {
+        I !found && &col.name == column_name {
             found = true;
             col_info = Some(col.clone());
-            B;
         }
     }
 
@@ -333,10 +332,9 @@ F alter_column_type(
     ~found = false;
     ~old_type: Option<SqlType> = None;
     L col: columns {
-        I &col.name == column_name {
+        I !found && &col.name == column_name {
             found = true;
             old_type = Some(col.data_type);
-            B;
         }
     }
 

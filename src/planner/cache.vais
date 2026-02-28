@@ -28,7 +28,7 @@ S PlanCacheKey {
 X PlanCacheKey {
     # Create a new cache key from normalized SQL
     F new(normalized_sql: Str) -> PlanCacheKey {
-        L hash = fnv1a_hash(&normalized_sql);
+        ~hash := fnv1a_hash(&normalized_sql);
         PlanCacheKey {
             hash,
             normalized_sql,
@@ -132,7 +132,7 @@ X PlanCacheStats {
 
     # Calculate hit rate (0.0 - 1.0)
     F hit_rate(self) -> f64 {
-        L total = self.hits + self.misses;
+        ~total := self.hits + self.misses;
         I total == 0 {
             0.0
         } E {
@@ -173,14 +173,14 @@ X PlanCache {
 
     # Get current timestamp and increment
     F next_timestamp(~self) -> u64 {
-        L ts = self.timestamp;
+        ~ts := self.timestamp;
         self.timestamp += 1;
         ts
     }
 
     # Get a cached plan (returns reference)
     F get(~self, key: &PlanCacheKey) -> Option<&HybridPlanNode> {
-        L ts = self.next_timestamp();
+        ~ts := self.next_timestamp();
 
         # Linear scan (fast enough for 256 entries)
         L ~entry: self.entries.iter_mut() {
@@ -197,7 +197,7 @@ X PlanCache {
 
     # Get a cached plan with cost
     F get_with_cost(~self, key: &PlanCacheKey) -> Option<(&HybridPlanNode, &HybridCost)> {
-        L ts = self.next_timestamp();
+        ~ts := self.next_timestamp();
 
         L ~entry: self.entries.iter_mut() {
             I entry.key.eq(key) {
@@ -219,7 +219,7 @@ X PlanCache {
         cost: HybridCost,
         tables: Vec<Str>,
     ) {
-        L ts = self.next_timestamp();
+        ~ts := self.next_timestamp();
 
         # Check I key already exists (update case)
         L ~entry: self.entries.iter_mut() {
@@ -238,7 +238,7 @@ X PlanCache {
         }
 
         # Insert new entry
-        L entry = PlanCacheEntry.new(key, plan, cost, tables, ts);
+        ~entry := PlanCacheEntry.new(key, plan, cost, tables, ts);
         self.entries.push(entry);
         self.stats.entries = self.entries.len();
     }
@@ -343,26 +343,28 @@ F normalize_query(sql: &Str) -> Str {
     ~normalized = Str.new();
     ~param_idx: u32 = 1;
     ~i: u64 = 0;
-    L bytes = sql.as_bytes();
-    L len = bytes.len();
+    ~bytes := sql.as_bytes();
+    ~len := bytes.len();
 
-    L {  # W: i < len
-        L ch = bytes[i];
+    W i < len {
+        ~ch := bytes[i];
 
         # String literal: 'abc' or "abc"
         I ch == 0x27 || ch == 0x22 {  # ' or "
-            L quote = ch;
+            ~quote := ch;
             i += 1;
             # Skip until closing quote
-            L {  # W: i < len
+            ~found_close = false;
+            W i < len && !found_close {
                 I bytes[i] == quote {
                     i += 1;
-                    B;
+                    found_close = true;
+                } E {
+                    I bytes[i] == 0x5C {  # backslash
+                        i += 1;  # Skip escaped char
+                    }
+                    i += 1;
                 }
-                I bytes[i] == 0x5C {  # backslash
-                    i += 1;  # Skip escaped char
-                }
-                i += 1;
             }
             normalized.push_str("$");
             normalized.push_str(&param_idx.to_string());
@@ -371,13 +373,14 @@ F normalize_query(sql: &Str) -> Str {
         # Number literal
         E I ch >= 0x30 && ch <= 0x39 {  # '0'..'9'
             # Skip number
-            L {  # W: i < len
-                L c = bytes[i];
+            ~in_number = true;
+            W i < len && in_number {
+                ~c := bytes[i];
                 I (c >= 0x30 && c <= 0x39) || c == 0x2E || c == 0x65 || c == 0x45 {
                     # digit or . or e or E
                     i += 1;
                 } E {
-                    B;
+                    in_number = false;
                 }
             }
             normalized.push_str("$");
@@ -417,14 +420,14 @@ F extract_tables(plan: &HybridPlanNode) -> Vec<Str> {
             tables.push(params.table_name.clone());
         },
         HybridPlanNode.ScoreFusion { left, right, .. } => {
-            L left_tables = extract_tables(left);
-            L right_tables = extract_tables(right);
+            ~left_tables := extract_tables(left);
+            ~right_tables := extract_tables(right);
             L t: left_tables.iter() { tables.push(t.clone()); }
             L t: right_tables.iter() { tables.push(t.clone()); }
         },
         HybridPlanNode.CrossEngineJoin { left, right, .. } => {
-            L left_tables = extract_tables(left);
-            L right_tables = extract_tables(right);
+            ~left_tables := extract_tables(left);
+            ~right_tables := extract_tables(right);
             L t: left_tables.iter() { tables.push(t.clone()); }
             L t: right_tables.iter() { tables.push(t.clone()); }
         },

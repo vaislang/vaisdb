@@ -194,106 +194,104 @@ X FullTextDDL {
             # Tokenize the text
             ~term_freqs = tokenizer.tokenize_with_freqs(text_content);
 
-            I term_freqs.is_empty() {
-                C;
-            }
+            I !term_freqs.is_empty() {
+                ~doc_length = 0u32;
+                L tf_info: &term_freqs {
+                    doc_length += tf_info.freq;
+                }
 
-            ~doc_length = 0u32;
-            L tf_info: &term_freqs {
-                doc_length += tf_info.freq;
-            }
+                # Step 3: Build posting lists for each term
+                L tf_info: term_freqs {
+                    ~term = &tf_info.term;
+                    ~term_freq = tf_info.freq;
+                    ~positions = &tf_info.positions;
 
-            # Step 3: Build posting lists for each term
-            L tf_info: term_freqs {
-                ~term = &tf_info.term;
-                ~term_freq = tf_info.freq;
-                ~positions = &tf_info.positions;
+                    total_tokens += term_freq as u64;
 
-                total_tokens += term_freq as u64;
+                    # Lookup or create dictionary entry
+                    M dict_index.lookup_term(term, &self.pool) {
+                        Ok(Some(dict_entry)) => {
+                            # Term exists, append to posting list
+                            ~posting_entry = PostingEntry.new(
+                                doc_id,
+                                meta.table_id,
+                                0u32, # row_tid (placeholder)
+                                term_freq,
+                                doc_length,
+                                txn_id,
+                                cmd_id,
+                            );
 
-                # Lookup or create dictionary entry
-                M dict_index.lookup_term(term, &self.pool) {
-                    Ok(Some(dict_entry)) => {
-                        # Term exists, append to posting list
-                        ~posting_entry = PostingEntry.new(
-                            doc_id,
-                            meta.table_id,
-                            0u32, # row_tid (placeholder)
-                            term_freq,
-                            doc_length,
-                            txn_id,
-                            cmd_id,
-                        );
-
-                        ~term_hash = fnv1a_hash(term);
-                        M posting_store.append_entry(
-                            dict_entry.posting_head_page,
-                            &posting_entry,
-                            term_hash,
-                            txn_id,
-                            gcm,
-                            &self.pool,
-                        ) {
-                            Ok(_) => {}
-                            Err(e) => {
-                                R Err(e);
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        # Term does not exist, create new dictionary entry
-                        # Allocate page for posting list head
-                        M self.allocator.alloc_page(FILE_ID_FULLTEXT, txn_id, cmd_id, gcm) {
-                            Ok(posting_head_page) => {
-                                # Insert term into dictionary
-                                M dict_index.insert_term(
-                                    term,
-                                    posting_head_page,
-                                    txn_id,
-                                    gcm,
-                                    &self.pool,
-                                ) {
-                                    Ok(_) => {
-                                        terms_created += 1;
-
-                                        # Create first posting entry
-                                        ~posting_entry = PostingEntry.new(
-                                            doc_id,
-                                            meta.table_id,
-                                            0u32, # row_tid (placeholder)
-                                            term_freq,
-                                            doc_length,
-                                            txn_id,
-                                            cmd_id,
-                                        );
-
-                                        ~term_hash = fnv1a_hash(term);
-                                        M posting_store.append_entry(
-                                            posting_head_page,
-                                            &posting_entry,
-                                            term_hash,
-                                            txn_id,
-                                            gcm,
-                                            &self.pool,
-                                        ) {
-                                            Ok(_) => {}
-                                            Err(e) => {
-                                                R Err(e);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        R Err(e);
-                                    }
+                            ~term_hash = fnv1a_hash(term);
+                            M posting_store.append_entry(
+                                dict_entry.posting_head_page,
+                                &posting_entry,
+                                term_hash,
+                                txn_id,
+                                gcm,
+                                &self.pool,
+                            ) {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    R Err(e);
                                 }
                             }
-                            Err(e) => {
-                                R Err(e);
+                        }
+                        Ok(None) => {
+                            # Term does not exist, create new dictionary entry
+                            # Allocate page for posting list head
+                            M self.allocator.alloc_page(FILE_ID_FULLTEXT, txn_id, cmd_id, gcm) {
+                                Ok(posting_head_page) => {
+                                    # Insert term into dictionary
+                                    M dict_index.insert_term(
+                                        term,
+                                        posting_head_page,
+                                        txn_id,
+                                        gcm,
+                                        &self.pool,
+                                    ) {
+                                        Ok(_) => {
+                                            terms_created += 1;
+
+                                            # Create first posting entry
+                                            ~posting_entry = PostingEntry.new(
+                                                doc_id,
+                                                meta.table_id,
+                                                0u32, # row_tid (placeholder)
+                                                term_freq,
+                                                doc_length,
+                                                txn_id,
+                                                cmd_id,
+                                            );
+
+                                            ~term_hash = fnv1a_hash(term);
+                                            M posting_store.append_entry(
+                                                posting_head_page,
+                                                &posting_entry,
+                                                term_hash,
+                                                txn_id,
+                                                gcm,
+                                                &self.pool,
+                                            ) {
+                                                Ok(_) => {}
+                                                Err(e) => {
+                                                    R Err(e);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            R Err(e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    R Err(e);
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        R Err(e);
+                        Err(e) => {
+                            R Err(e);
+                        }
                     }
                 }
             }
@@ -488,15 +486,16 @@ X IndexEntry {
                     M posting_store.read_all_entries(dict_entry.posting_head_page, &self.pool) {
                         Ok(postings) => {
                             # Find posting entry with matching doc_id
+                            ~found_posting = false;
                             L posting: postings {
-                                I posting.doc_id == doc_id {
+                                I !found_posting && posting.doc_id == doc_id {
                                     # Mark as expired
                                     # Note: Actual implementation would update the posting entry
                                     # in the page to set txn_id_expire = txn_id
                                     # For now, we acknowledge that this requires page-level update
                                     # which should be done via posting_store.expire_entry()
                                     # (not yet implemented in posting.vais)
-                                    B;
+                                    found_posting = true;
                                 }
                             }
                         }
@@ -507,7 +506,6 @@ X IndexEntry {
                 }
                 Ok(None) => {
                     # Term not found, nothing to delete
-                    C;
                 }
                 Err(e) => {
                     R Err(e);

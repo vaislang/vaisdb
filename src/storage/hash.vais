@@ -11,8 +11,7 @@ F fnv1a_hash(data: &Str) -> u64 {
     ~hash: u64 = FNV_OFFSET_BASIS;
     ~bytes = data.as_bytes();
     ~i: u64 = 0;
-    L {
-        I i >= bytes.len() { B }
+    W i < bytes.len() {
         hash = hash ^ (bytes[i] as u64);
         hash = hash * FNV_PRIME;
         i = i + 1;
@@ -24,8 +23,7 @@ F fnv1a_hash(data: &Str) -> u64 {
 F fnv1a_hash_bytes(data: &[u8]) -> u64 {
     ~hash: u64 = FNV_OFFSET_BASIS;
     ~i: u64 = 0;
-    L {
-        I i >= data.len() { B }
+    W i < data.len() {
         hash = hash ^ (data[i] as u64);
         hash = hash * FNV_PRIME;
         i = i + 1;

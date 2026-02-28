@@ -6,9 +6,12 @@
 # Module exports
 # ============================================================================
 
+# Submodules (auto-discovered by filesystem)
+# types, embedding, chunking, wal, visibility, concurrency
+# context, search, memory
+
 # Core types
-pub mod types;
-pub use types.{
+U types.{
     RagConfig, RagMeta, RagFusionConfig,
     ChunkInfo, DocumentInfo, RagSearchResult, ScoredChunk,
     RAG_FORMAT_VERSION, FILE_ID_RAG, FILE_NAME_RAG, ENGINE_TAG_RAG,
@@ -20,55 +23,47 @@ pub use types.{
     err_rag_engine_closed, err_rag_doc_not_found, err_rag_chunk_not_found,
     err_rag_model_not_found, err_rag_memory_not_found, err_rag_session_not_found,
 };
-pub use storage/hash.{fnv1a_hash};
+U storage/hash.{fnv1a_hash};
 
 # Embedding management
-pub mod embedding;
-pub use embedding/model.{EmbeddingModelInfo, EmbeddingModelRegistry};
-pub use embedding/manager.{EmbeddingManager, ReindexProgress};
+U embedding/model.{EmbeddingModelInfo, EmbeddingModelRegistry};
+U embedding/manager.{EmbeddingManager, ReindexProgress};
 
 # Chunking pipeline
-pub mod chunking;
-pub use chunking/chunker.{SemanticChunker, ChunkingConfig};
-pub use chunking/strategies.{FixedSizeChunker, SentenceChunker, ParagraphChunker};
-pub use chunking/graph.{ChunkGraphManager, ChunkEdgePlan};
-pub use chunking/hierarchy.{DocumentHierarchy, HierarchyNode, HierarchyLevel};
+U chunking/chunker.{SemanticChunker, ChunkingConfig};
+U chunking/strategies.{FixedSizeChunker, SentenceChunker, ParagraphChunker};
+U chunking/graph.{ChunkGraphManager, ChunkEdgePlan};
+U chunking/hierarchy.{DocumentHierarchy, HierarchyNode, HierarchyLevel};
 
 # WAL manager
-pub mod wal;
-pub use wal.{RagWalManager};
+U wal.{RagWalManager};
 
 # MVCC visibility
-pub mod visibility;
-pub use visibility.{
+U visibility.{
     is_chunk_visible, is_doc_visible, is_memory_visible,
     filter_visible_chunks, filter_visible_docs, filter_visible_memories,
 };
 
 # Concurrency control
-pub mod concurrency;
-pub use concurrency.{RagDocLockManager, RagChunkLockManager, RagMemoryLockManager};
+U concurrency.{RagDocLockManager, RagChunkLockManager, RagMemoryLockManager};
 
 # Context preservation
-pub mod context;
-pub use context/window.{ContextWindow, ContextExpander};
-pub use context/crossref.{CrossRefTracker, CrossReference};
-pub use context/versioning.{VersionTracker, ChunkVersion};
+U context/window.{ContextWindow, ContextExpander};
+U context/crossref.{CrossRefTracker, CrossReference};
+U context/versioning.{VersionTracker, ChunkVersion};
 
 # Search pipeline
-pub mod search;
-pub use search/rag_search.{RagSearchExecutor, RagSearchParams, EngineResultSet};
-pub use search/pipeline.{RagSearchPipeline, PipelineConfig};
-pub use search/attribution.{AttributionBuilder, Attribution, ScoreBreakdown};
+U search/rag_search.{RagSearchExecutor, RagSearchParams, EngineResultSet};
+U search/pipeline.{RagSearchPipeline, PipelineConfig};
+U search/attribution.{AttributionBuilder, Attribution, ScoreBreakdown};
 
 # Agent memory
-pub mod memory;
-pub use memory/types.{MemoryEntry, ImportanceScorer, MemoryConfig};
-pub use memory/storage.{MemoryStore};
-pub use memory/search.{MemorySearchExecutor, MemorySearchParams, MemorySearchResult};
-pub use memory/retrieval.{HybridRetriever, HybridRetrievalConfig, HybridResult};
-pub use memory/session.{SessionManager, AgentSession};
-pub use memory/lifecycle.{MemoryLifecycleManager, LifecycleAction, LifecycleStats};
+U memory/types.{MemoryEntry, ImportanceScorer, MemoryConfig};
+U memory/storage.{MemoryStore};
+U memory/search.{MemorySearchExecutor, MemorySearchParams, MemorySearchResult};
+U memory/retrieval.{HybridRetriever, HybridRetrievalConfig, HybridResult};
+U memory/session.{SessionManager, AgentSession};
+U memory/lifecycle.{MemoryLifecycleManager, LifecycleAction, LifecycleStats};
 
 # Dependencies
 U std/option.{Option, Some, None};

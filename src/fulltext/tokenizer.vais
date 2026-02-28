@@ -54,7 +54,7 @@ X Tokenizer {
         ~stop_words = Vec.new();
         I config.enable_stop_words {
             ~i: u64 = 0;
-            L W i < 174 {
+            W i < 174 {
                 stop_words.push(ENGLISH_STOP_WORDS[i].clone());
                 i += 1;
             }
@@ -76,7 +76,7 @@ X Tokenizer {
     F default() -> Tokenizer {
         ~stop_words = Vec.new();
         ~i: u64 = 0;
-        L W i < 174 {
+        W i < 174 {
             stop_words.push(ENGLISH_STOP_WORDS[i].clone());
             i += 1;
         }
@@ -104,52 +104,48 @@ X Tokenizer {
         ~pos: u64 = 0;         # Current byte position
         ~token_position: u32 = 0; # Logical token position
 
-        L W pos < len {
+        W pos < len {
             # Skip non-word characters
             I !is_word_byte(bytes[pos]) {
                 pos += 1;
-                C;
-            }
-
-            # Start of a word token
-            ~start = pos;
-
-            # Consume word characters
-            L W pos < len && is_word_byte(bytes[pos]) {
-                pos += 1;
-            }
-
-            ~end = pos;
-            ~word_len = end - start;
-
-            # Length filter
-            I word_len < self.min_token_length as u64 ||
-               word_len > self.max_token_length as u64 {
-                C;
-            }
-
-            # Extract and normalize token
-            ~raw = text.substring(start, end);
-            ~term = I self.enable_lowercase {
-                to_ascii_lowercase(&raw)
             } E {
-                raw
-            };
+                # Start of a word token
+                ~start = pos;
 
-            # Stop word filter
-            I self.enable_stop_words && self.is_stop_word(&term) {
-                # Still increment position for stop words (preserves phrase distances)
-                token_position += 1;
-                C;
+                # Consume word characters
+                W pos < len && is_word_byte(bytes[pos]) {
+                    pos += 1;
+                }
+
+                ~end = pos;
+                ~word_len = end - start;
+
+                # Length filter
+                I word_len >= self.min_token_length as u64 &&
+                   word_len <= self.max_token_length as u64 {
+                    # Extract and normalize token
+                    ~raw = text.substring(start, end);
+                    ~term = I self.enable_lowercase {
+                        to_ascii_lowercase(&raw)
+                    } E {
+                        raw
+                    };
+
+                    # Stop word filter
+                    I self.enable_stop_words && self.is_stop_word(&term) {
+                        # Still increment position for stop words (preserves phrase distances)
+                        token_position += 1;
+                    } E {
+                        tokens.push(TokenInfo.new(
+                            term,
+                            token_position,
+                            start as u32,
+                            end as u32,
+                        ));
+                        token_position += 1;
+                    }
+                }
             }
-
-            tokens.push(TokenInfo.new(
-                term,
-                token_position,
-                start as u32,
-                end as u32,
-            ));
-            token_position += 1;
         }
 
         tokens
@@ -162,17 +158,17 @@ X Tokenizer {
         ~result: Vec<TermFreqInfo> = Vec.new();
 
         ~i: u64 = 0;
-        L W i < tokens.len() {
+        W i < tokens.len() {
             ~found = false;
             ~j: u64 = 0;
-            L W j < result.len() {
+            W j < result.len() && !found {
                 I result[j].term == tokens[i].term {
                     result[j].freq += 1;
                     result[j].positions.push(tokens[i].position);
                     found = true;
-                    B;
+                } E {
+                    j += 1;
                 }
-                j += 1;
             }
             I !found {
                 ~positions = Vec.new();
@@ -201,7 +197,7 @@ X Tokenizer {
         ~lo: u64 = 0;
         ~hi: u64 = self.stop_words.len();
 
-        L W lo < hi {
+        W lo < hi {
             ~mid = lo + (hi - lo) / 2;
             I self.stop_words[mid] < *term {
                 lo = mid + 1;
@@ -251,7 +247,7 @@ F to_ascii_lowercase(s: &Str) -> Str {
     ~bytes = s.as_bytes();
     ~result = Vec.with_capacity(bytes.len());
     ~i: u64 = 0;
-    L W i < bytes.len() {
+    W i < bytes.len() {
         ~b = bytes[i];
         I b >= 65 && b <= 90 {
             # A-Z → a-z

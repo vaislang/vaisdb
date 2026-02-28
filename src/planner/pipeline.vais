@@ -16,12 +16,17 @@ U sql/parser/ast.{Expr, BinOp, JoinType};
 U sql/executor/mod.{ExecutorRow, ExecContext, ExecStats};
 U sql/executor/expr_eval.{eval_expr, eval_predicate, EvalContext, ColumnBinding};
 U sql/executor/join.{RowSource};
+U sql/executor/scan.{TableScanExecutor};
 U sql/planner/mod.{PlanNode};
+U sql/catalog/schema.{TableInfo, ColumnInfo};
 U planner/types.{
     HybridPlanNode, HybridCost, EngineType, FusionMethod,
     VectorScanParams, GraphTraverseNodeParams, FullTextScanParams,
     HybridExecStats, err_hybrid_plan_failed
 };
+U vector/search.{VectorSearchParams, VectorSearchExecutor, VectorSearchRow};
+U graph/query/traverse_fn.{GraphTraverseParams, GraphTraverseResult, TraverseRow};
+U fulltext/search/match_fn.{FullTextMatchExecutor, FullTextMatchResult};
 
 # ============================================================================
 # Error Codes: EE=00 (common/planner), CC=09 (executor)
@@ -150,11 +155,12 @@ F fuse_weighted_sum(
     L lr: norm_left.iter() {
         ~left_key = row_hash_key(&lr.row);
         ~right_score = 0.0;
+        ~found_match = false;
         L (rk, ri, rs): right_map.iter() {
-            I *rk == left_key && rows_match(&lr.row, &norm_right[*ri].row) {
+            I !found_match && *rk == left_key && rows_match(&lr.row, &norm_right[*ri].row) {
                 right_score = *rs;
                 right_matched[*ri] = true;
-                B;
+                found_match = true;
             }
         }
         combined.push(ScoredResult {
@@ -217,11 +223,12 @@ F fuse_rrf(
 
         # Look up matching right row via hash
         ~left_key = row_hash_key(&left[i].row);
+        ~found_match = false;
         L (rk, ri, rank): right_map.iter() {
-            I *rk == left_key && rows_match(&left[i].row, &right[*ri].row) {
+            I !found_match && *rk == left_key && rows_match(&left[i].row, &right[*ri].row) {
                 rrf_score += 1.0 / (k as f64 + *rank as f64 + 1.0);
                 right_matched[*ri] = true;
-                B;
+                found_match = true;
             }
         }
 
@@ -387,65 +394,245 @@ F execute_plan(
 # ============================================================================
 
 # Execute SQL PlanNode via existing SQL executor
+# Recursively interprets PlanNode tree using Volcano-style executors
 F execute_sql_plan(plan: &PlanNode, ctx: &ExecContext) -> Result<Vec<ExecutorRow>, VaisError> {
-    # Delegate to existing SQL executor pipeline
-    # In a full implementation, would call sql/executor/scan.vais TableScanExecutor etc.
-    # For now, R empty result set as placeholder
-    Ok(Vec.new())
+    M plan {
+        PlanNode.SeqScan { table, alias, filter } => {
+            # Resolve table from catalog
+            ~table_info = ctx.catalog.get_table(table)
+                .ok_or(err_hybrid_exec_failed("Table not found: ".to_string() + table))?;
+            ~columns = ctx.catalog.get_columns(table_info.table_id)
+                .ok_or(err_hybrid_exec_failed("Columns not found for table"))?;
+
+            # Use TableScanExecutor
+            ~scan = TableScanExecutor.new(table_info.clone(), columns, filter.clone());
+            scan.open(ctx)?;
+
+            ~rows = Vec.new();
+            W true {
+                M scan.next(ctx)? {
+                    Some(row) => rows.push(row),
+                    None => { R Ok(rows); },
+                }
+            }
+            Ok(rows)
+        },
+
+        PlanNode.Filter { input, predicate } => {
+            ~rows = execute_sql_plan(input, ctx)?;
+            ~eval_ctx = EvalContext.new();
+            ~filtered = Vec.new();
+            L row: rows.iter() {
+                M eval_predicate(predicate, row.get_row(), &eval_ctx) {
+                    Ok(true) => filtered.push(row.clone()),
+                    _ => {},
+                }
+            }
+            Ok(filtered)
+        },
+
+        PlanNode.Project { input, columns } => {
+            ~rows = execute_sql_plan(input, ctx)?;
+            ~eval_ctx = EvalContext.new();
+            ~projected = Vec.new();
+            L row: rows.iter() {
+                ~values = Vec.new();
+                L col: columns.iter() {
+                    M eval_expr(&col.expr, row.get_row(), &eval_ctx) {
+                        Ok(val) => values.push(val),
+                        Err(e) => R Err(err_hybrid_exec_failed("SQL projection failed")),
+                    }
+                }
+                projected.push(ExecutorRow.virtual(Row.from_values(values)));
+            }
+            Ok(projected)
+        },
+
+        PlanNode.Limit { input, limit, offset } => {
+            ~rows = execute_sql_plan(input, ctx)?;
+            ~start = M offset { Some(o) => *o, None => 0 };
+            I start >= rows.len() { R Ok(Vec.new()); }
+            ~end = M limit {
+                Some(l) => {
+                    ~e = start + *l;
+                    I e > rows.len() { rows.len() } E { e }
+                },
+                None => rows.len(),
+            };
+            Ok(rows[start..end].to_vec())
+        },
+
+        PlanNode.Empty => Ok(Vec.new()),
+
+        _ => {
+            # Other plan types (IndexScan, Join, Sort, Aggregate, etc.)
+            # delegate to general SQL executor; return empty for unsupported nodes
+            Ok(Vec.new())
+        },
+    }
 }
 
 # Execute VECTOR_SEARCH via VectorSearchExecutor
+# Converts HybridPlanNode VectorScanParams → VectorSearchParams → executor call
 F execute_vector_scan(
     params: &VectorScanParams,
     ctx: &ExecContext,
 ) -> Result<Vec<ExecutorRow>, VaisError> {
-    # In a full implementation, would:
-    # 1. Resolve index from catalog
-    # 2. Call VectorSearchExecutor.open()/next()/close()
-    # 3. Apply pre/post filters
-    # 4. Convert VectorSearchRow to ExecutorRow with distance column
-    #
-    # The VectorSearchExecutor (src/vector/search.vais) handles:
-    # - HNSW MVCC-filtered search
-    # - Result materialization with original row data
-    # - Distance column appended
-    Ok(Vec.new())
+    # 1. Evaluate query vector expression to get actual Vec<f32>
+    ~eval_ctx = EvalContext.new();
+    ~query_val = eval_expr(&params.query_vector_expr, &Row.empty(), &eval_ctx)
+        .map_err(|e| err_hybrid_exec_failed("Failed to evaluate query vector expression"))?;
+
+    ~query_vector = M query_val {
+        SqlValue.VectorVal { v } => v,
+        SqlValue.ArrayVal { elements } => {
+            ~vec = Vec.new();
+            L elem: elements.iter() {
+                M elem {
+                    SqlValue.FloatVal { v } => vec.push(*v as f32),
+                    SqlValue.IntVal { v } => vec.push(*v as f32),
+                    _ => {},
+                }
+            }
+            vec
+        },
+        _ => R Err(err_hybrid_exec_failed("Query vector expression did not evaluate to vector")),
+    };
+
+    # 2. Build VectorSearchParams for the engine executor
+    ~search_params = VectorSearchParams {
+        table_name: params.table_name.clone(),
+        column_name: params.column_name.clone(),
+        query_vector: query_vector,
+        top_k: params.top_k as u64,
+        ef_search: params.ef_search,
+        index_id: 0,  # Resolved during open()
+        table_id: 0,  # Resolved during open()
+    };
+
+    # 3. Execute via VectorSearchExecutor (open/next/close Volcano model)
+    ~executor = VectorSearchExecutor.new(search_params, ctx);
+    executor.open()?;
+
+    ~rows = Vec.new();
+    W true {
+        M executor.next()? {
+            Some(row) => rows.push(row),
+            None => { executor.close()?; R Ok(rows); },
+        }
+    }
+
+    executor.close()?;
+    Ok(rows)
 }
 
 # Execute GRAPH_TRAVERSE via GraphTraverseFunction
+# Evaluates start_node_expr, builds GraphTraverseParams, delegates to engine
 F execute_graph_traverse(
     params: &GraphTraverseNodeParams,
     ctx: &ExecContext,
 ) -> Result<Vec<ExecutorRow>, VaisError> {
-    # In a full implementation, would:
-    # 1. Resolve start node from expression
-    # 2. Call BfsTraversal or DfsTraversal based on params.use_dfs
-    # 3. Apply edge type filter
-    # 4. Convert TraverseRow to ExecutorRow with (node_id, depth, path, edge_types)
-    #
-    # The GraphTraverseFunction (src/graph/query/traverse_fn.vais) handles:
-    # - BFS/DFS with MVCC snapshot isolation
-    # - Edge type filtering
-    # - Path tracking
-    Ok(Vec.new())
+    # 1. Evaluate start_node expression to get node ID
+    ~eval_ctx = EvalContext.new();
+    ~start_val = eval_expr(&params.start_node_expr, &Row.empty(), &eval_ctx)
+        .map_err(|e| err_hybrid_exec_failed("Failed to evaluate start node expression"))?;
+
+    ~start_node_id = M start_val {
+        SqlValue.IntVal { v } => *v as u64,
+        SqlValue.BigIntVal { v } => *v as u64,
+        _ => R Err(err_hybrid_exec_failed("Start node expression must evaluate to integer")),
+    };
+
+    # 2. Build GraphTraverseParams from planner params
+    ~traverse_params = GraphTraverseParams.default(start_node_id);
+    traverse_params.max_depth = params.max_depth;
+    traverse_params.direction = params.direction;
+    traverse_params.edge_type_filter = params.edge_type_filter.clone();
+    traverse_params.return_paths = params.return_paths;
+    traverse_params.use_dfs = params.use_dfs;
+
+    # 3. Resolve graph engine components from catalog
+    # The graph engine's traverse function needs: pool, node_store, adj_mgr, edge_type_table
+    # These are resolved via catalog's graph engine reference
+    ~graph_fn = ctx.catalog.get_graph_traverse_function()
+        .ok_or(err_hybrid_exec_failed("Graph engine not initialized"))?;
+
+    # 4. Execute traversal with MVCC snapshot
+    ~result = graph_fn.execute(&traverse_params, ctx.snapshot, ctx.clog)?;
+
+    # 5. Convert TraverseRows to ExecutorRows
+    # Schema: (node_id BIGINT, depth INT, edge_type VARCHAR)
+    ~rows = Vec.new();
+    L trow: result.rows.iter() {
+        ~values = Vec.new();
+        values.push(SqlValue.from_u64(trow.node_id));
+        values.push(SqlValue.from_u32(trow.depth));
+        M &trow.edge_type {
+            Some(ref et) => values.push(SqlValue.from_string(et.clone())),
+            None => values.push(SqlValue.Null),
+        }
+        rows.push(ExecutorRow.virtual(Row.from_values(values)));
+    }
+
+    Ok(rows)
 }
 
 # Execute FULLTEXT_MATCH via FullTextMatchExecutor
+# Evaluates query_text_expr, resolves index, delegates to BM25 search
 F execute_fulltext_scan(
     params: &FullTextScanParams,
     ctx: &ExecContext,
 ) -> Result<Vec<ExecutorRow>, VaisError> {
-    # In a full implementation, would:
-    # 1. Resolve fulltext index from catalog
-    # 2. Call FullTextMatchExecutor.execute_search()
-    # 3. Apply BM25 scoring
-    # 4. Convert FullTextMatchResult to ExecutorRow with (doc_id, score)
-    #
-    # The FullTextMatchExecutor (src/fulltext/search/match_fn.vais) handles:
-    # - Tokenization + posting list scan
-    # - MVCC visibility filtering
-    # - BM25 scoring
-    Ok(Vec.new())
+    # 1. Evaluate query text expression
+    ~eval_ctx = EvalContext.new();
+    ~query_val = eval_expr(&params.query_text_expr, &Row.empty(), &eval_ctx)
+        .map_err(|e| err_hybrid_exec_failed("Failed to evaluate fulltext query expression"))?;
+
+    ~query_text = M query_val {
+        SqlValue.StringVal { v } => v,
+        _ => R Err(err_hybrid_exec_failed("Fulltext query expression must evaluate to string")),
+    };
+
+    # 2. Resolve fulltext index from catalog
+    ~ft_index = ctx.catalog.get_fulltext_index(&params.table_name, &params.column_name)
+        .ok_or(err_hybrid_exec_failed("Fulltext index not found"))?;
+
+    # 3. Get fulltext engine components from catalog
+    ~ft_meta = ctx.catalog.get_fulltext_meta(ft_index.index_id)
+        .ok_or(err_hybrid_exec_failed("Fulltext metadata not found"))?;
+    ~ft_config = ctx.catalog.get_fulltext_config(ft_index.index_id)
+        .ok_or(err_hybrid_exec_failed("Fulltext config not found"))?;
+    ~dict_index = ctx.catalog.get_dictionary_index(ft_index.index_id)
+        .ok_or(err_hybrid_exec_failed("Dictionary index not found"))?;
+    ~posting_store = ctx.catalog.get_posting_store(ft_index.index_id)
+        .ok_or(err_hybrid_exec_failed("Posting store not found"))?;
+
+    # 4. Create and execute FullTextMatchExecutor
+    ~executor = FullTextMatchExecutor.new(ft_index.index_id, query_text, params.top_k);
+    executor.execute_search(
+        &ft_meta, &ft_config, &dict_index, &posting_store,
+        ctx.snapshot, ctx.clog, ctx.pool,
+    )?;
+    executor.open();
+
+    # 5. Convert results to ExecutorRows
+    # Schema: (doc_id BIGINT, score FLOAT, row_tid INT)
+    ~rows = Vec.new();
+    W true {
+        M executor.next() {
+            Some(result) => {
+                ~values = Vec.new();
+                values.push(SqlValue.from_u64(result.doc_id));
+                values.push(SqlValue.FloatVal { v: result.score });
+                values.push(SqlValue.from_u32(result.row_tid));
+                rows.push(ExecutorRow.virtual(Row.from_values(values)));
+            },
+            None => { R Ok(rows); },
+        }
+    }
+
+    executor.close();
+    Ok(rows)
 }
 
 # ============================================================================

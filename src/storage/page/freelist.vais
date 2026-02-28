@@ -55,7 +55,7 @@ X FreelistBitmap {
         ~bit_offset = (bit_index % 8) as u8;
 
         I byte_index >= self.data.len() {
-            return;
+            R;
         }
 
         I free {
@@ -104,11 +104,10 @@ X FreelistBitmap {
                 # Found a byte with free bits, find the first free bit
                 L bit_offset: 0..8 {
                     ~page_id = (byte_idx * 8 + bit_offset) as u32;
-                    I page_id >= pages_per_bitmap {
-                        B;
-                    }
-                    I (self.data[byte_idx] & (1 << bit_offset)) != 0 {
-                        R Some(page_id);
+                    I page_id < pages_per_bitmap {
+                        I (self.data[byte_idx] & (1 << bit_offset)) != 0 {
+                            R Some(page_id);
+                        }
                     }
                 }
             }
@@ -120,11 +119,10 @@ X FreelistBitmap {
                 I self.data[byte_idx] != 0 {
                     L bit_offset: 0..8 {
                         ~page_id = (byte_idx * 8 + bit_offset) as u32;
-                        I page_id >= pages_per_bitmap {
-                            B;
-                        }
-                        I (self.data[byte_idx] & (1 << bit_offset)) != 0 {
-                            R Some(page_id);
+                        I page_id < pages_per_bitmap {
+                            I (self.data[byte_idx] & (1 << bit_offset)) != 0 {
+                                R Some(page_id);
+                            }
                         }
                     }
                 }
@@ -142,7 +140,7 @@ X FreelistBitmap {
         L byte_idx: 0..max_bytes {
             ~byte_val = self.data[byte_idx];
             # Count set bits in this byte using Brian Kernighan's algorithm
-            L while byte_val != 0 {
+            W byte_val != 0 {
                 byte_val &= byte_val - 1;  # Clear the lowest set bit
                 count += 1;
             }
@@ -173,7 +171,8 @@ X FreelistBitmap {
         ~allocated = Vec.new();
         ~search_start = 0u32;
 
-        L while allocated.len() < (count as u64) {
+        ~has_free = true;
+        W allocated.len() < (count as u64) && has_free {
             M self.find_first_free_fast(pages_per_bitmap, search_start) {
                 Some(page_id) => {
                     self.set_bit(page_id, pages_per_bitmap, false);
@@ -182,7 +181,7 @@ X FreelistBitmap {
                 }
                 None => {
                     # No more free pages
-                    B;
+                    has_free = false;
                 }
             }
         }

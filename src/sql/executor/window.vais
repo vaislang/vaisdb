@@ -9,12 +9,12 @@ U std/option.Option;
 U std/vec.Vec;
 U std/str.Str;
 
-U crate/error.VaisError;
-U crate/sql/types.{SqlValue, SqlType, agg_sum, agg_avg_accumulate, agg_avg_finalize, agg_min, agg_max, agg_count_value, group_key_hash, order_by_compare};
-U crate/sql/row.Row;
-U crate/sql/parser/ast.{OrderByItem, Expr};
-U crate/sql/executor/mod.{ExecutorRow, ExecStats};
-U crate/sql/executor/expr_eval.{eval_expr, EvalContext};
+U storage/error.VaisError;
+U sql/types.{SqlValue, SqlType, agg_sum, agg_avg_accumulate, agg_avg_finalize, agg_min, agg_max, agg_count_value, group_key_hash, order_by_compare};
+U sql/row.Row;
+U sql/parser/ast.{OrderByItem, Expr};
+U sql/executor/mod.{ExecutorRow, ExecStats};
+U sql/executor/expr_eval.{eval_expr, EvalContext};
 
 # ============================================================================
 # WindowExecutor - Computes window function values over partitions
@@ -81,13 +81,14 @@ X WindowExecutor {
 
         # Step 1: Materialize all input rows
         ~input_rows = Vec.new();
-        L {
+        ~has_more = true;
+        W has_more {
             M self.input.next()? {
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     input_rows.push(exec_row.get_row().clone());
                 },
-                Option.None => { B; },
+                Option.None => { has_more = false; },
             }
         }
 
@@ -331,12 +332,13 @@ X WindowExecutor {
                     # Compare all sort key values
                     ~same = true;
                     L j: 0..sort_key.len() {
-                        M sort_key[j].compare(&prev_key[j]) {
-                            Result.Ok(0) => {},  # Equal, continue
-                            _ => {
-                                same = false;
-                                B;
-                            },
+                        I same {
+                            M sort_key[j].compare(&prev_key[j]) {
+                                Result.Ok(0) => {},  # Equal, continue
+                                _ => {
+                                    same = false;
+                                },
+                            }
                         }
                     }
                     same

@@ -155,7 +155,7 @@ F hnsw_delete(
     # Step 5: Collect affected layers for WAL record
     ~layers_affected = Vec.with_capacity((node.max_layer + 1) as u64);
     ~layer: u8 = 0;
-    L while layer <= node.max_layer {
+    W layer <= node.max_layer {
         layers_affected.push(layer);
         layer = layer + 1;
     }
@@ -254,7 +254,7 @@ F mvcc_filtered_search(
     ~retry = 0;
     ~max_retries = 3;
 
-    L while retry < max_retries {
+    W retry < max_retries {
         # Calculate actual k and ef for this attempt
         ~actual_k = ((k as f64) * oversample).ceil() as u64;
         ~actual_ef = I (actual_k as u32) > ef_search {
@@ -276,26 +276,23 @@ F mvcc_filtered_search(
         # Filter results by MVCC visibility
         ~visible_results = Vec.with_capacity(k);
         ~idx: u64 = 0;
-        L while idx < search_result.results.len() {
+        W idx < search_result.results.len() {
             ~entry = &search_result.results[idx];
             ~node_id = entry.node_id;
 
             # Get node and check visibility
             ~node_res = store.get_node(node_id);
-            ~node = M node_res {
-                Ok(n) => n,
-                Err(e) => {
-                    # Skip nodes that can't be retrieved
-                    idx = idx + 1;
-                    C                },
-            };
-
-            # Check MVCC visibility
-            I is_vector_visible(node, snapshot, clog) {
-                visible_results.push(SearchResultEntry.new(
-                    entry.node_id,
-                    entry.distance,
-                ));
+            M node_res {
+                Ok(node) => {
+                    # Check MVCC visibility
+                    I is_vector_visible(node, snapshot, clog) {
+                        visible_results.push(SearchResultEntry.new(
+                            entry.node_id,
+                            entry.distance,
+                        ));
+                    }
+                },
+                Err(_) => {},  # Skip nodes that can't be retrieved
             }
 
             idx = idx + 1;
@@ -345,23 +342,21 @@ F mvcc_filtered_search(
     # Final visibility filter
     ~final_visible = Vec.with_capacity(k);
     ~final_idx: u64 = 0;
-    L while final_idx < final_search.results.len() {
+    W final_idx < final_search.results.len() {
         ~final_entry = &final_search.results[final_idx];
         ~final_node_id = final_entry.node_id;
 
         ~final_node_res = store.get_node(final_node_id);
-        ~final_node = M final_node_res {
-            Ok(n) => n,
-            Err(e) => {
-                final_idx = final_idx + 1;
-                C            },
-        };
-
-        I is_vector_visible(final_node, snapshot, clog) {
-            final_visible.push(SearchResultEntry.new(
-                final_entry.node_id,
-                final_entry.distance,
-            ));
+        M final_node_res {
+            Ok(final_node) => {
+                I is_vector_visible(final_node, snapshot, clog) {
+                    final_visible.push(SearchResultEntry.new(
+                        final_entry.node_id,
+                        final_entry.distance,
+                    ));
+                }
+            },
+            Err(_) => {},  # Skip nodes that can't be retrieved
         }
 
         final_idx = final_idx + 1;
@@ -466,20 +461,17 @@ F scan_gc_candidates(
     ~ready_nodes = Vec.new();
 
     ~idx: u64 = 0;
-    L while idx < node_ids.len() {
+    W idx < node_ids.len() {
         ~node_id = node_ids[idx];
 
         ~node_res = store.get_node(node_id);
-        ~node = M node_res {
-            Ok(n) => n,
-            Err(e) => {
-                # Skip nodes that can't be retrieved
-                idx = idx + 1;
-                C            },
-        };
-
-        I is_gc_ready(node, low_water_mark, clog) {
-            ready_nodes.push(node_id);
+        M node_res {
+            Ok(node) => {
+                I is_gc_ready(node, low_water_mark, clog) {
+                    ready_nodes.push(node_id);
+                }
+            },
+            Err(_) => {},  # Skip nodes that can't be retrieved
         }
 
         idx = idx + 1;

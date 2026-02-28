@@ -81,12 +81,13 @@ X BootstrapPage {
     # Get meta.vdb path as string (strip null padding)
     F get_meta_path(self) -> Str {
         ~end = 0;
+        ~null_found = false;
         L i: 0..32 {
-            I self.meta_vdb_path[i] == 0 {
+            I !null_found && self.meta_vdb_path[i] == 0 {
                 end = i;
-                B;
+                null_found = true;
             }
-            I i == 31 { end = 32; }
+            I !null_found && i == 31 { end = 32; }
         }
         Str.from_utf8(&self.meta_vdb_path[0..end]).unwrap_or("meta.vdb")
     }

@@ -260,55 +260,49 @@ X ContextExpander {
         # Process each window
         ~i: u32 = 0;
         W i < windows.len() as u32 {
-            I *used.get(i as u64) {
-                i = i + 1;
-                C;
-            }
+            I !*used.get(i as u64) {
+                ~window_a = windows.get(i as u64);
+                ~chunks_a = window_a.all_chunk_ids();
+                ~merged_window = ContextWindow.new(window_a.center_chunk_id);
+                merged_window.chunks_before = window_a.chunks_before.clone();
+                merged_window.chunks_after = window_a.chunks_after.clone();
+                merged_window.total_tokens = window_a.total_tokens;
+                merged_window.expansion_level = window_a.expansion_level;
 
-            ~window_a = windows.get(i as u64);
-            ~chunks_a = window_a.all_chunk_ids();
-            ~merged_window = ContextWindow.new(window_a.center_chunk_id);
-            merged_window.chunks_before = window_a.chunks_before.clone();
-            merged_window.chunks_after = window_a.chunks_after.clone();
-            merged_window.total_tokens = window_a.total_tokens;
-            merged_window.expansion_level = window_a.expansion_level;
+                # Check for overlaps with other windows
+                ~j: u32 = i + 1;
+                W j < windows.len() as u32 {
+                    I !*used.get(j as u64) {
+                        ~window_b = windows.get(j as u64);
+                        ~chunks_b = window_b.all_chunk_ids();
 
-            # Check for overlaps with other windows
-            ~j: u32 = i + 1;
-            W j < windows.len() as u32 {
-                I *used.get(j as u64) {
-                    j = j + 1;
-                    C;
-                }
-
-                ~window_b = windows.get(j as u64);
-                ~chunks_b = window_b.all_chunk_ids();
-
-                # Check if windows overlap
-                ~overlaps = false;
-                ~m: u32 = 0;
-                W m < chunks_a.len() as u32 && !overlaps {
-                    ~chunk_a = *chunks_a.get(m as u64);
-                    ~n: u32 = 0;
-                    W n < chunks_b.len() as u32 {
-                        I chunk_a == *chunks_b.get(n as u64) {
-                            overlaps = true;
+                        # Check if windows overlap
+                        ~overlaps = false;
+                        ~m: u32 = 0;
+                        W m < chunks_a.len() as u32 && !overlaps {
+                            ~chunk_a = *chunks_a.get(m as u64);
+                            ~n: u32 = 0;
+                            W n < chunks_b.len() as u32 {
+                                I chunk_a == *chunks_b.get(n as u64) {
+                                    overlaps = true;
+                                }
+                                n = n + 1;
+                            }
+                            m = m + 1;
                         }
-                        n = n + 1;
+
+                        I overlaps {
+                            # Mark as used
+                            *used.get_mut(j as u64) = true;
+                        }
                     }
-                    m = m + 1;
+
+                    j = j + 1;
                 }
 
-                I overlaps {
-                    # Mark as used
-                    *used.get_mut(j as u64) = true;
-                }
-
-                j = j + 1;
+                *used.get_mut(i as u64) = true;
+                merged.push(merged_window);
             }
-
-            *used.get_mut(i as u64) = true;
-            merged.push(merged_window);
             i = i + 1;
         }
 

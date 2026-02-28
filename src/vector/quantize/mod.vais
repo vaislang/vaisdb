@@ -222,14 +222,12 @@ X QuantizationManager {
                 encoded.push(0_u8);  # Strategy tag
 
                 ~ i: u64 = 0;
-                L {
-                    I i >= vector.len() { B }
+                W i < vector.len() {
                     # Convert f32 to 4 bytes (little-endian)
                     ~ val = vector[i];
                     ~ bytes = val.to_le_bytes();
                     ~ j: u64 = 0;
-                    L {
-                        I j >= 4 { B }
+                    W j < 4 {
                         encoded.push(bytes[j]);
                         j = j + 1;
                     }
@@ -249,8 +247,7 @@ X QuantizationManager {
 
                         # Append i8 values as u8 (reinterpret cast)
                         ~ i: u64 = 0;
-                        L {
-                            I i >= quantized.len() { B }
+                        W i < quantized.len() {
                             encoded.push(quantized[i] as u8);
                             i = i + 1;
                         }
@@ -271,8 +268,7 @@ X QuantizationManager {
 
                         # Append PQ code
                         ~ i: u64 = 0;
-                        L {
-                            I i >= code.len() { B }
+                        W i < code.len() {
                             encoded.push(code[i]);
                             i = i + 1;
                         }
@@ -308,8 +304,7 @@ X QuantizationManager {
 
                 ~ vector = Vec.new();
                 ~ i: u64 = 0;
-                L {
-                    I i >= data.len() { B }
+                W i < data.len() {
 
                     # Read 4 bytes as f32 (little-endian)
                     ~ bytes: [u8; 4] = [data[i], data[i+1], data[i+2], data[i+3]];
@@ -328,8 +323,7 @@ X QuantizationManager {
                         # Convert u8 back to i8
                         ~ quantized = Vec.new();
                         ~ i: u64 = 0;
-                        L {
-                            I i >= data.len() { B }
+                        W i < data.len() {
                             quantized.push(data[i] as i8);
                             i = i + 1;
                         }
@@ -388,8 +382,7 @@ X QuantizationManager {
                         # Convert data from u8 to i8
                         ~ vec_quantized = Vec.new();
                         ~ i: u64 = 0;
-                        L {
-                            I i >= data.len() { B }
+                        W i < data.len() {
                             vec_quantized.push(data[i] as i8);
                             i = i + 1;
                         }
@@ -620,8 +613,7 @@ F test_encode_decode_none() {
     # Should be exact M for None strategy
     assert_eq!(decoded.len(), 4);
     ~ i: u64 = 0;
-    L {
-        I i >= 4 { B }
+    W i < 4 {
         assert!((decoded[i] - test_vec[i]).abs() < 0.0001);
         i = i + 1;
     }

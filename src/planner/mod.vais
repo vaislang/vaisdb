@@ -64,7 +64,7 @@ S HybridPlanner {
 }
 
 X HybridPlanner {
-    # Create a new HybridPlanner with default configuration
+    ## Create a new HybridPlanner with default configuration
     F new() -> HybridPlanner {
         HybridPlanner {
             cache: PlanCache.new(),
@@ -76,7 +76,7 @@ X HybridPlanner {
         }
     }
 
-    # Create with custom optimizer configuration
+    ## Create with custom optimizer configuration
     F with_config(config: OptimizerConfig) -> HybridPlanner {
         HybridPlanner {
             cache: PlanCache.new(),
@@ -92,13 +92,13 @@ X HybridPlanner {
     # Full Pipeline: plan + execute
     # ========================================================================
 
-    # Plan and execute a SELECT query end-to-end
-    #
-    # Steps:
-    # 1. analyze_query → QueryProfile
-    # 2. cache lookup → hit → use cached plan
-    # 3. miss → build_initial_plan → optimize → cache
-    # 4. execute_plan → Vec<ExecutorRow>
+    ## Plan and execute a SELECT query end-to-end
+    ##
+    ## Steps:
+    ## 1. analyze_query -> QueryProfile
+    ## 2. cache lookup -> hit: use cached plan
+    ## 3. miss -> build_initial_plan -> optimize -> cache
+    ## 4. execute_plan -> Vec<ExecutorRow>
     F execute_query(
         ~self,
         query: &SelectQuery,
@@ -107,14 +107,14 @@ X HybridPlanner {
         self.total_queries += 1;
 
         # Step 1: Analyze query
-        L profile = analyze_query(query)?;
+        ~profile := analyze_query(query)?;
 
         I profile.engine_count() > 1 {
             self.hybrid_queries += 1;
         }
 
         # Step 2: Plan (with cache)
-        L plan = self.plan_query(query, &profile)?;
+        ~plan := self.plan_query(query, &profile)?;
 
         # Step 3: Execute
         execute_plan(&plan, ctx)
@@ -124,16 +124,16 @@ X HybridPlanner {
     # Planning Only (no execution)
     # ========================================================================
 
-    # Plan a query without executing it
-    # Returns the optimized HybridPlanNode tree
+    ## Plan a query without executing it
+    ## Returns the optimized HybridPlanNode tree
     F plan_query(
         ~self,
         query: &SelectQuery,
         profile: &QueryProfile,
     ) -> Result<HybridPlanNode, VaisError> {
         # Check cache
-        L normalized = normalize_query(&query.to_string());
-        L cache_key = PlanCacheKey.new(normalized);
+        ~normalized := normalize_query(&query.to_string());
+        ~cache_key := PlanCacheKey.new(normalized);
 
         M self.cache.get(&cache_key) {
             Some(cached_plan) => {
@@ -149,7 +149,7 @@ X HybridPlanner {
         plan = optimize_plan(plan, &self.stats, &self.optimizer_config)?;
 
         # Cache the optimized plan
-        L tables = extract_tables(&plan);
+        ~tables := extract_tables(&plan);
         self.cache.put(cache_key, plan.clone(), plan.get_cost().clone(), tables);
 
         Ok(plan)
@@ -159,15 +159,15 @@ X HybridPlanner {
     # EXPLAIN
     # ========================================================================
 
-    # Generate EXPLAIN output for a query
+    ## Generate EXPLAIN output for a query
     F explain(
         ~self,
         query: &SelectQuery,
         options: &ExplainOptions,
     ) -> Result<Str, VaisError> {
         # Analyze and plan
-        L profile = analyze_query(query)?;
-        L plan = self.plan_query(query, &profile)?;
+        ~profile := analyze_query(query)?;
+        ~plan := self.plan_query(query, &profile)?;
 
         # Format output
         explain_plan(&plan, options)
@@ -177,14 +177,14 @@ X HybridPlanner {
     # ANALYZE (statistics refresh)
     # ========================================================================
 
-    # Run ANALYZE on a table to refresh statistics
+    ## Run ANALYZE on a table to refresh statistics
     F analyze_table(
         ~self,
         catalog: &CatalogManager,
         pool: &BufferPool,
         table_name: &Str,
     ) -> Result<AnalyzeResult, VaisError> {
-        L result = self.stats_collector.analyze_table(catalog, pool, table_name)?;
+        ~result := self.stats_collector.analyze_table(catalog, pool, table_name)?;
 
         # Invalidate cached plans for this table since stats changed
         self.cache.invalidate_table(table_name);
@@ -192,7 +192,7 @@ X HybridPlanner {
         Ok(result)
     }
 
-    # Refresh all statistics
+    ## Refresh all statistics
     F analyze_all(
         ~self,
         catalog: &CatalogManager,
@@ -210,12 +210,12 @@ X HybridPlanner {
     # Cache Management
     # ========================================================================
 
-    # Invalidate cached plans for a table (called on DDL)
+    ## Invalidate cached plans for a table (called on DDL)
     F invalidate_table(~self, table_name: &Str) -> u32 {
         self.cache.invalidate_table(table_name)
     }
 
-    # Clear entire plan cache
+    ## Clear entire plan cache
     F invalidate_all(~self) {
         self.cache.invalidate_all();
     }
@@ -224,9 +224,9 @@ X HybridPlanner {
     # Statistics & Diagnostics
     # ========================================================================
 
-    # Get planner statistics
+    ## Get planner statistics
     F planner_stats(self) -> PlannerStats {
-        L cache_stats = self.cache.stats();
+        ~cache_stats := self.cache.stats();
         PlannerStats {
             total_queries: self.total_queries,
             hybrid_queries: self.hybrid_queries,
@@ -238,7 +238,7 @@ X HybridPlanner {
         }
     }
 
-    # Update engine statistics (called by stats collector or external source)
+    ## Update engine statistics (called by stats collector or external source)
     F update_stats(~self, stats: HybridStats) {
         self.stats = stats;
         # Invalidate cache since cost estimates may change
@@ -279,7 +279,7 @@ X PlannerStats {
         result.push_str(&self.cache_entries.to_string());
         result.push_str("\n  Cache hit rate:  ");
         # Format hit_rate as percentage
-        L pct = (self.cache_hit_rate * 100.0) as u32;
+        ~pct := (self.cache_hit_rate * 100.0) as u32;
         result.push_str(&pct.to_string());
         result.push_str("%\n");
         result
@@ -290,26 +290,26 @@ X PlannerStats {
 # Convenience Functions (Module-Level)
 # ============================================================================
 
-# Quick plan: analyze + build + optimize in one call
-# For use outside the HybridPlanner (e.g., testing, one-shot queries)
+## Quick plan: analyze + build + optimize in one call
+## For use outside the HybridPlanner (e.g., testing, one-shot queries)
 F quick_plan(
     query: &SelectQuery,
     stats: &HybridStats,
 ) -> Result<HybridPlanNode, VaisError> {
-    L profile = analyze_query(query)?;
+    ~profile := analyze_query(query)?;
     ~plan = build_initial_plan(&profile, stats)?;
     plan = optimize_plan(plan, stats, &OptimizerConfig.default())?;
     Ok(plan)
 }
 
-# Quick explain: plan + format in one call
+## Quick explain: plan + format in one call
 F quick_explain(
     query: &SelectQuery,
     stats: &HybridStats,
     verbose: bool,
 ) -> Result<Str, VaisError> {
-    L plan = quick_plan(query, stats)?;
-    L options = ExplainOptions {
+    ~plan := quick_plan(query, stats)?;
+    ~options := ExplainOptions {
         analyze: false,
         verbose,
         format: ExplainFormat.Text,

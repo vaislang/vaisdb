@@ -44,8 +44,9 @@ F is_visible(
         }
         # Expired by same transaction - check expire_cmd_id
         I expired_by_effective == snapshot.get_txn_id() {
-            # Visible if expiration hasn't happened yet from this command's perspective
-            R expire_cmd_id >= snapshot.get_cmd_id();
+            # Visible only if expiration happened in a LATER command
+            # (expire_cmd_id == cmd_id means this command is doing the expiration)
+            R expire_cmd_id > snapshot.get_cmd_id();
         }
         R true;
     }
@@ -61,7 +62,7 @@ F is_visible(
     }
     # Expired by current transaction - check expire_cmd_id
     I expired_by_effective == snapshot.get_txn_id() {
-        R expire_cmd_id >= snapshot.get_cmd_id();
+        R expire_cmd_id > snapshot.get_cmd_id();
     }
     I !is_committed_before(expired_by_effective, snapshot, clog) {
         R true;  # Expirer not yet committed = still visible

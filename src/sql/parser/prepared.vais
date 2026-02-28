@@ -29,7 +29,7 @@ X PreparedStatement {
     # Parse SQL, count parameters, create prepared statement
     F prepare(name: Str, sql: Str) -> Result<PreparedStatement, VaisError> {
         # Parse the SQL
-        ~let stmts = parse_sql(sql.clone())?;
+        ~stmts = parse_sql(sql.clone())?;
 
         # Must be exactly one statement
         I stmts.len() != 1 {
@@ -39,13 +39,13 @@ X PreparedStatement {
             ));
         }
 
-        ~let parsed = stmts[0].clone();
+        ~parsed = stmts[0].clone();
 
         # Count parameters in the AST
-        ~let param_count = count_parameters(&parsed);
+        ~param_count = count_parameters(&parsed);
 
         # Initialize empty type hints
-        ~let param_types = Vec.new();
+        ~param_types = Vec.new();
         L _: 0..param_count {
             param_types.push(Option.None);
         }
@@ -118,7 +118,7 @@ X PreparedStatementCache {
         }
 
         # Create the prepared statement
-        ~let stmt = PreparedStatement.prepare(name.clone(), sql)?;
+        ~stmt = PreparedStatement.prepare(name.clone(), sql)?;
 
         # Check cache size limit
         I self.statements.len() >= self.max_size {
@@ -181,13 +181,13 @@ F count_parameters(stmt: &Statement) -> u32 {
     M stmt {
         Statement.Select { query } => count_params_in_query(query),
         Statement.Insert { insert } => {
-            ~let max = 0u32;
+            ~max = 0u32;
             # Count in source (VALUES or SELECT)
             M &insert.source {
                 InsertSource.Values { rows } => {
                     L row: rows {
                         L expr: row {
-                            ~let expr_max = count_params_in_expr(expr);
+                            ~expr_max = count_params_in_expr(expr);
                             I expr_max > max {
                                 max = expr_max;
                             }
@@ -201,10 +201,10 @@ F count_parameters(stmt: &Statement) -> u32 {
             max
         },
         Statement.Update { update } => {
-            ~let max = 0u32;
+            ~max = 0u32;
             # Count in assignments
             L assign: &update.assignments {
-                ~let expr_max = count_params_in_expr(&assign.value);
+                ~expr_max = count_params_in_expr(&assign.value);
                 I expr_max > max {
                     max = expr_max;
                 }
@@ -212,7 +212,7 @@ F count_parameters(stmt: &Statement) -> u32 {
             # Count in where clause
             M &update.where_clause {
                 Option.Some(expr) => {
-                    ~let expr_max = count_params_in_expr(expr);
+                    ~expr_max = count_params_in_expr(expr);
                     I expr_max > max {
                         max = expr_max;
                     }
@@ -228,11 +228,11 @@ F count_parameters(stmt: &Statement) -> u32 {
             }
         },
         Statement.CreateTable { create } => {
-            ~let max = 0u32;
+            ~max = 0u32;
             L col: &create.columns {
                 M &col.default_value {
                     Option.Some(expr) => {
-                        ~let expr_max = count_params_in_expr(expr);
+                        ~expr_max = count_params_in_expr(expr);
                         I expr_max > max {
                             max = expr_max;
                         }
@@ -241,7 +241,7 @@ F count_parameters(stmt: &Statement) -> u32 {
                 }
                 M &col.check_expr {
                     Option.Some(expr) => {
-                        ~let expr_max = count_params_in_expr(expr);
+                        ~expr_max = count_params_in_expr(expr);
                         I expr_max > max {
                             max = expr_max;
                         }
@@ -255,9 +255,9 @@ F count_parameters(stmt: &Statement) -> u32 {
             count_parameters(&**inner)
         },
         Statement.Execute { params, .. } => {
-            ~let max = 0u32;
+            ~max = 0u32;
             L expr: params {
-                ~let expr_max = count_params_in_expr(expr);
+                ~expr_max = count_params_in_expr(expr);
                 I expr_max > max {
                     max = expr_max;
                 }
@@ -270,11 +270,11 @@ F count_parameters(stmt: &Statement) -> u32 {
 
 # Count parameters in a SelectQuery
 F count_params_in_query(query: &SelectQuery) -> u32 {
-    ~let max = 0u32;
+    ~max = 0u32;
 
     # CTEs
     L cte: &query.ctes {
-        ~let cte_max = count_params_in_query(&cte.query);
+        ~cte_max = count_params_in_query(&cte.query);
         I cte_max > max {
             max = cte_max;
         }
@@ -284,7 +284,7 @@ F count_params_in_query(query: &SelectQuery) -> u32 {
     L item: &query.select_list {
         M item {
             SelectItem.Expr { expr, .. } => {
-                ~let expr_max = count_params_in_expr(expr);
+                ~expr_max = count_params_in_expr(expr);
                 I expr_max > max {
                     max = expr_max;
                 }
@@ -297,7 +297,7 @@ F count_params_in_query(query: &SelectQuery) -> u32 {
     M &query.from {
         Option.Some(refs) => {
             L table_ref: refs {
-                ~let ref_max = count_params_in_table_ref(table_ref);
+                ~ref_max = count_params_in_table_ref(table_ref);
                 I ref_max > max {
                     max = ref_max;
                 }
@@ -309,7 +309,7 @@ F count_params_in_query(query: &SelectQuery) -> u32 {
     # WHERE
     M &query.where_clause {
         Option.Some(expr) => {
-            ~let expr_max = count_params_in_expr(expr);
+            ~expr_max = count_params_in_expr(expr);
             I expr_max > max {
                 max = expr_max;
             }
@@ -319,7 +319,7 @@ F count_params_in_query(query: &SelectQuery) -> u32 {
 
     # GROUP BY
     L expr: &query.group_by {
-        ~let expr_max = count_params_in_expr(expr);
+        ~expr_max = count_params_in_expr(expr);
         I expr_max > max {
             max = expr_max;
         }
@@ -328,7 +328,7 @@ F count_params_in_query(query: &SelectQuery) -> u32 {
     # HAVING
     M &query.having {
         Option.Some(expr) => {
-            ~let expr_max = count_params_in_expr(expr);
+            ~expr_max = count_params_in_expr(expr);
             I expr_max > max {
                 max = expr_max;
             }
@@ -338,7 +338,7 @@ F count_params_in_query(query: &SelectQuery) -> u32 {
 
     # ORDER BY
     L item: &query.order_by {
-        ~let expr_max = count_params_in_expr(&item.expr);
+        ~expr_max = count_params_in_expr(&item.expr);
         I expr_max > max {
             max = expr_max;
         }
@@ -347,7 +347,7 @@ F count_params_in_query(query: &SelectQuery) -> u32 {
     # LIMIT/OFFSET
     M &query.limit {
         Option.Some(expr) => {
-            ~let expr_max = count_params_in_expr(expr);
+            ~expr_max = count_params_in_expr(expr);
             I expr_max > max {
                 max = expr_max;
             }
@@ -356,7 +356,7 @@ F count_params_in_query(query: &SelectQuery) -> u32 {
     }
     M &query.offset {
         Option.Some(expr) => {
-            ~let expr_max = count_params_in_expr(expr);
+            ~expr_max = count_params_in_expr(expr);
             I expr_max > max {
                 max = expr_max;
             }
@@ -367,7 +367,7 @@ F count_params_in_query(query: &SelectQuery) -> u32 {
     # Set operations
     M &query.set_op {
         Option.Some(set_op) => {
-            ~let set_max = count_params_in_query(&*set_op.right);
+            ~set_max = count_params_in_query(&*set_op.right);
             I set_max > max {
                 max = set_max;
             }
@@ -383,14 +383,14 @@ F count_params_in_table_ref(table_ref: &TableRef) -> u32 {
     M table_ref {
         TableRef.Subquery { query, .. } => count_params_in_query(&**query),
         TableRef.Join { join } => {
-            ~let left_max = count_params_in_table_ref(&*join.left);
-            ~let right_max = count_params_in_table_ref(&*join.right);
-            ~let max = I left_max > right_max { left_max } E { right_max };
+            ~left_max = count_params_in_table_ref(&*join.left);
+            ~right_max = count_params_in_table_ref(&*join.right);
+            ~max = I left_max > right_max { left_max } E { right_max };
 
             # Check condition
             M &join.condition {
                 JoinCondition.On { expr } => {
-                    ~let cond_max = count_params_in_expr(expr);
+                    ~cond_max = count_params_in_expr(expr);
                     I cond_max > max {
                         max = cond_max;
                     }
@@ -400,8 +400,8 @@ F count_params_in_table_ref(table_ref: &TableRef) -> u32 {
             }
         },
         TableRef.CrossJoin { left, right } => {
-            ~let left_max = count_params_in_table_ref(&**left);
-            ~let right_max = count_params_in_table_ref(&**right);
+            ~left_max = count_params_in_table_ref(&**left);
+            ~right_max = count_params_in_table_ref(&**right);
             I left_max > right_max { left_max } E { right_max }
         },
         _ => 0,
@@ -413,23 +413,23 @@ F count_params_in_expr(expr: &Expr) -> u32 {
     M expr {
         Expr.Parameter { idx } => *idx,
         Expr.BinaryOp { left, right, .. } => {
-            ~let left_max = count_params_in_expr(&**left);
-            ~let right_max = count_params_in_expr(&**right);
+            ~left_max = count_params_in_expr(&**left);
+            ~right_max = count_params_in_expr(&**right);
             I left_max > right_max { left_max } E { right_max }
         },
         Expr.UnaryOp { operand, .. } => count_params_in_expr(&**operand),
         Expr.IsNull { expr: e, .. } => count_params_in_expr(&**e),
         Expr.Between { expr: e, low, high, .. } => {
-            ~let e_max = count_params_in_expr(&**e);
-            ~let low_max = count_params_in_expr(&**low);
-            ~let high_max = count_params_in_expr(&**high);
-            ~let max = I e_max > low_max { e_max } E { low_max };
+            ~e_max = count_params_in_expr(&**e);
+            ~low_max = count_params_in_expr(&**low);
+            ~high_max = count_params_in_expr(&**high);
+            ~max = I e_max > low_max { e_max } E { low_max };
             I high_max > max { high_max } E { max }
         },
         Expr.InList { expr: e, list, .. } => {
-            ~let max = count_params_in_expr(&**e);
+            ~max = count_params_in_expr(&**e);
             L item: list {
-                ~let item_max = count_params_in_expr(item);
+                ~item_max = count_params_in_expr(item);
                 I item_max > max {
                     max = item_max;
                 }
@@ -437,18 +437,18 @@ F count_params_in_expr(expr: &Expr) -> u32 {
             max
         },
         Expr.InSubquery { expr: e, query, .. } => {
-            ~let e_max = count_params_in_expr(&**e);
-            ~let q_max = count_params_in_query(&**query);
+            ~e_max = count_params_in_expr(&**e);
+            ~q_max = count_params_in_query(&**query);
             I e_max > q_max { e_max } E { q_max }
         },
         Expr.Exists { query, .. } => count_params_in_query(&**query),
         Expr.Like { expr: e, pattern, .. } => {
-            ~let e_max = count_params_in_expr(&**e);
-            ~let p_max = count_params_in_expr(&**pattern);
+            ~e_max = count_params_in_expr(&**e);
+            ~p_max = count_params_in_expr(&**pattern);
             I e_max > p_max { e_max } E { p_max }
         },
         Expr.Case { operand, when_clauses, else_result } => {
-            ~let max = 0u32;
+            ~max = 0u32;
             M operand {
                 Option.Some(op) => {
                     max = count_params_in_expr(&**op);
@@ -456,8 +456,8 @@ F count_params_in_expr(expr: &Expr) -> u32 {
                 Option.None => {},
             }
             L when_clause: when_clauses {
-                ~let cond_max = count_params_in_expr(&when_clause.condition);
-                ~let res_max = count_params_in_expr(&when_clause.result);
+                ~cond_max = count_params_in_expr(&when_clause.condition);
+                ~res_max = count_params_in_expr(&when_clause.result);
                 I cond_max > max {
                     max = cond_max;
                 }
@@ -467,7 +467,7 @@ F count_params_in_expr(expr: &Expr) -> u32 {
             }
             M else_result {
                 Option.Some(e) => {
-                    ~let e_max = count_params_in_expr(&**e);
+                    ~e_max = count_params_in_expr(&**e);
                     I e_max > max {
                         max = e_max;
                     }
@@ -478,9 +478,9 @@ F count_params_in_expr(expr: &Expr) -> u32 {
         },
         Expr.Cast { expr: e, .. } => count_params_in_expr(&**e),
         Expr.FunctionCall { args, .. } => {
-            ~let max = 0u32;
+            ~max = 0u32;
             L arg: args {
-                ~let arg_max = count_params_in_expr(arg);
+                ~arg_max = count_params_in_expr(arg);
                 I arg_max > max {
                     max = arg_max;
                 }
@@ -488,15 +488,15 @@ F count_params_in_expr(expr: &Expr) -> u32 {
             max
         },
         Expr.WindowFunc { func, partition_by, order_by } => {
-            ~let max = count_params_in_expr(&**func);
+            ~max = count_params_in_expr(&**func);
             L expr: partition_by {
-                ~let expr_max = count_params_in_expr(expr);
+                ~expr_max = count_params_in_expr(expr);
                 I expr_max > max {
                     max = expr_max;
                 }
             }
             L item: order_by {
-                ~let expr_max = count_params_in_expr(&item.expr);
+                ~expr_max = count_params_in_expr(&item.expr);
                 I expr_max > max {
                     max = expr_max;
                 }
@@ -505,8 +505,8 @@ F count_params_in_expr(expr: &Expr) -> u32 {
         },
         Expr.Subquery { query } => count_params_in_query(&**query),
         Expr.Concat { left, right } => {
-            ~let left_max = count_params_in_expr(&**left);
-            ~let right_max = count_params_in_expr(&**right);
+            ~left_max = count_params_in_expr(&**left);
+            ~right_max = count_params_in_expr(&**right);
             I left_max > right_max { left_max } E { right_max }
         },
         _ => 0,
@@ -521,15 +521,15 @@ F count_params_in_expr(expr: &Expr) -> u32 {
 F substitute_params(stmt: &Statement, params: &[SqlValue]) -> Result<Statement, VaisError> {
     M stmt {
         Statement.Select { query } => {
-            ~let new_query = substitute_query(query, params)?;
+            ~new_query = substitute_query(query, params)?;
             Ok(Statement.Select { query: new_query })
         },
         Statement.Insert { insert } => {
-            ~let new_source = M &insert.source {
+            ~new_source = M &insert.source {
                 InsertSource.Values { rows } => {
-                    ~let new_rows = Vec.new();
+                    ~new_rows = Vec.new();
                     L row: rows {
-                        ~let new_row = Vec.new();
+                        ~new_row = Vec.new();
                         L expr: row {
                             new_row.push(substitute_expr(expr, params)?);
                         }
@@ -550,14 +550,14 @@ F substitute_params(stmt: &Statement, params: &[SqlValue]) -> Result<Statement, 
             })
         },
         Statement.Update { update } => {
-            ~let new_assignments = Vec.new();
+            ~new_assignments = Vec.new();
             L assign: &update.assignments {
                 new_assignments.push(Assignment {
                     column: assign.column.clone(),
                     value: substitute_expr(&assign.value, params)?,
                 });
             }
-            ~let new_where = M &update.where_clause {
+            ~new_where = M &update.where_clause {
                 Option.Some(expr) => Option.Some(substitute_expr(expr, params)?),
                 Option.None => Option.None,
             };
@@ -570,7 +570,7 @@ F substitute_params(stmt: &Statement, params: &[SqlValue]) -> Result<Statement, 
             })
         },
         Statement.Delete { delete } => {
-            ~let new_where = M &delete.where_clause {
+            ~new_where = M &delete.where_clause {
                 Option.Some(expr) => Option.Some(substitute_expr(expr, params)?),
                 Option.None => Option.None,
             };
@@ -589,7 +589,7 @@ F substitute_params(stmt: &Statement, params: &[SqlValue]) -> Result<Statement, 
 # Substitute parameters in a SelectQuery
 F substitute_query(query: &SelectQuery, params: &[SqlValue]) -> Result<SelectQuery, VaisError> {
     # CTEs
-    ~let new_ctes = Vec.new();
+    ~new_ctes = Vec.new();
     L cte: &query.ctes {
         new_ctes.push(Cte {
             name: cte.name.clone(),
@@ -600,9 +600,9 @@ F substitute_query(query: &SelectQuery, params: &[SqlValue]) -> Result<SelectQue
     }
 
     # Select list
-    ~let new_select_list = Vec.new();
+    ~new_select_list = Vec.new();
     L item: &query.select_list {
-        ~let new_item = M item {
+        ~new_item = M item {
             SelectItem.Expr { expr, alias } => {
                 SelectItem.Expr {
                     expr: substitute_expr(expr, params)?,
@@ -615,9 +615,9 @@ F substitute_query(query: &SelectQuery, params: &[SqlValue]) -> Result<SelectQue
     }
 
     # FROM clause
-    ~let new_from = M &query.from {
+    ~new_from = M &query.from {
         Option.Some(refs) => {
-            ~let new_refs = Vec.new();
+            ~new_refs = Vec.new();
             L table_ref: refs {
                 new_refs.push(substitute_table_ref(table_ref, params)?);
             }
@@ -627,25 +627,25 @@ F substitute_query(query: &SelectQuery, params: &[SqlValue]) -> Result<SelectQue
     };
 
     # WHERE
-    ~let new_where = M &query.where_clause {
+    ~new_where = M &query.where_clause {
         Option.Some(expr) => Option.Some(substitute_expr(expr, params)?),
         Option.None => Option.None,
     };
 
     # GROUP BY
-    ~let new_group_by = Vec.new();
+    ~new_group_by = Vec.new();
     L expr: &query.group_by {
         new_group_by.push(substitute_expr(expr, params)?);
     }
 
     # HAVING
-    ~let new_having = M &query.having {
+    ~new_having = M &query.having {
         Option.Some(expr) => Option.Some(substitute_expr(expr, params)?),
         Option.None => Option.None,
     };
 
     # ORDER BY
-    ~let new_order_by = Vec.new();
+    ~new_order_by = Vec.new();
     L item: &query.order_by {
         new_order_by.push(OrderByItem {
             expr: substitute_expr(&item.expr, params)?,
@@ -655,17 +655,17 @@ F substitute_query(query: &SelectQuery, params: &[SqlValue]) -> Result<SelectQue
     }
 
     # LIMIT/OFFSET
-    ~let new_limit = M &query.limit {
+    ~new_limit = M &query.limit {
         Option.Some(expr) => Option.Some(substitute_expr(expr, params)?),
         Option.None => Option.None,
     };
-    ~let new_offset = M &query.offset {
+    ~new_offset = M &query.offset {
         Option.Some(expr) => Option.Some(substitute_expr(expr, params)?),
         Option.None => Option.None,
     };
 
     # Set operations
-    ~let new_set_op = M &query.set_op {
+    ~new_set_op = M &query.set_op {
         Option.Some(set_op) => {
             Option.Some(SetOperation {
                 op: set_op.op.clone(),
@@ -701,9 +701,9 @@ F substitute_table_ref(table_ref: &TableRef, params: &[SqlValue]) -> Result<Tabl
             })
         },
         TableRef.Join { join } => {
-            ~let new_left = Box.new(substitute_table_ref(&*join.left, params)?);
-            ~let new_right = Box.new(substitute_table_ref(&*join.right, params)?);
-            ~let new_condition = M &join.condition {
+            ~new_left = Box.new(substitute_table_ref(&*join.left, params)?);
+            ~new_right = Box.new(substitute_table_ref(&*join.right, params)?);
+            ~new_condition = M &join.condition {
                 JoinCondition.On { expr } => {
                     JoinCondition.On { expr: substitute_expr(expr, params)? }
                 },
@@ -737,7 +737,7 @@ F substitute_expr(expr: &Expr, params: &[SqlValue]) -> Result<Expr, VaisError> {
             I *idx == 0 || (*idx as u64) > params.len() {
                 R Err(err_param_out_of_range(*idx, params.len() as u32));
             }
-            ~let param_idx = (*idx - 1) as u64;
+            ~param_idx = (*idx - 1) as u64;
             Ok(Expr.Literal { value: params[param_idx].clone() })
         },
 
@@ -778,7 +778,7 @@ F substitute_expr(expr: &Expr, params: &[SqlValue]) -> Result<Expr, VaisError> {
 
         # IN (list)
         Expr.InList { expr: e, list, negated } => {
-            ~let new_list = Vec.new();
+            ~new_list = Vec.new();
             L item: list {
                 new_list.push(substitute_expr(item, params)?);
             }
@@ -817,18 +817,18 @@ F substitute_expr(expr: &Expr, params: &[SqlValue]) -> Result<Expr, VaisError> {
 
         # CASE
         Expr.Case { operand, when_clauses, else_result } => {
-            ~let new_operand = M operand {
+            ~new_operand = M operand {
                 Option.Some(op) => Option.Some(Box.new(substitute_expr(&**op, params)?)),
                 Option.None => Option.None,
             };
-            ~let new_when_clauses = Vec.new();
+            ~new_when_clauses = Vec.new();
             L when_clause: when_clauses {
                 new_when_clauses.push(WhenClause {
                     condition: substitute_expr(&when_clause.condition, params)?,
                     result: substitute_expr(&when_clause.result, params)?,
                 });
             }
-            ~let new_else = M else_result {
+            ~new_else = M else_result {
                 Option.Some(e) => Option.Some(Box.new(substitute_expr(&**e, params)?)),
                 Option.None => Option.None,
             };
@@ -849,7 +849,7 @@ F substitute_expr(expr: &Expr, params: &[SqlValue]) -> Result<Expr, VaisError> {
 
         # Function call
         Expr.FunctionCall { name, args, distinct } => {
-            ~let new_args = Vec.new();
+            ~new_args = Vec.new();
             L arg: args {
                 new_args.push(substitute_expr(arg, params)?);
             }
@@ -862,12 +862,12 @@ F substitute_expr(expr: &Expr, params: &[SqlValue]) -> Result<Expr, VaisError> {
 
         # Window function
         Expr.WindowFunc { func, partition_by, order_by } => {
-            ~let new_func = Box.new(substitute_expr(&**func, params)?);
-            ~let new_partition = Vec.new();
+            ~new_func = Box.new(substitute_expr(&**func, params)?);
+            ~new_partition = Vec.new();
             L expr: partition_by {
                 new_partition.push(substitute_expr(expr, params)?);
             }
-            ~let new_order = Vec.new();
+            ~new_order = Vec.new();
             L item: order_by {
                 new_order.push(OrderByItem {
                     expr: substitute_expr(&item.expr, params)?,

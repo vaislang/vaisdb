@@ -3,14 +3,14 @@
 # Single-writer + multiple-reader lock management for HNSW index
 
 U std/sync.{RwLock, Mutex, MutexGuard, RwLockReadGuard, RwLockWriteGuard, AtomicU64, Ordering};
-U crate/common/error.{VaisError, ErrorCategory, error_code};
-U crate/vector/types.{HnswMeta, HnswConfig, VectorId};
-U crate/vector/search.SearchResult;
+U storage/error.{VaisError, ErrorCategory, error_code};
+U vector/types.{HnswMeta, HnswConfig, VectorId};
+U vector/search.SearchResult;
 
 # Error codes: EE=02 (vector), CC=07 (concurrency)
-const ERROR_LOCK_POISONED: u32 = error_code(2, 7, 1);      # 02-07-001
-const ERROR_WRITE_CONFLICT: u32 = error_code(2, 7, 2);     # 02-07-002
-const ERROR_LOCK_TIMEOUT: u32 = error_code(2, 7, 3);       # 02-07-003
+L ERROR_LOCK_POISONED: u32 = error_code(2, 7, 1);      # 02-07-001
+L ERROR_WRITE_CONFLICT: u32 = error_code(2, 7, 2);     # 02-07-002
+L ERROR_LOCK_TIMEOUT: u32 = error_code(2, 7, 3);       # 02-07-003
 
 ###############################################################################
 # HnswLock - Core concurrency primitive
@@ -23,7 +23,7 @@ const ERROR_LOCK_TIMEOUT: u32 = error_code(2, 7, 3);       # 02-07-003
 # - Active reader/writer counts for observability
 # - Read path is lock-free via snapshot isolation (MVCC handles consistency)
 S HnswLock {
-    rw_lock: RwLock<()>,           # Main read-write lock
+    rw_lock: RwLock,               # Main read-write lock
     write_queue: Mutex<Vec<u64>>,  # Pending write txn_ids (FIFO order)
     active_readers: AtomicU64,     # Count of active readers
     active_writer: AtomicU64,      # Current writer txn_id (0 = none)
@@ -44,12 +44,14 @@ X HnswLock {
     # Returns guard that auto-releases on drop
     F read_lock(self) -> Result<HnswReadGuard, VaisError> {
         # Acquire read portion of RwLock
-        guard := self.rw_lock.read()
-            .map_err(|_| VaisError {
+        guard := M self.rw_lock.read() {
+            Ok(g) => g,
+            Err(_) => R Err(VaisError {
                 code: ERROR_LOCK_POISONED,
                 message: "HNSW read lock poisoned".to_string(),
                 category: ErrorCategory.Concurrency,
-            })?;
+            }),
+        };
 
         # Increment active reader count
         self.active_readers.fetch_add(1, Ordering.SeqCst);
@@ -65,23 +67,28 @@ X HnswLock {
     F write_lock(self, txn_id: u64) -> Result<HnswWriteGuard, VaisError> {
         # Add to write queue
         {
-            ~queue = self.write_queue.lock()
-                .map_err(|_| VaisError {
+            ~queue = M self.write_queue.lock() {
+                Ok(g) => g,
+                Err(_) => R Err(VaisError {
                     code: ERROR_LOCK_POISONED,
                     message: "HNSW write queue lock poisoned".to_string(),
                     category: ErrorCategory.Concurrency,
-                })?;
+                }),
+            };
             queue.push(txn_id);
         }
 
         # Wait until this txn_id is at front of queue
-        L {
-            ~queue = self.write_queue.lock()
-                .map_err(|_| VaisError {
+        ~at_front = false;
+        W !at_front {
+            ~queue = M self.write_queue.lock() {
+                Ok(g) => g,
+                Err(_) => R Err(VaisError {
                     code: ERROR_LOCK_POISONED,
                     message: "HNSW write queue lock poisoned".to_string(),
                     category: ErrorCategory.Concurrency,
-                })?;
+                }),
+            };
 
             I queue.is_empty() {
                 R Err(VaisError {
@@ -92,20 +99,23 @@ X HnswLock {
             }
 
             I queue[0] == txn_id {
-                B            }
-
-            # Release queue lock and yield
-            drop(queue);
-            std.thread.yield_now();
+                at_front = true;
+            } E {
+                # Release queue lock and yield
+                drop(queue);
+                std.thread.yield_now();
+            }
         }
 
         # Acquire exclusive write lock
-        guard := self.rw_lock.write()
-            .map_err(|_| VaisError {
+        guard := M self.rw_lock.write() {
+            Ok(g) => g,
+            Err(_) => R Err(VaisError {
                 code: ERROR_LOCK_POISONED,
                 message: "HNSW write lock poisoned".to_string(),
                 category: ErrorCategory.Concurrency,
-            })?;
+            }),
+        };
 
         # Set active writer
         self.active_writer.store(txn_id, Ordering.SeqCst);
@@ -121,12 +131,14 @@ X HnswLock {
     # Returns None if lock unavailable, Some(guard) if acquired
     F try_write_lock(self, txn_id: u64) -> Result<Option<HnswWriteGuard>, VaisError> {
         # Check if queue is empty and we can acquire immediately
-        ~queue = self.write_queue.lock()
-            .map_err(|_| VaisError {
+        ~queue = M self.write_queue.lock() {
+            Ok(g) => g,
+            Err(_) => R Err(VaisError {
                 code: ERROR_LOCK_POISONED,
                 message: "HNSW write queue lock poisoned".to_string(),
                 category: ErrorCategory.Concurrency,
-            })?;
+            }),
+        };
 
         I !queue.is_empty() {
             R Ok(None);
@@ -184,26 +196,26 @@ X HnswLock {
 ###############################################################################
 
 # Read lock guard - automatically releases read lock on drop
-S HnswReadGuard<'a> {
-    lock: &'a HnswLock,
-    _guard: RwLockReadGuard<'a, ()>,
+S HnswReadGuard {
+    lock: &HnswLock,
+    _guard: RwLockReadGuard,
 }
 
-X Drop for HnswReadGuard<'_> {
-    F drop(&~self) {
+X Drop for HnswReadGuard {
+    F drop(~self) {
         self.lock.decrement_readers();
     }
 }
 
 # Write lock guard - automatically releases write lock on drop
-S HnswWriteGuard<'a> {
-    lock: &'a HnswLock,
+S HnswWriteGuard {
+    lock: &HnswLock,
     txn_id: u64,
-    _guard: RwLockWriteGuard<'a, ()>,
+    _guard: RwLockWriteGuard,
 }
 
-X Drop for HnswWriteGuard<'_> {
-    F drop(&~self) {
+X Drop for HnswWriteGuard {
+    F drop(~self) {
         self.lock.release_writer(self.txn_id);
     }
 }
@@ -261,11 +273,11 @@ X ConcurrencyStats {
 
     # Get average write wait time in microseconds
     F avg_write_wait_us(self) -> f64 {
-        total_writes := self.total_writes.load(Ordering.Relaxed);
+        ~total_writes = self.total_writes.load(Ordering.Relaxed);
         I total_writes == 0 {
             R 0.0;
         }
-        total_wait := self.write_wait_total_us.load(Ordering.Relaxed);
+        ~total_wait = self.write_wait_total_us.load(Ordering.Relaxed);
         (total_wait as f64) / (total_writes as f64)
     }
 
@@ -316,7 +328,7 @@ X ConcurrentHnswIndex {
     # Note: Actual search implementation delegated to HnswIndex
     # This is just the concurrency wrapper
     F search(
-        &self,
+        self,
         query: &[f32],
         k: u64,
         ef_search: u64,
@@ -328,9 +340,8 @@ X ConcurrentHnswIndex {
         concurrent_readers := self.lock.active_reader_count();
         self.stats.record_read(concurrent_readers);
 
-        # Actual search would be performed here via HnswIndex
-        # For now, return placeholder
-        # TODO: Integrate with actual HnswIndex.search() when available
+        # FUTURE(integration): Delegate to HnswIndex.search()
+        # Placeholder: return empty result
         Ok(SearchResult {
             ids: Vec.new(),
             distances: Vec.new(),
@@ -341,7 +352,7 @@ X ConcurrentHnswIndex {
     # Perform concurrent insert (acquires write lock)
     # Serializes with other writes via write queue
     F insert(
-        &~self,
+        ~self,
         txn_id: u64,
         vector_id: VectorId,
         vector: &[f32],
@@ -356,14 +367,13 @@ X ConcurrentHnswIndex {
         wait_us := start.elapsed().as_micros() as u64;
         self.stats.record_write(wait_us);
 
-        # Actual insert would be performed here via HnswIndex
-        # TODO: Integrate with actual HnswIndex.insert() when available
+        # FUTURE(integration): Delegate to HnswIndex.insert()
         Ok(())
     }
 
     # Perform concurrent delete (acquires write lock)
     F delete(
-        &~self,
+        ~self,
         txn_id: u64,
         vector_id: VectorId,
     ) -> Result<(), VaisError> {
@@ -377,15 +387,14 @@ X ConcurrentHnswIndex {
         wait_us := start.elapsed().as_micros() as u64;
         self.stats.record_write(wait_us);
 
-        # Actual delete would be performed here via HnswIndex
-        # TODO: Integrate with actual HnswIndex.delete() when available
+        # FUTURE(integration): Delegate to HnswIndex.delete()
         Ok(())
     }
 
     # Try non-blocking insert
     # Returns Ok(true) if insert succeeded, Ok(false) if lock unavailable
     F try_insert(
-        &~self,
+        ~self,
         txn_id: u64,
         vector_id: VectorId,
         vector: &[f32],
@@ -397,7 +406,7 @@ X ConcurrentHnswIndex {
             Some(_g) => {
                 # Lock acquired, perform insert
                 self.stats.record_write(0);
-                # TODO: Actual insert
+                # FUTURE(integration): Actual insert via HnswIndex
                 Ok(true)
             },
             None => {
@@ -410,29 +419,31 @@ X ConcurrentHnswIndex {
 
     # Get metadata snapshot (acquires read lock on meta)
     F get_meta(self) -> Result<HnswMeta, VaisError> {
-        meta_guard := self.meta.read()
-            .map_err(|_| VaisError {
+        meta_guard := M self.meta.read() {
+            Ok(g) => g,
+            Err(_) => R Err(VaisError {
                 code: ERROR_LOCK_POISONED,
                 message: "HNSW meta lock poisoned".to_string(),
                 category: ErrorCategory.Concurrency,
-            })?;
+            }),
+        };
 
         Ok(meta_guard.clone())
     }
 
     # Update metadata (acquires write lock on meta)
-    F update_meta<F>(self, update_fn: F) -> Result<(), VaisError>
-    where
-        F: FnOnce(&~HnswMeta),
-    {
-        ~meta_guard = self.meta.write()
-            .map_err(|_| VaisError {
+    # Caller provides a callback that receives mutable meta reference
+    F update_meta(self, update_fn: Fn(~HnswMeta)) -> Result<(), VaisError> {
+        ~meta_guard = M self.meta.write() {
+            Ok(g) => g,
+            Err(_) => R Err(VaisError {
                 code: ERROR_LOCK_POISONED,
                 message: "HNSW meta lock poisoned".to_string(),
                 category: ErrorCategory.Concurrency,
-            })?;
+            }),
+        };
 
-        update_fn(&~*meta_guard);
+        update_fn(~*meta_guard);
         Ok(())
     }
 

@@ -368,8 +368,8 @@ X UserManager {
         };
 
         # 3. Check for dependencies (owned objects)
-        # TODO: In a full implementation, check for owned tables/indexes/grants
-        # For now, CASCADE flag allows unconditional drop
+        # FUTURE(cascade): Check for owned tables/indexes/grants before drop
+        # Currently CASCADE allows unconditional drop
 
         # 4. Write WAL record
         ~wal_buf = ByteBuffer.new(128);

@@ -14,13 +14,13 @@ S ScoredDoc {
 }
 
 # ScoreFusionMethod - Strategy for combining multiple result sets
-E ScoreFusionMethod {
+L ScoreFusionMethod {
     # Weighted sum of normalized scores
     # Combined score = weight_a * norm_a + weight_b * norm_b
     WeightedSum { weight_a: f64, weight_b: f64 },
 
     # Reciprocal Rank Fusion
-    # Score = Σ 1/(k + rank_i) across all result lists
+    # Score = 1/(k + rank_i) across all result lists
     # Default k=60 (proven effective in literature)
     ReciprocalRankFusion { k: u32 },
 }
@@ -78,7 +78,6 @@ F fuse_weighted_sum(
         L j: 0..norm_b.len() {
             I norm_b[j].doc_id == doc_id {
                 score_b = norm_b[j].score;
-                B;
             }
         }
 
@@ -92,9 +91,8 @@ F fuse_weighted_sum(
         ~found = false;
 
         L j: 0..norm_a.len() {
-            I norm_a[j].doc_id == doc_id {
+            I !found && norm_a[j].doc_id == doc_id {
                 found = true;
-                B;
             }
         }
 
@@ -136,10 +134,9 @@ F fuse_rrf(
         # Check if already in combined
         ~found = false;
         L j: 0..combined.len() {
-            I combined[j].doc_id == doc_id {
+            I !found && combined[j].doc_id == doc_id {
                 combined[j].score += rrf_contribution;
                 found = true;
-                B;
             }
         }
 
@@ -157,10 +154,9 @@ F fuse_rrf(
         # Check if already in combined
         ~found = false;
         L j: 0..combined.len() {
-            I combined[j].doc_id == doc_id {
+            I !found && combined[j].doc_id == doc_id {
                 combined[j].score += rrf_contribution;
                 found = true;
-                B;
             }
         }
 

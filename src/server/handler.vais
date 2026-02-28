@@ -90,16 +90,8 @@ X QueryHandler {
             conn.set_state(ConnectionState.InQuery)
         })??;
 
-        # TODO: Route to actual SQL execution pipeline:
-        # 1. parse_sql(sql) → Vec<Statement>
-        # 2. For each Statement:
-        #    - SELECT → HybridPlanner.execute_query() → rows
-        #    - INSERT/UPDATE/DELETE → Executor.execute_dml() → affected_rows
-        #    - CREATE/DROP → Executor.execute_ddl()
-        #    - BEGIN/COMMIT/ROLLBACK → Transaction management
-        #    - SET → Session config update
-        #    - EXPLAIN → HybridPlanner.explain()
-        #
+        # FUTURE(integration): Route to SQL execution pipeline
+        # parse_sql -> HybridPlanner.execute_query / Executor.execute_dml / DDL / txn mgmt
         # Placeholder: return empty result with CommandComplete
 
         ~tag = classify_sql_tag(&sql);
@@ -136,8 +128,8 @@ X QueryHandler {
         ~reader = msg.payload_reader();
         ~stmt_info = deserialize_parse(&reader)?;
 
-        # TODO: Actually parse the SQL and validate parameter types
-        # For now, store the prepared statement in the connection
+        # FUTURE(integration): Parse SQL and validate parameter types via sql/parser
+        # Currently stores the prepared statement without validation
 
         pool.with_connection(self.conn_id, |conn| {
             conn.add_prepared_stmt(stmt_info)
@@ -183,8 +175,8 @@ X QueryHandler {
         ~exec_msg = deserialize_execute(&reader)?;
         ~responses = Vec.new();
 
-        # TODO: Look up portal, find bound statement + params, execute
-        # For now, return empty CommandComplete
+        # FUTURE(integration): Look up portal, resolve bound statement + params, execute
+        # Placeholder: return empty CommandComplete
 
         responses.push(serialize_command_complete("SELECT 0"));
 
@@ -230,7 +222,7 @@ X QueryHandler {
             }
         } E {
             # Describe Portal ('P') — return RowDescription
-            # TODO: look up portal and return its column info
+            # FUTURE(integration): Look up portal and return its column info
         }
 
         Ok(responses)

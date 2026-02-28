@@ -2,5 +2,5 @@
 # Schema metadata management: tables, columns, indexes
 # Provides CatalogManager for DDL operations (CREATE TABLE, DROP TABLE, etc.)
 
-pub mod schema;
-pub mod manager;
+# Submodules (auto-discovered by filesystem)
+# schema, manager

@@ -6,19 +6,29 @@
 U std/sync.{Mutex, AtomicU64};
 U storage/constants.{
     INVALID_TXN_ID, NULL_UNDO_PTR, DEFAULT_TXN_TIMEOUT_SEC,
-    DEFAULT_CLOG_CACHE_PAGES
+    DEFAULT_CLOG_CACHE_PAGES, UNDO_INSERT, UNDO_DELETE, UNDO_UPDATE,
 };
 U storage/error.{VaisError, err_internal, err_deadlock, err_txn_timeout};
 U storage/txn/snapshot.{Snapshot, IsolationLevel, DEFAULT_ISOLATION};
 U storage/txn/clog.{Clog, TxnStatus};
 U storage/txn/undo.{UndoLog};
 U storage/txn/undo_entry.{UndoEntry};
-# Note: RollbackExecutor not used directly in manager
-# TODO: Refactor RollbackExecutor to take &UndoLog instead of owning it
+# NOTE: RollbackExecutor not used directly in manager
+# FUTURE(refactor): Refactor RollbackExecutor to take &UndoLog instead of owning it
 U storage/txn/att.{ActiveTransactionTable, ActiveTransactionEntry, TxnState};
 U storage/txn/conflict.{ConflictDetector};
 U storage/txn/deadlock.{WaitForGraph};
 U storage/buffer/pool.{BufferPool};
+U storage/wal/group_commit.{GroupCommitManager};
+U storage/wal/header.{ENGINE_META};
+U storage/wal/record_types.{
+    TXN_BEGIN, TXN_COMMIT, TXN_ABORT,
+    TxnBeginPayload, TxnCommitPayload, TxnAbortPayload,
+};
+U storage/page/heap.{HeapPage};
+U storage/page/tuple.{Tuple};
+U storage/page/mvcc.{MvccTupleMeta};
+U std/bytes.{ByteBuffer};
 
 # Transaction Manager: central coordinator for transaction lifecycle
 S TransactionManager {
@@ -27,6 +37,7 @@ S TransactionManager {
     undo_log: UndoLog,
     conflict_detector: ConflictDetector,
     deadlock_detector: WaitForGraph,
+    gcm: GroupCommitManager,    # WAL group commit manager for writing records
     next_txn_id: AtomicU64,     # Monotonically increasing txn ID
     txn_timeout_sec: u32,       # Transaction timeout in seconds
     lock: Mutex,
@@ -34,13 +45,14 @@ S TransactionManager {
 
 X TransactionManager {
     # Create a new transaction manager
-    F new(page_size: u32) -> TransactionManager {
+    F new(page_size: u32, gcm: GroupCommitManager) -> TransactionManager {
         TransactionManager {
             att: ActiveTransactionTable.new(),
             clog: Clog.new(page_size, DEFAULT_CLOG_CACHE_PAGES),
             undo_log: UndoLog.new(page_size),
             conflict_detector: ConflictDetector.new(),
             deadlock_detector: WaitForGraph.new(),
+            gcm,
             next_txn_id: AtomicU64.new(1),  # Start from 1 (0 is INVALID_TXN_ID)
             txn_timeout_sec: DEFAULT_TXN_TIMEOUT_SEC,
             lock: Mutex.new(),
@@ -62,6 +74,12 @@ X TransactionManager {
         self.clog.set_status(txn_id, TxnStatus.InProgress);
 
         drop(guard);
+
+        # Write TXN_BEGIN WAL record
+        ~begin_payload = TxnBeginPayload { isolation_level: isolation_level as u8 };
+        ~buf = ByteBuffer.with_capacity(4);
+        begin_payload.serialize(&buf);
+        self.gcm.write_record(txn_id, TXN_BEGIN, ENGINE_META, buf.as_bytes())?;
 
         Ok(txn_id)
     }
@@ -85,9 +103,16 @@ X TransactionManager {
         # Set state to COMMITTING
         self.att.set_state(txn_id, TxnState.Committing);
 
-        # TODO: Write TXN_COMMIT WAL record (Phase 2)
-        # wal.write_commit_record(txn_id)?;
-        # wal.fsync()?;
+        # Write TXN_COMMIT WAL record (must be durable before we return success)
+        ~commit_payload = TxnCommitPayload {};
+        ~buf = ByteBuffer.with_capacity(4);
+        commit_payload.serialize(&buf);
+        ~commit_lsn = self.gcm.write_record(
+            txn_id, TXN_COMMIT, ENGINE_META, buf.as_bytes()
+        )?;
+
+        # Ensure commit record is fsynced (group commit batches for efficiency)
+        self.gcm.commit_and_wait(txn_id, commit_lsn)?;
 
         # Set CLOG status to COMMITTED
         self.clog.set_status(txn_id, TxnStatus.Committed);
@@ -139,10 +164,11 @@ X TransactionManager {
             )?;
         }
 
-        # TODO: Write TXN_ABORT WAL record (Phase 2)
-        # TODO: Write CLR (Compensation Log Records) for undo operations
-        # wal.write_abort_record(txn_id)?;
-        # wal.fsync()?;
+        # Write TXN_ABORT WAL record (after rollback is complete)
+        ~abort_payload = TxnAbortPayload {};
+        ~abort_buf = ByteBuffer.with_capacity(4);
+        abort_payload.serialize(&abort_buf);
+        self.gcm.write_record(txn_id, TXN_ABORT, ENGINE_META, abort_buf.as_bytes())?;
 
         # Set CLOG status to ABORTED
         self.clog.set_status(txn_id, TxnStatus.Aborted);
@@ -310,8 +336,7 @@ X TransactionManager {
     }
 
     # Internal helper: perform rollback by traversing undo chain
-    # Inlined rollback logic from RollbackExecutor
-    # TODO: Refactor to share code with RollbackExecutor or make it a standalone utility
+    # Applies actual undo operations for each entry in reverse chronological order
     F perform_rollback(
         ~self,
         txn_id: u64,
@@ -327,19 +352,68 @@ X TransactionManager {
         ~count = 0u32;
 
         # Process each undo entry in reverse chronological order (newest first)
-        # The actual rollback operations are handled by RollbackExecutor
-        # For this design phase, we just validate and count
         L entry: entries {
             I entry.txn_id != txn_id {
                 R Err(err_internal(
                     "Undo entry txn_id mismatch: expected {txn_id}, got {entry.txn_id}"
                 ));
             }
-            # TODO: Apply actual rollback operations here
-            # This would involve:
-            # - UNDO_INSERT: mark slot as dead
-            # - UNDO_DELETE: restore MVCC metadata
-            # - UNDO_UPDATE: restore old tuple data
+
+            # Apply the actual undo operation based on entry type
+            M entry.entry_type {
+                UNDO_INSERT => {
+                    # Undo INSERT: mark the inserted tuple's slot as dead
+                    ~frame = pool.fetch_page(entry.file_id, entry.page_id)?;
+                    ~page_data = pool.get_page_mut(frame);
+                    ~heap = HeapPage.from_page_data(page_data, pool.page_size)?;
+                    heap.mark_slot_dead(entry.slot_id)?;
+                    ~flushed = heap.flush();
+                    L i: 0..flushed.len() {
+                        page_data[i] = flushed[i];
+                    }
+                    pool.unpin_page(frame, true);
+                },
+                UNDO_DELETE => {
+                    # Undo DELETE: restore the tuple's MVCC metadata (clear txn_id_expire)
+                    # The old_data contains the original tuple before deletion
+                    ~frame = pool.fetch_page(entry.file_id, entry.page_id)?;
+                    ~page_data = pool.get_page_mut(frame);
+                    ~heap = HeapPage.from_page_data(page_data, pool.page_size)?;
+                    # Restore original MVCC: clear expiration so tuple becomes visible again
+                    ~original_tuple = Tuple.read_from(&entry.old_data, 0, entry.old_data.len() as u64)?;
+                    heap.update_mvcc(entry.slot_id, &original_tuple.mvcc)?;
+                    ~flushed = heap.flush();
+                    L i: 0..flushed.len() {
+                        page_data[i] = flushed[i];
+                    }
+                    pool.unpin_page(frame, true);
+                },
+                UNDO_UPDATE => {
+                    # Undo UPDATE: restore old tuple data
+                    # For MVCC-style updates: the old version was expired and a new version inserted
+                    # Undo: restore old version's MVCC (clear expiration), remove new version
+                    ~frame = pool.fetch_page(entry.file_id, entry.page_id)?;
+                    ~page_data = pool.get_page_mut(frame);
+                    ~heap = HeapPage.from_page_data(page_data, pool.page_size)?;
+                    # Restore the old tuple's MVCC metadata
+                    ~original_tuple = Tuple.read_from(&entry.old_data, 0, entry.old_data.len() as u64)?;
+                    heap.update_mvcc(entry.slot_id, &original_tuple.mvcc)?;
+                    # Mark the latest inserted version (new version) as dead
+                    ~last_slot = heap.item_count() - 1;
+                    I last_slot > entry.slot_id {
+                        heap.mark_slot_dead(last_slot)?;
+                    }
+                    ~flushed = heap.flush();
+                    L i: 0..flushed.len() {
+                        page_data[i] = flushed[i];
+                    }
+                    pool.unpin_page(frame, true);
+                },
+                _ => {
+                    # Unknown undo entry type — skip
+                },
+            }
+
             count += 1;
         }
 

@@ -38,10 +38,10 @@ X PhraseQuery {
 }
 
 # BooleanClause — Clause in a boolean query
-E BooleanClause {
-    Must(Query),        # Document MUST M this query (AND)
-    Should(Query),      # Document SHOULD M this query (OR)
-    MustNot(Query),     # Document MUST NOT M this query (NOT)
+L BooleanClause {
+    Must(Query),        # Document MUST match this query (AND)
+    Should(Query),      # Document SHOULD match this query (OR)
+    MustNot(Query),     # Document MUST NOT match this query (NOT)
 }
 
 # BooleanQuery — Combination of clauses
@@ -72,7 +72,7 @@ X BooleanQuery {
 }
 
 # Query — Top-level query enum
-E Query {
+L Query {
     Term(TermQuery),
     Phrase(PhraseQuery),
     Boolean(BooleanQuery),
@@ -123,44 +123,39 @@ X BooleanQueryParser {
         ~bytes = query_str.as_bytes();
         ~i: u64 = 0;
 
-        L W i < bytes.len() {
+        W i < bytes.len() {
             ~ch = bytes[i] as char;
 
             # Skip whitespace
             I ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
                 i += 1;
-                C;
-            }
-
-            # Handle quoted phrase
-            I ch == '"' {
+            } E I ch == '"' {
+                # Handle quoted phrase
                 ~phrase = self.extract_quoted_phrase(bytes, i)?;
                 tokens.push(phrase);
                 # Skip past closing quote
                 i += phrase.len() + 2;  # +2 for opening and closing quotes
-                C;
-            }
-
-            # Handle negation operator
-            I ch == '-' {
+            } E I ch == '-' {
+                # Handle negation operator
                 tokens.push(Str.from("-"));
                 i += 1;
-                C;
-            }
-
-            # Extract word
-            ~word_start = i;
-            L W i < bytes.len() {
-                ~word_ch = bytes[i] as char;
-                I word_ch == ' ' || word_ch == '\t' || word_ch == '\n' || word_ch == '\r' || word_ch == '"' {
-                    B;
+            } E {
+                # Extract word
+                ~word_start = i;
+                ~at_word_end = false;
+                W i < bytes.len() && !at_word_end {
+                    ~word_ch = bytes[i] as char;
+                    I word_ch == ' ' || word_ch == '\t' || word_ch == '\n' || word_ch == '\r' || word_ch == '"' {
+                        at_word_end = true;
+                    } E {
+                        i += 1;
+                    }
                 }
-                i += 1;
-            }
 
-            I i > word_start {
-                ~word = self.substring(query_str, word_start, i);
-                tokens.push(word);
+                I i > word_start {
+                    ~word = self.substring(query_str, word_start, i);
+                    tokens.push(word);
+                }
             }
         }
 
@@ -173,12 +168,12 @@ X BooleanQueryParser {
         ~phrase_start = i;
 
         # Find closing quote
-        L W i < bytes.len() {
+        W i < bytes.len() {
             I (bytes[i] as char) == '"' {
                 # Found closing quote
                 ~phrase_bytes = Vec.with_capacity(i - phrase_start);
                 ~j = phrase_start;
-                L W j < i {
+                W j < i {
                     phrase_bytes.push(bytes[j]);
                     j += 1;
                 }
@@ -197,7 +192,7 @@ X BooleanQueryParser {
         ~i: u64 = 0;
         ~default_operator_is_or = false;
 
-        L W i < tokens.len() {
+        W i < tokens.len() {
             ~token = &tokens[i];
 
             # Check for negation
@@ -211,41 +206,37 @@ X BooleanQueryParser {
                 ~term_query = TermQuery.new(negated_term.clone());
                 boolean_query.add_must_not(Query.Term(term_query));
                 i += 1;
-                C;
-            }
-
-            # Check for OR operator
-            I token.as_str() == "OR" || token.as_str() == "or" {
+            } E I token.as_str() == "OR" || token.as_str() == "or" {
+                # Check for OR operator
                 default_operator_is_or = true;
                 i += 1;
-                C;
-            }
-
-            # Regular term or phrase
-            I self.is_phrase(token) {
-                # Phrase query (contains spaces - was quoted)
-                ~phrase_terms = self.split_phrase_into_terms(token);
-                ~phrase_query = PhraseQuery.new(phrase_terms);
-
-                I default_operator_is_or {
-                    boolean_query.add_should(Query.Phrase(phrase_query));
-                    default_operator_is_or = false;
-                } E {
-                    boolean_query.add_must(Query.Phrase(phrase_query));
-                }
             } E {
-                # Term query
-                ~term_query = TermQuery.new(token.clone());
+                # Regular term or phrase
+                I self.is_phrase(token) {
+                    # Phrase query (contains spaces - was quoted)
+                    ~phrase_terms = self.split_phrase_into_terms(token);
+                    ~phrase_query = PhraseQuery.new(phrase_terms);
 
-                I default_operator_is_or {
-                    boolean_query.add_should(Query.Term(term_query));
-                    default_operator_is_or = false;
+                    I default_operator_is_or {
+                        boolean_query.add_should(Query.Phrase(phrase_query));
+                        default_operator_is_or = false;
+                    } E {
+                        boolean_query.add_must(Query.Phrase(phrase_query));
+                    }
                 } E {
-                    boolean_query.add_must(Query.Term(term_query));
-                }
-            }
+                    # Term query
+                    ~term_query = TermQuery.new(token.clone());
 
-            i += 1;
+                    I default_operator_is_or {
+                        boolean_query.add_should(Query.Term(term_query));
+                        default_operator_is_or = false;
+                    } E {
+                        boolean_query.add_must(Query.Term(term_query));
+                    }
+                }
+
+                i += 1;
+            }
         }
 
         # If only one clause and it's a MUST, return the inner query directly
@@ -263,7 +254,7 @@ X BooleanQueryParser {
     F is_phrase(self, token: &Str) -> bool {
         ~bytes = token.as_bytes();
         ~i: u64 = 0;
-        L W i < bytes.len() {
+        W i < bytes.len() {
             I (bytes[i] as char) == ' ' {
                 R true;
             }
@@ -278,14 +269,14 @@ X BooleanQueryParser {
         ~bytes = phrase.as_bytes();
         ~i: u64 = 0;
 
-        L W i < bytes.len() {
+        W i < bytes.len() {
             # Skip whitespace
-            L W i < bytes.len() && (bytes[i] as char) == ' ' {
+            W i < bytes.len() && (bytes[i] as char) == ' ' {
                 i += 1;
             }
 
             ~term_start = i;
-            L W i < bytes.len() && (bytes[i] as char) != ' ' {
+            W i < bytes.len() && (bytes[i] as char) != ' ' {
                 i += 1;
             }
 
@@ -303,7 +294,7 @@ X BooleanQueryParser {
         ~bytes = s.as_bytes();
         ~result_bytes = Vec.with_capacity(end - start);
         ~i = start;
-        L W i < end && i < bytes.len() {
+        W i < end && i < bytes.len() {
             result_bytes.push(bytes[i]);
             i += 1;
         }
@@ -365,7 +356,7 @@ X BooleanQueryExecutor {
     ) -> Vec<(u64, f64)> {
         # Find results for this term
         ~i: u64 = 0;
-        L W i < results_per_term.len() {
+        W i < results_per_term.len() {
             I results_per_term[i].0.as_str() == term.as_str() {
                 R results_per_term[i].1.clone();
             }
@@ -389,7 +380,7 @@ X BooleanQueryExecutor {
 
         # Intersect with remaining terms
         ~i: u64 = 1;
-        L W i < terms.len() {
+        W i < terms.len() {
             ~term_results = self.execute_term_query(&terms[i], results_per_term);
             result = self.intersect_results(&result, &term_results);
             i += 1;
@@ -410,7 +401,7 @@ X BooleanQueryExecutor {
 
         # Process each clause
         ~i: u64 = 0;
-        L W i < clauses.len() {
+        W i < clauses.len() {
             M &clauses[i] {
                 BooleanClause.Must(q) -> {
                     ~clause_results = self.execute(q, results_per_term);
@@ -423,7 +414,7 @@ X BooleanQueryExecutor {
                 BooleanClause.MustNot(q) -> {
                     ~clause_results = self.execute(q, results_per_term);
                     ~j: u64 = 0;
-                    L W j < clause_results.len() {
+                    W j < clause_results.len() {
                         must_not_doc_ids.push(clause_results[j].0);
                         j += 1;
                     }
@@ -461,7 +452,7 @@ X BooleanQueryExecutor {
         I must_results.len() > 0 {
             result = must_results[0].clone();
             ~i: u64 = 1;
-            L W i < must_results.len() {
+            W i < must_results.len() {
                 result = self.intersect_results(&result, &must_results[i]);
                 i += 1;
             }
@@ -470,7 +461,7 @@ X BooleanQueryExecutor {
         # Add SHOULD results (union)
         I should_results.len() > 0 {
             ~i: u64 = 0;
-            L W i < should_results.len() {
+            W i < should_results.len() {
                 result = self.union_results(&result, &should_results[i]);
                 i += 1;
             }
@@ -491,7 +482,7 @@ X BooleanQueryExecutor {
         ~result = Vec.new();
 
         ~i: u64 = 0;
-        L W i < results1.len() {
+        W i < results1.len() {
             ~doc_id = results1[i].0;
             ~score1 = results1[i].1;
 
@@ -520,7 +511,7 @@ X BooleanQueryExecutor {
 
         # Add results2, merging scores for existing doc_ids
         ~i: u64 = 0;
-        L W i < results2.len() {
+        W i < results2.len() {
             ~doc_id = results2[i].0;
             ~score2 = results2[i].1;
 
@@ -551,12 +542,12 @@ X BooleanQueryExecutor {
         ~result = Vec.new();
 
         ~i: u64 = 0;
-        L W i < results.len() {
+        W i < results.len() {
             ~doc_id = results[i].0;
 
             ~excluded = false;
             ~j: u64 = 0;
-            L W j < exclude_doc_ids.len() {
+            W j < exclude_doc_ids.len() {
                 I exclude_doc_ids[j] == doc_id {
                     excluded = true;
                 }
@@ -576,7 +567,7 @@ X BooleanQueryExecutor {
     # Find score for doc_id in results
     F find_score_for_doc(self, doc_id: u64, results: &Vec<(u64, f64)>) -> Option<f64> {
         ~i: u64 = 0;
-        L W i < results.len() {
+        W i < results.len() {
             I results[i].0 == doc_id {
                 R Some(results[i].1);
             }
@@ -588,7 +579,7 @@ X BooleanQueryExecutor {
     # Find index for doc_id in results
     F find_index_for_doc(self, doc_id: u64, results: &Vec<(u64, f64)>) -> Option<u64> {
         ~i: u64 = 0;
-        L W i < results.len() {
+        W i < results.len() {
             I results[i].0 == doc_id {
                 R Some(i);
             }
@@ -605,9 +596,9 @@ X BooleanQueryExecutor {
 
         ~n = results.len();
         ~i: u64 = 0;
-        L W i < n {
+        W i < n {
             ~j: u64 = 0;
-            L W j < n - i - 1 {
+            W j < n - i - 1 {
                 I results[j].1 < results[j + 1].1 {
                     # Swap
                     ~temp = results[j];

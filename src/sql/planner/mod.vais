@@ -438,6 +438,31 @@ F plan_table_ref(table_ref: &TableRef, catalog: &CatalogManager) -> Result<PlanN
     }
 }
 
+# Extract the effective table name (or alias) from a TableRef
+# Used for USING clause expansion to qualify column references
+F extract_table_name(table_ref: &TableRef) -> Option<Str> {
+    M table_ref {
+        TableRef.Table { name, alias } => {
+            M alias {
+                Some(a) => Some(a.clone()),
+                None => Some(name.clone()),
+            }
+        },
+        TableRef.Subquery { query, alias } => Some(alias.clone()),
+        TableRef.Join { join } => {
+            # For nested joins, use rightmost table's name
+            extract_table_name(&join.right)
+        },
+        TableRef.TableFunction { name, args, alias } => {
+            M alias {
+                Some(a) => Some(a.clone()),
+                None => Some(name.clone()),
+            }
+        },
+        _ => None,
+    }
+}
+
 # Plan a join (choose between nested loop join and hash join based on cost)
 F plan_join(join: &JoinClause, catalog: &CatalogManager) -> Result<PlanNode, VaisError> {
     ~left_plan = plan_table_ref(&join.left, catalog)?;
@@ -452,13 +477,17 @@ F plan_join(join: &JoinClause, catalog: &CatalogManager) -> Result<PlanNode, Vai
             I columns.len() == 0 {
                 None
             } E {
+                # Extract table names for left and right sides to qualify columns
+                ~left_table = extract_table_name(&join.left);
+                ~right_table = extract_table_name(&join.right);
+
                 # Build conjunction of equality conditions
                 ~on_expr: Option<Expr> = None;
                 L col: columns {
                     ~eq = Expr.BinaryOp {
-                        left: Box.new(Expr.ColumnRef { table: None, column: col.clone() }),
+                        left: Box.new(Expr.ColumnRef { table: left_table.clone(), column: col.clone() }),
                         op: BinOp.Eq,
-                        right: Box.new(Expr.ColumnRef { table: None, column: col.clone() }),
+                        right: Box.new(Expr.ColumnRef { table: right_table.clone(), column: col.clone() }),
                     };
                     on_expr = M on_expr {
                         None => Some(eq),
@@ -537,7 +566,9 @@ F plan_join(join: &JoinClause, catalog: &CatalogManager) -> Result<PlanNode, Vai
 
 # Extract equi-join keys from a join condition
 # Returns (found_equi, left_keys, right_keys)
+# Keys are ordinal positions (0-based) of equi-join predicates found
 # For example: a.x = b.y AND a.z = b.w → ([0, 1], [0, 1])
+# The actual column name resolution to physical indices happens at execution time
 F extract_equi_join_keys(expr: &Expr) -> (bool, Vec<u64>, Vec<u64>) {
     ~left_keys = Vec.new();
     ~right_keys = Vec.new();
@@ -547,19 +578,44 @@ F extract_equi_join_keys(expr: &Expr) -> (bool, Vec<u64>, Vec<u64>) {
             M op {
                 BinOp.Eq => {
                     # Check if both sides are column references
-                    # Simplified: assume column indices are known (in real impl, would resolve from schema)
-                    # For now, return found=true with empty keys
-                    R (true, left_keys, right_keys);
+                    ~is_left_col = M left.as_ref() {
+                        Expr.ColumnRef { table, column } => true,
+                        _ => false,
+                    };
+                    ~is_right_col = M right.as_ref() {
+                        Expr.ColumnRef { table, column } => true,
+                        _ => false,
+                    };
+
+                    I is_left_col && is_right_col {
+                        # Both sides are column refs — this is an equi-join predicate
+                        # Use ordinal index 0 for this single predicate
+                        left_keys.push(0);
+                        right_keys.push(0);
+                        R (true, left_keys, right_keys);
+                    }
                 },
                 BinOp.And => {
                     # Recursively extract from both sides
                     ~(l_found, l_lk, l_rk) = extract_equi_join_keys(left);
                     ~(r_found, r_lk, r_rk) = extract_equi_join_keys(right);
                     I l_found || r_found {
+                        # Merge keys, adjusting ordinals
+                        ~offset = l_lk.len();
                         left_keys.extend(l_lk);
-                        left_keys.extend(r_lk);
                         right_keys.extend(l_rk);
-                        right_keys.extend(r_rk);
+
+                        # Offset right-side keys
+                        ~i: u64 = 0;
+                        W i < r_lk.len() {
+                            left_keys.push(r_lk[i] + offset);
+                            i += 1;
+                        }
+                        i = 0;
+                        W i < r_rk.len() {
+                            right_keys.push(r_rk[i] + offset);
+                            i += 1;
+                        }
                         R (true, left_keys, right_keys);
                     }
                 },

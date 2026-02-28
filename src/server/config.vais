@@ -761,7 +761,7 @@ F parse_f64(s: &Str) -> Result<f64, VaisError> {
 
 # Parse bool from string
 F parse_bool(s: &Str) -> Result<bool, VaisError> {
-    # TODO: Implement actual parsing when std/parse is available
+    # FUTURE(std/parse): Use standard library parsing when available
     I *s == "true" || *s == "1" {
         Ok(true)
     } E I *s == "false" || *s == "0" {

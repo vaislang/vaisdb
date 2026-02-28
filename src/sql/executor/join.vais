@@ -109,13 +109,14 @@ X NestedLoopJoinExecutor {
                 self.right_source.open(ctx)?;
                 self.right_row_buffer.clear();
 
-                L {
+                ~has_more = true;
+                W has_more {
                     M self.right_source.next(ctx)? {
                         Some(row) => {
                             self.right_row_buffer.push(row);
                             self.stats.add_scanned(1);
                         },
-                        None => { B; },
+                        None => { has_more = false; },
                     }
                 }
 
@@ -254,7 +255,8 @@ X NestedLoopJoinExecutor {
 
             self.right_source.open(ctx)?;
 
-            L {
+            ~right_exhausted = false;
+            W !right_exhausted {
                 M self.right_source.next(ctx)? {
                     Some(right_row) => {
                         ~combined = combine_rows(
@@ -288,7 +290,7 @@ X NestedLoopJoinExecutor {
                         }
 
                         self.current_left_idx += 1;
-                        B;
+                        right_exhausted = true;
                     },
                 }
             }
@@ -332,8 +334,7 @@ X NestedLoopJoinExecutor {
 
     # Emit unmatched right rows for RIGHT JOIN
     F emit_unmatched_right(~self) -> Result<Option<ExecutorRow>, VaisError> {
-        L {
-            I !(self.unmatched_right_idx < self.right_row_buffer.len()) { B }
+        W self.unmatched_right_idx < self.right_row_buffer.len() {
             I !self.matched_right_rows[self.unmatched_right_idx] {
                 ~right_row = &self.right_row_buffer[self.unmatched_right_idx];
                 ~null_left = Row.null_row(self.left_col_count);
@@ -493,7 +494,8 @@ X HashJoinExecutor {
         self.hash_table.clear();
         self.build_side.open(ctx)?;
 
-        L {
+        ~has_more = true;
+        W has_more {
             M self.build_side.next(ctx)? {
                 Some(row) => {
                     ~key_values = self.extract_join_keys(
@@ -510,7 +512,7 @@ X HashJoinExecutor {
 
                     self.stats.add_scanned(1);
                 },
-                None => { B; },
+                None => { has_more = false; },
             }
         }
 

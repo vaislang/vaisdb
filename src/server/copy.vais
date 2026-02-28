@@ -167,14 +167,14 @@ X CopyHandler {
         columns: Vec<Str>,
         options: CopyOptions,
     ) -> Result<CopyState, VaisError> {
-        # Validate table exists (placeholder - would query catalog)
-        # For now, just check table name is not empty
+        # FUTURE(catalog): Validate table exists via CatalogManager
+        # Currently validates table name is not empty
         I table.len() == 0 {
             R Err(err_copy_table_not_found(""));
         }
 
         # Check graph import ordering
-        L is_edge_table = table.contains("edge") || table.contains("Edge");
+        ~is_edge_table := table.contains("edge") || table.contains("Edge");
         validate_graph_import_order(&table, is_edge_table, self.nodes_imported)?;
 
         # Track node table imports
@@ -182,7 +182,7 @@ X CopyHandler {
             self.nodes_imported = true;
         }
 
-        L state = CopyState.new(
+        ~state := CopyState.new(
             CopyDirection.CopyFrom,
             table,
             columns,
@@ -198,47 +198,42 @@ X CopyHandler {
         state: &~CopyState,
         data: &[u8],
     ) -> Result<u64, VaisError> {
-        # Placeholder implementation
-        # In real implementation, would:
-        # 1. Parse data based on state.options.format
-        # 2. Validate column count matches state.columns.len()
-        # 3. Convert to internal row format
-        # 4. Insert rows (optionally bypassing WAL if state.options.wal_bypass)
-        # 5. Return number of rows parsed
+        # FUTURE(integration): Full implementation would parse data, validate columns,
+        # convert to row format, and insert (optionally bypass WAL)
 
         M state.options.format {
             CopyFormat.Csv => {
                 # Simple CSV parsing (single line for demonstration)
-                L fields = parse_csv_line(
+                ~fields := parse_csv_line(
                     data,
                     state.options.delimiter,
                     state.options.quote_char,
                 );
 
-                L expected_cols = state.columns.len() as u64;
-                L actual_cols = fields.len() as u64;
+                ~expected_cols := state.columns.len() as u64;
+                ~actual_cols := fields.len() as u64;
 
                 I actual_cols != expected_cols {
                     R Err(err_copy_column_mismatch(expected_cols, actual_cols));
                 }
 
-                # Placeholder: would insert row here
+                # FUTURE(integration): Insert parsed row via executor
                 state.add_rows(1);
                 state.add_bytes(data.len() as u64);
                 R Ok(1);
             },
             CopyFormat.Json => {
-                # Placeholder: would parse JSON object
+                # FUTURE(integration): Parse JSON object and insert
                 state.add_bytes(data.len() as u64);
                 R Ok(0);
             },
             CopyFormat.Jsonl => {
-                # Placeholder: would parse JSONL (one object per line)
+                # FUTURE(integration): Parse JSONL (one object per line) and insert
                 state.add_bytes(data.len() as u64);
                 R Ok(0);
             },
             CopyFormat.VectorBinary => {
-                # Placeholder: would parse binary vector format
+                # FUTURE(integration): Parse binary vector format and insert
                 state.add_bytes(data.len() as u64);
                 R Ok(0);
             },
@@ -250,7 +245,7 @@ X CopyHandler {
         ~self,
         state: &CopyState,
     ) -> Result<u64, VaisError> {
-        # Placeholder: would flush any pending batches
+        # FUTURE(integration): Flush any pending batch inserts
         # Return total rows imported
         R Ok(state.rows_processed);
     }
@@ -262,12 +257,12 @@ X CopyHandler {
         columns: Vec<Str>,
         options: CopyOptions,
     ) -> Result<CopyState, VaisError> {
-        # Validate table exists (placeholder)
+        # FUTURE(catalog): Validate table exists via CatalogManager
         I table.len() == 0 {
             R Err(err_copy_table_not_found(""));
         }
 
-        L state = CopyState.new(
+        ~state := CopyState.new(
             CopyDirection.CopyTo,
             table,
             columns,
@@ -282,14 +277,8 @@ X CopyHandler {
         ~self,
         state: &~CopyState,
     ) -> Result<Vec<u8>, VaisError> {
-        # Placeholder implementation
-        # In real implementation, would:
-        # 1. Fetch next batch of rows from table
-        # 2. Format as CSV/JSON/JSONL/binary based on state.options.format
-        # 3. Update state.rows_processed, state.bytes_processed
-        # 4. Return formatted data
-
-        # For now, return empty vector
+        # FUTURE(integration): Fetch rows from table, format based on options, update state
+        # Currently returns empty data
         L empty: Vec<u8> = Vec.new();
         R Ok(empty);
     }
@@ -314,18 +303,18 @@ F parse_csv_line(data: &[u8], delimiter: u8, quote_char: u8) -> Vec<Str> {
     L fields: Vec<Str> = Vec.new();
     L current_field: Vec<u8> = Vec.new();
     ~in_quotes = false;
-    L len = data.len();
+    ~len := data.len();
     ~i: usize = 0;
 
     W i < len {
-        L byte = data[i];
+        ~byte := data[i];
 
         I byte == quote_char {
             # Toggle quote state
             in_quotes = !in_quotes;
         } E I byte == delimiter && !in_quotes {
             # End of field
-            L field_str = Str.from_utf8_lossy(&current_field);
+            ~field_str := Str.from_utf8_lossy(&current_field);
             fields.push(field_str);
             current_field.clear();
         } E {
@@ -338,7 +327,7 @@ F parse_csv_line(data: &[u8], delimiter: u8, quote_char: u8) -> Vec<Str> {
 
     # Push last field
     I current_field.len() > 0 || len > 0 {
-        L field_str = Str.from_utf8_lossy(&current_field);
+        ~field_str := Str.from_utf8_lossy(&current_field);
         fields.push(field_str);
     }
 

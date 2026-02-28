@@ -5,6 +5,7 @@
 U std/bytes.{ByteBuffer};
 U std/vec.Vec;
 U std/option.{Option, Some, None};
+U std/hashmap.{HashMap};
 U storage/constants.{
     PAGE_HEADER_SIZE, DEFAULT_PAGE_SIZE, NULL_PAGE,
     FILE_ID_GRAPH, MVCC_TUPLE_META_SIZE, INVALID_TXN_ID
@@ -102,7 +103,7 @@ X NodePage {
         # Read slot directory
         ~slots = Vec.with_capacity(node_count as u64);
         ~i: u64 = 0;
-        L while i < node_count as u64 {
+        W i < node_count as u64 {
             slots.push(NodeSlot.deserialize(&buf)?);
             i += 1;
         }
@@ -135,7 +136,7 @@ X NodePage {
     F find_lowest_data_offset(self) -> u32 {
         ~lowest = self.page_size;
         ~i: u64 = 0;
-        L while i < self.slots.len() {
+        W i < self.slots.len() {
             I !self.slots[i].is_deleted() && (self.slots[i].offset as u32) < lowest {
                 lowest = self.slots[i].offset as u32;
             }
@@ -160,7 +161,7 @@ X NodePage {
         # Write node data bottom-up
         ~data_offset = self.find_lowest_data_offset() - node_size;
         ~i: u64 = 0;
-        L while i < node_bytes.len() {
+        W i < node_bytes.len() {
             self.page_data[(data_offset as u64) + i] = node_bytes[i];
             i += 1;
         }
@@ -210,7 +211,7 @@ X NodePage {
 
         # Overwrite existing data
         ~i: u64 = 0;
-        L while i < node_bytes.len() {
+        W i < node_bytes.len() {
             self.page_data[(slot.offset as u64) + i] = node_bytes[i];
             i += 1;
         }
@@ -239,7 +240,7 @@ X NodePage {
 
         # Write slot directory
         ~i: u64 = 0;
-        L while i < self.slots.len() {
+        W i < self.slots.len() {
             self.slots[i].serialize(&buf);
             i += 1;
         }
@@ -247,7 +248,7 @@ X NodePage {
         # Copy node data area (bottom-up region)
         ~lowest = self.find_lowest_data_offset() as u64;
         ~j: u64 = lowest;
-        L while j < self.page_size as u64 {
+        W j < self.page_size as u64 {
             out[j] = self.page_data[j];
             j += 1;
         }
@@ -268,6 +269,7 @@ S NodeStore {
     allocator: &PageAllocator,
     bitmap: &FreelistBitmap,
     page_size: u32,
+    node_index: HashMap<u64, (u32, u16)>,  # node_id -> (page_id, slot_index)
 }
 
 X NodeStore {
@@ -277,11 +279,15 @@ X NodeStore {
         bitmap: &FreelistBitmap,
         page_size: u32
     ) -> NodeStore {
-        NodeStore { pool, allocator, bitmap, page_size }
+        NodeStore {
+            pool, allocator, bitmap, page_size,
+            node_index: HashMap.new(),
+        }
     }
 
     # Write a new node, allocating a page if needed
     # Returns (page_id, slot_index)
+    # Also registers the node in the node_id -> (page_id, slot_index) index
     F write_node(~self, node: &GraphNode, txn_id: u64) -> Result<(u32, u16), VaisError> {
         # Allocate new page (simple strategy: one node per page for now)
         ~page_id = self.allocator.allocate_page(FILE_ID_GRAPH, self.bitmap)?;
@@ -293,17 +299,30 @@ X NodeStore {
         ~frame_id = self.pool.fetch_page(FILE_ID_GRAPH, page_id)?;
         ~frame_data = self.pool.get_page_mut(frame_id);
         ~i: u64 = 0;
-        L while i < page_buffer.len() {
+        W i < page_buffer.len() {
             frame_data[i] = page_buffer[i];
             i += 1;
         }
         self.pool.unpin_page(frame_id, true);
 
+        # Register in node index
+        self.node_index.insert(node.node_id, (page_id, slot_index));
+
         Ok((page_id, slot_index))
     }
 
-    # Read a node from storage
-    F read_node(self, page_id: u32, slot_index: u16) -> Result<GraphNode, VaisError> {
+    # Read a node by node_id (uses node_index for lookup)
+    F read_node(self, node_id: u64) -> Result<GraphNode, VaisError> {
+        M self.node_index.get(&node_id) {
+            Some(loc) => {
+                self.read_node_at(loc.0, loc.1)
+            },
+            None => Err(err_graph_node_not_found(node_id)),
+        }
+    }
+
+    # Read a node from storage at a specific (page_id, slot_index)
+    F read_node_at(self, page_id: u32, slot_index: u16) -> Result<GraphNode, VaisError> {
         ~frame_id = self.pool.fetch_page(FILE_ID_GRAPH, page_id)?;
         ~page_data = self.pool.get_page(frame_id);
         ~npage = NodePage.load(page_id, page_data, self.page_size)?;
@@ -312,7 +331,37 @@ X NodeStore {
         Ok(node)
     }
 
-    # Update a node in storage
+    # Delete (soft-expire) a node by node_id
+    F delete_node(~self, node_id: u64, txn_id: u64, cmd_id: u32) -> Result<(), VaisError> {
+        M self.node_index.get(&node_id) {
+            Some(loc) => {
+                ~page_id = loc.0;
+                ~slot_index = loc.1;
+                ~frame_id = self.pool.fetch_page(FILE_ID_GRAPH, page_id)?;
+                ~page_data = self.pool.get_page_mut(frame_id);
+                ~npage = NodePage.load(page_id, page_data, self.page_size)?;
+                ~node = npage.read_node(slot_index)?;
+
+                # Set MVCC expiration fields
+                node.txn_id_expire = txn_id;
+                node.expire_cmd_id = cmd_id;
+
+                # Write back
+                npage.update_node(slot_index, &node)?;
+                ~page_buffer = npage.write_to_buffer(0, txn_id);
+                ~i: u64 = 0;
+                W i < page_buffer.len() {
+                    page_data[i] = page_buffer[i];
+                    i += 1;
+                }
+                self.pool.unpin_page(frame_id, true);
+                Ok(())
+            },
+            None => Err(err_graph_node_not_found(node_id)),
+        }
+    }
+
+    # Update a node in storage at a specific location
     F update_node(~self, page_id: u32, slot_index: u16, node: &GraphNode, txn_id: u64) -> Result<(), VaisError> {
         ~frame_id = self.pool.fetch_page(FILE_ID_GRAPH, page_id)?;
         ~page_data = self.pool.get_page_mut(frame_id);
@@ -322,11 +371,16 @@ X NodeStore {
         # Write back
         ~page_buffer = npage.write_to_buffer(0, txn_id);
         ~i: u64 = 0;
-        L while i < page_buffer.len() {
+        W i < page_buffer.len() {
             page_data[i] = page_buffer[i];
             i += 1;
         }
         self.pool.unpin_page(frame_id, true);
         Ok(())
+    }
+
+    # Register a node_id -> location mapping in the index (used during recovery)
+    F register_node(~self, node_id: u64, page_id: u32, slot_index: u16) {
+        self.node_index.insert(node_id, (page_id, slot_index));
     }
 }

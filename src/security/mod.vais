@@ -70,7 +70,7 @@ S SecurityEngine {
 }
 
 X SecurityEngine {
-    # Create a new security engine (not yet initialized)
+    ## Create a new security engine (not yet initialized)
     F new(page_size: u32) -> SecurityEngine {
         ~config = SecurityConfig.default(page_size);
         ~meta = SecurityMeta.new(page_size);
@@ -90,8 +90,8 @@ X SecurityEngine {
         }
     }
 
-    # Initialize (open) the security engine
-    # Loads user/role/grant/policy data from the catalog
+    ## Initialize (open) the security engine
+    ## Loads user/role/grant/policy data from the catalog
     F open(
         ~self,
         catalog: &CatalogManager,
@@ -127,7 +127,7 @@ X SecurityEngine {
         Ok(())
     }
 
-    # Shutdown the security engine
+    ## Shutdown the security engine
     F close(~self) -> Result<(), VaisError> {
         # Verify audit log integrity before shutdown
         I self.audit_logger.is_enabled() {
@@ -141,7 +141,7 @@ X SecurityEngine {
     # Authentication
     # ========================================================================
 
-    # Authenticate a user and return a SessionContext
+    ## Authenticate a user and return a SessionContext
     F authenticate(
         ~self,
         username: &Str,
@@ -189,7 +189,7 @@ X SecurityEngine {
     # Privilege Checking
     # ========================================================================
 
-    # Check if session has a table-level privilege
+    ## Check if session has a table-level privilege
     F check_privilege(
         self,
         session: &SessionContext,
@@ -201,7 +201,7 @@ X SecurityEngine {
         checker.check_table_privilege(session, table_name, priv_type)
     }
 
-    # Check if session has a column-level privilege
+    ## Check if session has a column-level privilege
     F check_column_privilege(
         self,
         session: &SessionContext,
@@ -218,7 +218,7 @@ X SecurityEngine {
     # RLS (Row-Level Security)
     # ========================================================================
 
-    # Apply RLS to a SQL scan — returns additional WHERE clause
+    ## Apply RLS to a SQL scan -- returns additional WHERE clause
     F apply_rls(
         self,
         table_name: &Str,

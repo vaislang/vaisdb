@@ -4,6 +4,8 @@
 # Error codes: EE=02 (vector), CC=08 (storage), NNN=001-004
 
 U std/bytes.{ByteBuffer};
+U std/vec.Vec;
+U std/hashmap.{HashMap};
 U storage/constants.{
     PAGE_HEADER_SIZE, DEFAULT_PAGE_SIZE, NULL_PAGE,
     FILE_ID_VECTORS, MVCC_TUPLE_META_SIZE, INVALID_TXN_ID
@@ -16,6 +18,8 @@ U storage/page/overflow.{OverflowPointer, write_overflow_data, read_overflow_dat
 U storage/buffer/pool.{BufferPool};
 U storage/page/allocator.{PageAllocator};
 U storage/page/freelist.{FreelistBitmap};
+U vector/hnsw/types.{HnswNode, INVALID_NODE_ID};
+U vector/hnsw/insert.{NodeStore};
 
 # Vector page body header (16 bytes, follows the 48-byte PageHeader)
 # Each vector data page tracks vectors of a single dimension
@@ -409,7 +413,7 @@ X VectorStore {
         vdata.serialize_inline(&buf);
         ~serialized = buf.to_vec();
 
-        # Write to overflow pages
+        # Write to overflow pages via buffer pool
         ~overflow_page_id = write_overflow_data(
             &serialized,
             self.page_size,
@@ -417,7 +421,8 @@ X VectorStore {
             self.allocator,
             self.bitmap,
             0,
-            txn_id
+            txn_id,
+            self.pool,
         )?;
 
         # Allocate main page to store overflow pointer
@@ -545,4 +550,70 @@ F err_vector_page_corrupt(page_id: u32) -> VaisError {
         "VAIS-0208004",
         "Vector page corrupted at page {page_id}"
     ).with_severity(ErrorSeverity.Fatal)
+}
+
+# ============================================================================
+# HnswNodeStore — Concrete NodeStore implementation for VectorEngine
+# Bridges VectorStore (raw vector data) with HnswNode (graph structure)
+# Maintains in-memory node graph data and delegates vector I/O to VectorStore
+# ============================================================================
+
+S HnswNodeStore {
+    vector_store: &VectorStore,
+    nodes: HashMap<u64, HnswNode>,        # node_id -> HnswNode (graph structure)
+    next_node_id: u64,                     # Monotonically increasing ID allocator
+}
+
+X HnswNodeStore {
+    F new(vector_store: &VectorStore) -> HnswNodeStore {
+        HnswNodeStore {
+            vector_store,
+            nodes: HashMap.new(),
+            next_node_id: 1,
+        }
+    }
+}
+
+# NodeStore trait implementation for HnswNodeStore
+X HnswNodeStore : NodeStore {
+    F load_node(self, node_id: u64) -> Result<HnswNode, VaisError> {
+        M self.nodes.get(&node_id) {
+            Some(node) => Ok(node.clone()),
+            None => Err(err_internal("HNSW node not found")),
+        }
+    }
+
+    F load_vector(self, node_id: u64) -> Result<Vec<f32>, VaisError> {
+        M self.nodes.get(&node_id) {
+            Some(node) => {
+                self.vector_store.read_vector(node.vector_page_id, node.vector_offset)
+            },
+            None => Err(err_internal("HNSW node not found for vector load")),
+        }
+    }
+
+    F store_node(&~self, node: HnswNode) -> Result<(), VaisError> {
+        self.nodes.insert(node.node_id, node);
+        Ok(())
+    }
+
+    F allocate_node_id(&~self) -> u64 {
+        ~id = self.next_node_id;
+        self.next_node_id += 1;
+        id
+    }
+
+    F get_file_page(self, node_id: u64) -> Result<(u8, u32), VaisError> {
+        M self.nodes.get(&node_id) {
+            Some(node) => Ok((FILE_ID_VECTORS, node.vector_page_id)),
+            None => Err(err_internal("HNSW node not found for page lookup")),
+        }
+    }
+
+    F allocate_node_page(&~self, node_id: u64) -> Result<(u8, u32), VaisError> {
+        ~page_id = self.vector_store.allocator.allocate_page(
+            FILE_ID_VECTORS, self.vector_store.bitmap
+        )?;
+        Ok((FILE_ID_VECTORS, page_id))
+    }
 }

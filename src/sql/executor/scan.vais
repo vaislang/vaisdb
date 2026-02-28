@@ -158,53 +158,53 @@ X TableScanExecutor {
             None => { R Ok(None); },
         };
 
-        L {
-
-            I !(self.current_slot < heap.item_count()) { B }
+        W self.current_slot < heap.item_count() {
             ~slot_idx = self.current_slot;
             self.current_slot += 1;
             self.stats.add_scanned(1);
 
             # Try to read the tuple (skip dead slots)
-            ~tuple = M heap.read_tuple(slot_idx) {
-                Ok(t) => t,
-                Err(_) => { C; },  # Dead or corrupt slot
-            };
+            ~tuple_result = heap.read_tuple(slot_idx);
+            M tuple_result {
+                Ok(t) => {
+                    # MVCC visibility check
+                    ~mvcc = t.get_mvcc();
+                    I is_tuple_visible(
+                        mvcc.txn_id_create,
+                        mvcc.txn_id_expire,
+                        mvcc.cmd_id,
+                        mvcc.expire_cmd_id,
+                        ctx.snapshot,
+                        ctx.clog,
+                    ) {
+                        # Decode tuple data into a Row
+                        ~row = Row.decode(t.get_data().as_slice(), self.schema.as_slice())?;
 
-            # MVCC visibility check
-            ~mvcc = tuple.get_mvcc();
-            I !is_tuple_visible(
-                mvcc.txn_id_create,
-                mvcc.txn_id_expire,
-                mvcc.cmd_id,
-                mvcc.expire_cmd_id,
-                ctx.snapshot,
-                ctx.clog,
-            ) {
-                C;
-            }
+                        # Apply pushed-down filter
+                        ~passed_filter = true;
+                        M &self.filter {
+                            Some(ref filter_expr) => {
+                                I !eval_predicate(filter_expr, &row, &self.eval_ctx)? {
+                                    self.stats.add_rejected();
+                                    passed_filter = false;
+                                }
+                            },
+                            None => {},
+                        }
 
-            # Decode tuple data into a Row
-            ~row = Row.decode(tuple.get_data().as_slice(), self.schema.as_slice())?;
-
-            # Apply pushed-down filter
-            M &self.filter {
-                Some(ref filter_expr) => {
-                    I !eval_predicate(filter_expr, &row, &self.eval_ctx)? {
-                        self.stats.add_rejected();
-                        C;
+                        I passed_filter {
+                            self.stats.add_produced();
+                            R Ok(Some(ExecutorRow.with_alias(
+                                row,
+                                self.table_info.name.clone(),
+                                self.current_page_id,
+                                slot_idx,
+                            )));
+                        }
                     }
                 },
-                None => {},
+                Err(_) => {},  # Dead or corrupt slot, skip
             }
-
-            self.stats.add_produced();
-            R Ok(Some(ExecutorRow.with_alias(
-                row,
-                self.table_info.name.clone(),
-                self.current_page_id,
-                slot_idx,
-            )));
         }
 
         Ok(None)
@@ -339,9 +339,7 @@ X IndexScanExecutor {
             None => { R Ok(None); },
         };
 
-        L {
-
-            I !(cursor.valid()) { B }
+        W cursor.valid() {
             ~(key, tid) = cursor.current(ctx.pool)?;
 
             # Check if we've passed the end of the range
@@ -363,53 +361,50 @@ X IndexScanExecutor {
             ctx.pool.unpin_page(frame_id, false);
             self.stats.add_page_read();
 
-            ~tuple = M tuple_result {
-                Ok(t) => t,
-                Err(_) => {
-                    # Dead tuple, skip
-                    cursor.next(ctx.pool)?;
-                    C;
-                },
-            };
+            M tuple_result {
+                Ok(t) => {
+                    # MVCC visibility check
+                    ~mvcc = t.get_mvcc();
+                    I is_tuple_visible(
+                        mvcc.txn_id_create,
+                        mvcc.txn_id_expire,
+                        mvcc.cmd_id,
+                        mvcc.expire_cmd_id,
+                        ctx.snapshot,
+                        ctx.clog,
+                    ) {
+                        # Decode tuple data into a Row
+                        ~row = Row.decode(t.get_data().as_slice(), self.schema.as_slice())?;
 
-            # MVCC visibility check
-            ~mvcc = tuple.get_mvcc();
-            I !is_tuple_visible(
-                mvcc.txn_id_create,
-                mvcc.txn_id_expire,
-                mvcc.cmd_id,
-                mvcc.expire_cmd_id,
-                ctx.snapshot,
-                ctx.clog,
-            ) {
-                cursor.next(ctx.pool)?;
-                C;
-            }
+                        # Apply residual filter (for conditions not covered by the index)
+                        ~passed_filter = true;
+                        M &self.residual_filter {
+                            Some(ref filter_expr) => {
+                                I !eval_predicate(filter_expr, &row, &self.eval_ctx)? {
+                                    self.stats.add_rejected();
+                                    passed_filter = false;
+                                }
+                            },
+                            None => {},
+                        }
 
-            # Decode tuple data into a Row
-            ~row = Row.decode(tuple.get_data().as_slice(), self.schema.as_slice())?;
+                        I passed_filter {
+                            self.stats.add_produced();
+                            cursor.next(ctx.pool)?;
 
-            # Apply residual filter (for conditions not covered by the index)
-            M &self.residual_filter {
-                Some(ref filter_expr) => {
-                    I !eval_predicate(filter_expr, &row, &self.eval_ctx)? {
-                        self.stats.add_rejected();
-                        cursor.next(ctx.pool)?;
-                        C;
+                            R Ok(Some(ExecutorRow.with_alias(
+                                row,
+                                self.table_info.name.clone(),
+                                page_id,
+                                slot_id,
+                            )));
+                        }
                     }
                 },
-                None => {},
+                Err(_) => {},  # Dead tuple, skip
             }
 
-            self.stats.add_produced();
             cursor.next(ctx.pool)?;
-
-            R Ok(Some(ExecutorRow.with_alias(
-                row,
-                self.table_info.name.clone(),
-                page_id,
-                slot_id,
-            )));
         }
 
         self.is_exhausted = true;
@@ -550,10 +545,9 @@ F resolve_index_columns(
     L idx_col: index_columns {
         ~found = false;
         L i: 0..table_columns.len() {
-            I &table_columns[i].name == idx_col {
+            I !found && &table_columns[i].name == idx_col {
                 indices.push(i);
                 found = true;
-                B;
             }
         }
         I !found {

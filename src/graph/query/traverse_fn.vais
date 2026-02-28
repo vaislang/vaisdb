@@ -134,7 +134,7 @@ X GraphTraverseParams {
             Some(ref names) => {
                 ~ids = Vec.with_capacity(names.len());
                 ~i: u64 = 0;
-                L while i < names.len() {
+                W i < names.len() {
                     M edge_type_table.get_or_create(&names[i]) {
                         Ok(id) => ids.push(id),
                         Err(e) => R Err(e),
@@ -227,7 +227,7 @@ X GraphTraverseResult {
         I !return_paths {
             # Simple mode: just node_id and depth
             ~i: u64 = 0;
-            L while i < result.steps.len() {
+            W i < result.steps.len() {
                 sql_result.add_row(TraverseRow.from_step(&result.steps[i]));
                 i += 1;
             }
@@ -245,7 +245,7 @@ X GraphTraverseResult {
         ~result = GraphTraverseResult.new();
 
         ~i: u64 = 0;
-        L while i < steps.len() {
+        W i < steps.len() {
             ~step = &steps[i];
 
             I step.depth == 0 {
@@ -260,11 +260,12 @@ X GraphTraverseResult {
                 ~current_step = step;
                 ~depth = step.depth;
 
-                L while depth > 0 {
+                ~path_failed = false;
+                W depth > 0 && !path_failed {
                     # Find parent step
                     ~parent_found = false;
                     ~j: u64 = 0;
-                    L while j < i {
+                    W j < i && !parent_found {
                         I steps[j].node_id == current_step.parent_node &&
                            steps[j].depth == depth - 1 {
                             # Add edge type (prepend to front)
@@ -273,7 +274,7 @@ X GraphTraverseResult {
                             path.insert(0, steps[j].node_id);
                             current_step = &steps[j];
                             parent_found = true;
-                            B                        }
+                        }
                         j += 1;
                     }
 
@@ -281,9 +282,10 @@ X GraphTraverseResult {
                         # Path reconstruction failed - fall back to simple mode
                         path = Vec.new();
                         edge_types = Vec.new();
-                        B                    }
-
-                    depth -= 1;
+                        path_failed = true;
+                    } E {
+                        depth -= 1;
+                    }
                 }
 
                 # Add current node to end of path
@@ -451,7 +453,7 @@ F parse_edge_type_filter(filter_str: &Str) -> Vec<Str> {
     ~types = Vec.new();
     ~parts = filter_str.split(",");
     ~i: u64 = 0;
-    L while i < parts.len() {
+    W i < parts.len() {
         ~trimmed = parts[i].trim();
         I !trimmed.is_empty() {
             types.push(trimmed.to_string());

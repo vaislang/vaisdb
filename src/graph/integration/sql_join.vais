@@ -111,7 +111,7 @@ X GraphTraversalSource {
         }
         ~result = Str.new();
         ~i: u64 = 0;
-        L while i < ids.len() {
+        W i < ids.len() {
             I i > 0 {
                 result.push(',');
             }
@@ -128,7 +128,7 @@ X GraphTraversalSource {
         }
         ~result = Str.new();
         ~i: u64 = 0;
-        L while i < ids.len() {
+        W i < ids.len() {
             I i > 0 {
                 result.push(',');
             }
@@ -227,14 +227,14 @@ X GraphNodeLookupSource {
     ) -> GraphNodeLookupSource {
         ~node_ids = Vec.new();
         ~i: u64 = 0;
-        L while i < result.rows.len() {
+        W i < result.rows.len() {
             # Deduplicate node IDs
             ~found = false;
             ~j: u64 = 0;
-            L while j < node_ids.len() {
+            W j < node_ids.len() && !found {
                 I node_ids[j] == result.rows[i].node_id {
                     found = true;
-                    B                }
+                }
                 j += 1;
             }
             I !found {
@@ -369,18 +369,19 @@ X GraphSqlJoinBuilder {
         }
     }
 
-    F with_traversal(~self, params: GraphTraverseParams) -> &~GraphSqlJoinBuilder {
+    # Builder pattern: takes self by value, returns Self
+    F with_traversal(~self, params: GraphTraverseParams) -> GraphSqlJoinBuilder {
         self.traverse_params = Some(params);
         self
     }
 
-    F with_table(~self, name: Str, join_col: Str) -> &~GraphSqlJoinBuilder {
+    F with_table(~self, name: Str, join_col: Str) -> GraphSqlJoinBuilder {
         self.table_name = Some(name);
         self.join_column = Some(join_col);
         self
     }
 
-    F with_predicate(~self, pred: Expr) -> &~GraphSqlJoinBuilder {
+    F with_predicate(~self, pred: Expr) -> GraphSqlJoinBuilder {
         self.predicate = Some(pred);
         self
     }

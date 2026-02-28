@@ -99,9 +99,8 @@ X ConstraintChecker {
         # Find the primary key index
         ~pk_index: Option<&IndexInfo> = None;
         L idx: &self.indexes {
-            I idx.is_primary {
+            I pk_index.is_none() && idx.is_primary {
                 pk_index = Some(idx);
-                B;
             }
         }
 
@@ -167,35 +166,34 @@ X ConstraintChecker {
                     # NULL in UNIQUE column: skip this check (NULL != NULL)
                     I val.is_null() {
                         has_null = true;
-                        B;
                     }
 
-                    unique_values.push(val);
+                    I !has_null {
+                        unique_values.push(val);
+                    }
                 }
 
                 # If any column is NULL, skip uniqueness check for this index
-                I has_null {
-                    C;
-                }
+                I !has_null {
+                    # Build index key bytes
+                    ~key_bytes = build_index_key(&unique_values)?;
 
-                # Build index key bytes
-                ~key_bytes = build_index_key(&unique_values)?;
+                    # Search in the UNIQUE index B+Tree
+                    ~tree = BTree.new(idx.root_page_id, 0, DEFAULT_PAGE_SIZE);
+                    ~cursor = search_cursor(&tree, &key_bytes, pool)?;
 
-                # Search in the UNIQUE index B+Tree
-                ~tree = BTree.new(idx.root_page_id, 0, DEFAULT_PAGE_SIZE);
-                ~cursor = search_cursor(&tree, &key_bytes, pool)?;
+                    I cursor.valid() {
+                        # Key already exists = duplicate
+                        cursor.close(pool);
+                        ~display_key = format_key_values(&idx.columns, &unique_values);
+                        R Err(err_unique_violation(
+                            idx.columns.join(", "),
+                            display_key
+                        ));
+                    }
 
-                I cursor.valid() {
-                    # Key already exists = duplicate
                     cursor.close(pool);
-                    ~display_key = format_key_values(&idx.columns, &unique_values);
-                    R Err(err_unique_violation(
-                        idx.columns.join(", "),
-                        display_key
-                    ));
                 }
-
-                cursor.close(pool);
             }
         }
         Ok(())
@@ -267,12 +265,8 @@ X ConstraintChecker {
     # with the SQL expression evaluator in the executor module
     # For now, this is a no-op that always succeeds
     F check_check_constraint(self, row: &Row) -> Result<(), VaisError> {
-        # TODO: Implement CHECK constraint evaluation once expression evaluator is available
-        # This would:
-        # 1. Parse the CHECK expression from table metadata
-        # 2. Build an evaluation context with row values
-        # 3. Evaluate the expression using sql/executor/expression.vais
-        # 4. Return error if result is not TRUE (NULL or FALSE both fail)
+        # FUTURE(sql/executor): Evaluate CHECK expression using expression evaluator
+        # Parse CHECK expr from table metadata, build eval context, evaluate, reject NULL/FALSE
         Ok(())
     }
 

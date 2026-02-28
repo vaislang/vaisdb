@@ -137,7 +137,6 @@ X FullTextMatchExecutor {
                 }
                 Ok(None) => {
                     # Term not found, skip
-                    C;
                 }
                 Err(e) => {
                     R Err(e);
@@ -156,9 +155,8 @@ X FullTextMatchExecutor {
 
             # Find df for this term (simplified: use first matching term)
             ~df = 1u32;
-            L term_df: &term_doc_freqs {
-                df = term_df.1;
-                B;
+            I !term_doc_freqs.is_empty() {
+                df = term_doc_freqs[0].1;
             }
 
             # Get document length (simplified: use avg_doc_length)
@@ -271,8 +269,9 @@ X MultiTermScorer {
             ~df = postings.len() as u32;
 
             # Find posting for this doc_id
+            ~doc_found = false;
             L posting: postings {
-                I posting.doc_id == doc_id {
+                I !doc_found && posting.doc_id == doc_id {
                     ~tf = posting.term_freq;
                     ~doc_length = posting.doc_length;
 
@@ -285,7 +284,7 @@ X MultiTermScorer {
                     );
 
                     total_score += term_score;
-                    B;
+                    doc_found = true;
                 }
             }
         }

@@ -118,21 +118,26 @@ X Clog {
     }
 
     # Get transaction status
-    F get_status(self, txn_id: u64) -> TxnStatus {
+    # On cache miss, extends the cache window to include the requested page.
+    # Previous behavior returned InProgress on miss, which caused committed txns
+    # to appear uncommitted — a critical MVCC visibility bug.
+    F get_status(~self, txn_id: u64) -> TxnStatus {
         ~page_num = (txn_id / self.txns_per_page) as u32;
-        ~cache_idx = self.page_to_cache_index(page_num);
 
         ~guard = self.lock.lock();
-        M cache_idx {
+
+        # Ensure page is in cache (extends window on miss)
+        self.ensure_page_cached(page_num);
+
+        M self.page_to_cache_index(page_num) {
             Some(idx) => {
                 ~status = self.cache[idx].get_status(txn_id, self.txns_per_page);
                 drop(guard);
                 status
             },
             None => {
+                # Should not happen after ensure_page_cached
                 drop(guard);
-                # Page not in cache - would need disk I/O
-                # For now return IN_PROGRESS (conservative)
                 TxnStatus.InProgress
             },
         }
@@ -158,12 +163,12 @@ X Clog {
     }
 
     # Check if a transaction is committed
-    F is_committed(self, txn_id: u64) -> bool {
+    F is_committed(~self, txn_id: u64) -> bool {
         self.get_status(txn_id).is_committed()
     }
 
     # Check if a transaction is aborted
-    F is_aborted(self, txn_id: u64) -> bool {
+    F is_aborted(~self, txn_id: u64) -> bool {
         self.get_status(txn_id).is_aborted()
     }
 

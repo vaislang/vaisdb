@@ -227,10 +227,11 @@ X PessimisticDescent {
     # Keeps the latch on safe_page_id and below
     F release_above(~self, safe_page_id: u32, table: &LatchTable) {
         ~keep_from: u64 = 0;
+        ~found_safe = false;
         L i: 0..self.held_latches.len() {
-            I self.held_latches[i] == safe_page_id {
+            I !found_safe && self.held_latches[i] == safe_page_id {
                 keep_from = i;
-                B;
+                found_safe = true;
             }
         }
 

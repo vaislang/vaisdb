@@ -167,12 +167,13 @@ X VectorGraphPipeline {
         })
     }
 
-    F with_direction(~self, direction: u8) -> &~VectorGraphPipeline {
+    # Builder pattern: takes self by value, returns Self
+    F with_direction(~self, direction: u8) -> VectorGraphPipeline {
         self.direction = direction;
         self
     }
 
-    F with_edge_filter(~self, types: Vec<Str>) -> &~VectorGraphPipeline {
+    F with_edge_filter(~self, types: Vec<Str>) -> VectorGraphPipeline {
         self.edge_type_filter = Some(types);
         self
     }
@@ -188,41 +189,39 @@ X VectorGraphPipeline {
         ~all_results = Vec.new();
 
         ~i: u64 = 0;
-        L while i < hits.len() {
+        W i < hits.len() {
             ~hit = &hits[i];
 
-            I hit.node_id == INVALID_NODE_ID {
-                i += 1;
-                C            }
+            I hit.node_id != INVALID_NODE_ID {
+                # Add the origin node itself
+                all_results.push(GraphExpandedResult.origin(hit.node_id, hit.similarity));
 
-            # Add the origin node itself
-            all_results.push(GraphExpandedResult.origin(hit.node_id, hit.similarity));
+                # Expand through graph if depth > 0
+                I self.max_graph_depth > 0 {
+                    ~params = GraphTraverseParams.default(hit.node_id);
+                    params.max_depth = self.max_graph_depth;
+                    params.direction = self.direction;
+                    params.edge_type_filter = self.edge_type_filter.clone();
+                    params.return_paths = false;
 
-            # Expand through graph if depth > 0
-            I self.max_graph_depth > 0 {
-                ~params = GraphTraverseParams.default(hit.node_id);
-                params.max_depth = self.max_graph_depth;
-                params.direction = self.direction;
-                params.edge_type_filter = self.edge_type_filter.clone();
-                params.return_paths = false;
+                    ~traverse_result = self.traverse_fn.execute(&params, snapshot, clog)?;
 
-                ~traverse_result = self.traverse_fn.execute(&params, snapshot, clog)?;
-
-                # Convert traversal results to expanded results with scoring
-                ~j: u64 = 0;
-                L while j < traverse_result.rows.len() {
-                    ~trow = &traverse_result.rows[j];
-                    # Skip depth 0 (already added as origin)
-                    I trow.depth > 0 {
-                        all_results.push(GraphExpandedResult.new(
-                            hit.node_id,
-                            hit.similarity,
-                            trow.node_id,
-                            trow.depth,
-                            self.alpha,
-                        ));
+                    # Convert traversal results to expanded results with scoring
+                    ~j: u64 = 0;
+                    W j < traverse_result.rows.len() {
+                        ~trow = &traverse_result.rows[j];
+                        # Skip depth 0 (already added as origin)
+                        I trow.depth > 0 {
+                            all_results.push(GraphExpandedResult.new(
+                                hit.node_id,
+                                hit.similarity,
+                                trow.node_id,
+                                trow.depth,
+                                self.alpha,
+                            ));
+                        }
+                        j += 1;
                     }
-                    j += 1;
                 }
             }
 
@@ -241,9 +240,9 @@ X VectorGraphPipeline {
     # Sort results by combined_score descending (insertion sort for simplicity)
     F sort_by_score_desc(results: &~Vec<GraphExpandedResult>) {
         ~i: u64 = 1;
-        L while i < results.len() {
+        W i < results.len() {
             ~j = i;
-            L while j > 0 && results[j].combined_score > results[j - 1].combined_score {
+            W j > 0 && results[j].combined_score > results[j - 1].combined_score {
                 results.swap(j, j - 1);
                 j -= 1;
             }
@@ -258,14 +257,14 @@ X VectorGraphPipeline {
         ~seen_nodes = Vec.new();
 
         ~i: u64 = 0;
-        L while i < results.len() {
+        W i < results.len() {
             ~node_id = results[i].neighbor_node_id;
             ~found = false;
             ~j: u64 = 0;
-            L while j < seen_nodes.len() {
+            W j < seen_nodes.len() && !found {
                 I seen_nodes[j] == node_id {
                     found = true;
-                    B                }
+                }
                 j += 1;
             }
 
@@ -380,7 +379,7 @@ X VectorToGraphMapper {
 
         ~hits = Vec.with_capacity(row_ids.len());
         ~i: u64 = 0;
-        L while i < row_ids.len() {
+        W i < row_ids.len() {
             hits.push(VectorSearchHit.new(row_ids[i], node_ids[i], distances[i]));
             i += 1;
         }

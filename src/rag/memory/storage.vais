@@ -122,7 +122,7 @@ X MemoryStore {
 
     ## Get memory by ID (immutable reference)
     F get_memory(self, memory_id: u64) -> Option<&MemoryEntry> {
-        E entry in &self.memories {
+        L entry: &self.memories {
             I entry.memory_id == memory_id {
                 R Some(entry)
             }
@@ -132,7 +132,7 @@ X MemoryStore {
 
     ## Get memory by ID (mutable reference)
     F get_memory_mut(~self, memory_id: u64) -> Option<&~MemoryEntry> {
-        E entry in &~self.memories {
+        L entry: &~self.memories {
             I entry.memory_id == memory_id {
                 R Some(entry)
             }
@@ -245,7 +245,7 @@ X MemoryStore {
     F get_memories_by_type(self, memory_type: u8) -> Vec<&MemoryEntry> {
         ~result = Vec.new()
 
-        E entry in &self.memories {
+        L entry: &self.memories {
             I entry.memory_type == memory_type {
                 result.push(entry)
             }
@@ -258,7 +258,7 @@ X MemoryStore {
     F get_memories_by_session(self, session_id: u64) -> Vec<&MemoryEntry> {
         ~result = Vec.new()
 
-        E entry in &self.memories {
+        L entry: &self.memories {
             I entry.session_id == session_id {
                 result.push(entry)
             }
@@ -278,7 +278,7 @@ X MemoryStore {
 
         ~half_life = self.config.decay_half_life
 
-        E entry in &~self.memories {
+        L entry: &~self.memories {
             ~elapsed = (current_time - entry.last_accessed) as f64
             I elapsed > 0.0 {
                 entry.importance = self.scorer.decay_importance(
@@ -299,7 +299,7 @@ X MemoryStore {
     F memory_count_by_type(self, memory_type: u8) -> u32 {
         ~count = 0u32
 
-        E entry in &self.memories {
+        L entry: &self.memories {
             I entry.memory_type == memory_type {
                 count = count + 1
             }
@@ -371,7 +371,7 @@ X MemoryStore {
     ) -> Vec<&MemoryEntry> {
         ~result = Vec.new()
 
-        E entry in &self.memories {
+        L entry: &self.memories {
             ~importance = entry.importance_with_decay(
                 current_time,
                 self.config.decay_half_life,
@@ -405,7 +405,7 @@ X MemoryStore {
 
         # Find high-importance working memories
         ~candidates = Vec.new()
-        E entry in &self.memories {
+        L entry: &self.memories {
             I entry.memory_type == MEMORY_TYPE_WORKING {
                 ~importance = entry.importance_with_decay(
                     current_time,
@@ -417,12 +417,8 @@ X MemoryStore {
             }
         }
 
-        # TODO: In production, this would:
-        # - Group related working memories by session/topic
-        # - Use LLM to summarize/merge content
-        # - Create episodic memory with combined context
-        # - Transfer graph relationships
-        # For now, just return count of candidates
+        # FUTURE(llm): Group by session/topic, LLM summarize/merge, create episodic memory
+        # Currently returns count of consolidation candidates
         Ok(candidates.len() as u32)
     }
 

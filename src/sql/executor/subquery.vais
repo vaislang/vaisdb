@@ -13,12 +13,12 @@ U std/vec.Vec;
 U std/str.Str;
 U std/box.Box;
 
-U crate/error.VaisError;
-U crate/sql/types.{SqlValue, group_key_hash};
-U crate/sql/row.Row;
-U crate/sql/parser/ast.{SelectQuery, Expr, SetOpKind};
-U crate/sql/executor/mod.{ExecutorRow, ExecStats, ExecContext};
-U crate/sql/executor/expr_eval.{eval_expr, EvalContext};
+U storage/error.VaisError;
+U sql/types.{SqlValue, group_key_hash};
+U sql/row.Row;
+U sql/parser/ast.{SelectQuery, Expr, SetOpKind};
+U sql/executor/mod.{ExecutorRow, ExecStats, ExecContext};
+U sql/executor/expr_eval.{eval_expr, EvalContext};
 
 # ============================================================================
 # CTE Context - Shared storage for materialized CTEs
@@ -80,9 +80,10 @@ X SubqueryExecutor {
         ~result_val = SqlValue.Null;
         ~row_count = 0u64;
 
-        L {
+        ~has_more = true;
+        W has_more {
             M self.child.next()? {
-                Option.None => { B; },
+                Option.None => { has_more = false; },
                 Option.Some(exec_row) => {
                     row_count += 1;
                     self.stats.add_scanned(1);
@@ -129,9 +130,10 @@ F eval_in_subquery(
     ~found = false;
     ~found_null = false;
 
-    L {
+    ~has_more = true;
+    W has_more {
         M child.next()? {
-            Option.None => { B; },
+            Option.None => { has_more = false; },
             Option.Some(exec_row) => {
                 stats.add_scanned(1);
                 ~row = exec_row.get_row();
@@ -143,7 +145,7 @@ F eval_in_subquery(
                     M expr_val.equals(val) {
                         SqlValue.BoolVal { v: true } => {
                             found = true;
-                            B;
+                            has_more = false;
                         },
                         SqlValue.Null => {
                             found_null = true;
@@ -364,9 +366,10 @@ X SetOperationExecutor {
         ~result = Vec.new();
 
         # Materialize left side
-        L {
+        ~has_left = true;
+        W has_left {
             M self.left.next()? {
-                Option.None => { B; },
+                Option.None => { has_left = false; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     result.push(exec_row.get_row().clone());
@@ -375,9 +378,10 @@ X SetOperationExecutor {
         }
 
         # Materialize right side
-        L {
+        ~has_right = true;
+        W has_right {
             M self.right.next()? {
-                Option.None => { B; },
+                Option.None => { has_right = false; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     result.push(exec_row.get_row().clone());
@@ -400,9 +404,10 @@ X SetOperationExecutor {
         ~result = Vec.new();
 
         # Materialize left side with dedup
-        L {
+        ~has_left = true;
+        W has_left {
             M self.left.next()? {
-                Option.None => { B; },
+                Option.None => { has_left = false; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
@@ -423,9 +428,10 @@ X SetOperationExecutor {
         }
 
         # Materialize right side with dedup
-        L {
+        ~has_right = true;
+        W has_right {
             M self.right.next()? {
-                Option.None => { B; },
+                Option.None => { has_right = false; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
@@ -459,9 +465,10 @@ X SetOperationExecutor {
         # Materialize right side into hash set
         ~right_hashes = HashSet.new();
 
-        L {
+        ~has_right = true;
+        W has_right {
             M self.right.next()? {
-                Option.None => { B; },
+                Option.None => { has_right = false; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
@@ -480,9 +487,10 @@ X SetOperationExecutor {
         ~seen = HashSet.new();
         ~result = Vec.new();
 
-        L {
+        ~has_left = true;
+        W has_left {
             M self.left.next()? {
-                Option.None => { B; },
+                Option.None => { has_left = false; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
@@ -516,9 +524,10 @@ X SetOperationExecutor {
         # Materialize right side into hash set
         ~right_hashes = HashSet.new();
 
-        L {
+        ~has_right = true;
+        W has_right {
             M self.right.next()? {
-                Option.None => { B; },
+                Option.None => { has_right = false; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();
@@ -537,9 +546,10 @@ X SetOperationExecutor {
         ~seen = HashSet.new();
         ~result = Vec.new();
 
-        L {
+        ~has_left = true;
+        W has_left {
             M self.left.next()? {
-                Option.None => { B; },
+                Option.None => { has_left = false; },
                 Option.Some(exec_row) => {
                     self.stats.add_scanned(1);
                     ~row = exec_row.get_row();

@@ -14,17 +14,17 @@ U std/string.Str;
 U std/hashmap.{HashMap};
 U std/hashset.{HashSet};
 
-U crate/error.{VaisError, error_code};
-U crate/sql/executor/mod.{ExecContext, ExecStats};
-U crate/sql/executor/expr_eval.{eval_predicate, EvalContext};
-U crate/sql/parser/ast.{Expr, BinOp};
-U crate/sql/types.{SqlType, SqlValue};
-U crate/sql/row.Row;
-U crate/sql/catalog/schema.{TableInfo, ColumnInfo};
-U crate/vector/search.{VectorSearchParams, VectorSearchRow, execute_vector_search};
-U crate/storage/page/heap.HeapPage;
-U crate/storage/txn/visibility.is_tuple_visible;
-U crate/storage/constants.{FILE_ID_DATA, NULL_PAGE};
+U storage/error.{VaisError, error_code};
+U sql/executor/mod.{ExecContext, ExecStats};
+U sql/executor/expr_eval.{eval_predicate, EvalContext};
+U sql/parser/ast.{Expr, BinOp};
+U sql/types.{SqlType, SqlValue};
+U sql/row.Row;
+U sql/catalog/schema.{TableInfo, ColumnInfo};
+U vector/search.{VectorSearchParams, VectorSearchRow, execute_vector_search};
+U storage/page/heap.HeapPage;
+U storage/txn/visibility.is_tuple_visible;
+U storage/constants.{FILE_ID_DATA, NULL_PAGE};
 
 # Error codes: EE=02 (vector), CC=03 (search), NNN=010-012
 # 02-03-010: Filter strategy error
@@ -62,20 +62,20 @@ X FilterConfig {
         }
     }
 
-    # Override strategy explicitly
-    F with_strategy(~self, strategy: FilterStrategy) -> &~Self {
+    # Override strategy explicitly (builder pattern: takes self by value, returns Self)
+    F with_strategy(~self, strategy: FilterStrategy) -> FilterConfig {
         self.strategy = strategy;
         self
     }
 
     # Set selectivity threshold for hybrid mode
-    F with_selectivity_threshold(~self, threshold: f32) -> &~Self {
+    F with_selectivity_threshold(~self, threshold: f32) -> FilterConfig {
         self.selectivity_threshold = threshold;
         self
     }
 
     # Set post-filter oversampling factor
-    F with_oversample(~self, factor: f32) -> &~Self {
+    F with_oversample(~self, factor: f32) -> FilterConfig {
         self.post_filter_oversample = factor;
         self
     }
@@ -135,14 +135,14 @@ X FilteredVectorSearch {
         }
     }
 
-    # Override filter strategy
-    F with_strategy(~self, strategy: FilterStrategy) -> &~Self {
+    # Override filter strategy (builder pattern: takes self by value, returns Self)
+    F with_strategy(~self, strategy: FilterStrategy) -> FilteredVectorSearch {
         self.config.strategy = strategy;
         self
     }
 
     # Override filter configuration
-    F with_config(~self, config: FilterConfig) -> &~Self {
+    F with_config(~self, config: FilterConfig) -> FilteredVectorSearch {
         self.config = config;
         self
     }
@@ -198,10 +198,7 @@ X FilteredVectorSearch {
         ~scanned_count = 0u64;
 
         ~current_page_id = table_info.first_page_id;
-        L {
-            I current_page_id == 0 || current_page_id == NULL_PAGE {
-                B            }
-
+        W current_page_id != 0 && current_page_id != NULL_PAGE {
             # Load heap page
             ~frame_id = self.ctx.pool.fetch_page(FILE_ID_DATA, current_page_id)?;
             ~page_data = self.ctx.pool.get_page(frame_id);
@@ -214,31 +211,30 @@ X FilteredVectorSearch {
 
                 # Get tuple data
                 M heap.get_slot(slot_id) {
-                    None => C,
+                    None => {},
                     Some(tuple_data) => {
                         # Check MVCC visibility
                         M heap.get_mvcc_tuple(slot_id) {
-                            None => C,
+                            None => {},
                             Some(mvcc_tuple) => {
-                                I !is_tuple_visible(
+                                I is_tuple_visible(
                                     mvcc_tuple,
                                     self.ctx.txn_id,
                                     0,
                                     &self.ctx.snapshot,
                                     self.ctx.catalog.get_clog()
                                 ) {
-                                    C                                }
+                                    # Deserialize row
+                                    ~row = Row.decode(tuple_data, columns.iter().map(|c| c.data_type).collect().as_slice())?;
+
+                                    # Evaluate predicate
+                                    I eval_predicate(predicate, &row, &eval_ctx)? {
+                                        # Compute node_id from page_id and slot_id
+                                        ~node_id = ((current_page_id as u64) << 16) | (slot_id as u64);
+                                        valid_node_ids.insert(node_id);
+                                    }
+                                }
                             }
-                        }
-
-                        # Deserialize row
-                        ~row = Row.decode(tuple_data, columns.iter().map(|c| c.data_type).collect().as_slice())?;
-
-                        # Evaluate predicate
-                        I eval_predicate(predicate, &row, &eval_ctx)? {
-                            # Compute node_id from page_id and slot_id
-                            ~node_id = ((current_page_id as u64) << 16) | (slot_id as u64);
-                            valid_node_ids.insert(node_id);
                         }
                     }
                 }
@@ -255,12 +251,13 @@ X FilteredVectorSearch {
 
         # 5. Filter results against bitmap
         ~filtered_results = Vec.new();
-        L result: search_results {
+        ~r_idx: u64 = 0;
+        W r_idx < search_results.len() && filtered_results.len() < self.search_params.top_k {
+            ~result = &search_results[r_idx];
             I valid_node_ids.contains(&result.node_id) {
-                filtered_results.push(result);
-                I filtered_results.len() >= self.search_params.top_k {
-                    B                }
+                filtered_results.push(result.clone());
             }
+            r_idx += 1;
         }
 
         self.stats.add_produced(filtered_results.len() as u64);
@@ -307,12 +304,13 @@ X FilteredVectorSearch {
 
         # 4. Filter results by evaluating predicate
         ~filtered_results = Vec.new();
-        L result: search_results {
+        ~r_idx: u64 = 0;
+        W r_idx < search_results.len() && filtered_results.len() < self.search_params.top_k {
+            ~result = &search_results[r_idx];
             I eval_predicate(predicate, &result.row, &eval_ctx)? {
-                filtered_results.push(result);
-                I filtered_results.len() >= self.search_params.top_k {
-                    B                }
+                filtered_results.push(result.clone());
             }
+            r_idx += 1;
         }
 
         self.stats.add_produced(filtered_results.len() as u64);
@@ -488,12 +486,5 @@ F evaluate_filter(
     eval_predicate(predicate, row, eval_ctx)
 }
 
-# Export public API
-pub use {
-    FilterStrategy,
-    FilterConfig,
-    TableStats,
-    FilteredVectorSearch,
-    estimate_selectivity,
-    evaluate_filter,
-};
+# Public API: FilterStrategy, FilterConfig, TableStats,
+# FilteredVectorSearch, estimate_selectivity, evaluate_filter

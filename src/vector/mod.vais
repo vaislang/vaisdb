@@ -6,44 +6,41 @@
 # Module exports
 # ============================================================================
 
+# Submodules (auto-discovered by filesystem)
+# distance, storage, search, filter, concurrency, hnsw, quantize
+
 # Distance metrics
-pub mod distance;
-pub use distance.{DistanceMetric, DistanceComputer};
+U distance.{DistanceMetric, DistanceComputer};
 
 # Vector storage
-pub mod storage;
-pub use storage.{VectorStore, VectorPage, VectorPageHeader};
+U storage.{VectorStore, VectorPage, VectorPageHeader};
 
 # Search functionality
-pub mod search;
-pub use search.{VectorSearchExecutor, VectorSearchParams, VectorSearchRow};
+U search.{VectorSearchExecutor, VectorSearchParams, VectorSearchRow};
+U storage.{HnswNodeStore};
 
 # Filtered search
-pub mod filter;
-pub use filter.{FilteredVectorSearch, FilterStrategy, FilterConfig};
+U filter.{FilteredVectorSearch, FilterStrategy, FilterConfig};
 
 # Concurrency control
-pub mod concurrency;
-pub use concurrency.{ConcurrentHnswIndex, HnswLock, HnswReadGuard, HnswWriteGuard};
+U concurrency.{ConcurrentHnswIndex, HnswLock, HnswReadGuard, HnswWriteGuard};
 
 # HNSW submodules
-pub mod hnsw;
-pub use hnsw/types.{
+U hnsw/types.{
     HnswConfig, HnswMeta, HnswNode, HnswNeighbor, SearchCandidate, LayerRng,
     INVALID_NODE_ID, DISTANCE_COSINE, DISTANCE_L2, DISTANCE_DOT_PRODUCT,
     DEFAULT_M, DEFAULT_M_MAX_0, DEFAULT_EF_CONSTRUCTION, DEFAULT_EF_SEARCH,
 };
-pub use hnsw/insert.{hnsw_insert, NodeStore};
-pub use hnsw/search.{knn_search, SearchResult, SearchResultEntry};
-pub use hnsw/delete.{hnsw_delete, mvcc_filtered_search, is_vector_visible, is_gc_ready};
-pub use hnsw/layer.{LayerManager, PinnedLayer};
-pub use hnsw/wal.{HnswWalManager};
-pub use hnsw/cow.{CowNeighborStore, EpochManager, CowNeighborList};
-pub use hnsw/bulk.{BulkLoader, BulkLoadConfig, BulkLoadResult};
+U hnsw/insert.{hnsw_insert, NodeStore};
+U hnsw/search.{knn_search, SearchResult, SearchResultEntry};
+U hnsw/delete.{hnsw_delete, mvcc_filtered_search, is_vector_visible, is_gc_ready};
+U hnsw/layer.{LayerManager, PinnedLayer};
+U hnsw/wal.{HnswWalManager};
+U hnsw/cow.{CowNeighborStore, EpochManager, CowNeighborList};
+U hnsw/bulk.{BulkLoader, BulkLoadConfig, BulkLoadResult};
 
 # Quantization
-pub mod quantize;
-pub use quantize/mod.{QuantizationManager, QuantizationStrategy};
+U quantize/mod.{QuantizationManager, QuantizationStrategy};
 
 # Dependencies
 U std/option.{Option, Some, None};
@@ -52,8 +49,10 @@ U std/string.Str;
 U storage/error.{VaisError, ErrorSeverity};
 U storage/buffer/pool.{BufferPool};
 U storage/page/allocator.{PageAllocator};
+U storage/page/freelist.{FreelistBitmap};
 U storage/wal/group_commit.{GroupCommitManager};
 U storage/txn/snapshot.{Snapshot};
+U storage/txn/clog.{Clog};
 U storage/constants.{FILE_ID_VECTORS, PAGE_TYPE_HNSW_META, NULL_PAGE};
 U sql/catalog/manager.{CatalogManager};
 U sql/catalog/schema.{IndexInfo, INDEX_TYPE_HNSW};
@@ -95,6 +94,8 @@ S VectorEngine {
     config: HnswConfig,              # HNSW configuration (M, ef_construction, etc.)
     meta: HnswMeta,                  # Metadata (entry_point, max_layer, node_count)
     store: VectorStore,              # Raw vector data storage
+    node_store: HnswNodeStore,       # HNSW graph structure + NodeStore trait impl
+    distance_computer: DistanceComputer, # Distance metric computer
     layer_mgr: LayerManager,         # Upper layer (1+) pinning manager
     wal_mgr: HnswWalManager,         # WAL logging for HNSW operations
     cow_store: CowNeighborStore,     # Copy-on-write neighbor lists (epoch-based)
@@ -104,6 +105,7 @@ S VectorEngine {
     is_open: bool,                   # Engine open state
     pool: &BufferPool,               # Shared buffer pool
     allocator: &PageAllocator,       # Shared page allocator
+    bitmap: &FreelistBitmap,         # Freelist bitmap (FILE_ID_VECTORS)
     gcm: &GroupCommitManager,        # Shared group commit manager
 }
 
@@ -112,13 +114,14 @@ X VectorEngine {
     # Constructor — Create new vector engine instance
     # ========================================================================
 
-    # Create new VectorEngine instance (does not load from disk)
-    # Call open() to load metadata and upper layers
+    ## Create new VectorEngine instance (does not load from disk)
+    ## Call open() to load metadata and upper layers
     F new(
         config: HnswConfig,
         index_id: u32,
         pool: &BufferPool,
         allocator: &PageAllocator,
+        bitmap: &FreelistBitmap,
         gcm: &GroupCommitManager,
     ) -> Result<VectorEngine, VaisError> {
         # Validate configuration
@@ -133,20 +136,24 @@ X VectorEngine {
         }
 
         # Initialize metadata (empty index)
-        meta := HnswMeta.new(config.dim, config.metric);
+        ~meta = HnswMeta.new(config.clone(), index_id);
 
         # Initialize components
-        store := VectorStore.new(pool, allocator, FILE_ID_VECTORS)?;
-        layer_mgr := LayerManager.new(pool, allocator)?;
-        wal_mgr := HnswWalManager.new(gcm)?;
-        cow_store := CowNeighborStore.new()?;
-        quantization := QuantizationManager.new(config.quantization_strategy)?;
-        lock := HnswLock.new();
+        ~store = VectorStore.new(config.dim, pool, allocator, bitmap);
+        ~node_store = HnswNodeStore.new(&store);
+        ~distance_computer = DistanceComputer.new(config.metric);
+        ~layer_mgr = LayerManager.new(pool, allocator)?;
+        ~wal_mgr = HnswWalManager.new(gcm)?;
+        ~cow_store = CowNeighborStore.new()?;
+        ~quantization = QuantizationManager.new(config.quantization_strategy)?;
+        ~lock = HnswLock.new();
 
         Ok(VectorEngine {
             config,
             meta,
             store,
+            node_store,
+            distance_computer,
             layer_mgr,
             wal_mgr,
             cow_store,
@@ -156,6 +163,7 @@ X VectorEngine {
             is_open: false,
             pool,
             allocator,
+            bitmap,
             gcm,
         })
     }
@@ -164,7 +172,7 @@ X VectorEngine {
     # Lifecycle — Open/Close
     # ========================================================================
 
-    # Open engine: load meta page and upper layers from disk
+    ## Open engine: load meta page and upper layers from disk
     F open(~self) -> Result<(), VaisError> {
         I self.is_open {
             R Ok(());
@@ -192,7 +200,7 @@ X VectorEngine {
         Ok(())
     }
 
-    # Close engine: flush dirty pages, release resources
+    ## Close engine: flush dirty pages, release resources
     F close(~self) -> Result<(), VaisError> {
         I !self.is_open {
             R Ok(());
@@ -219,7 +227,7 @@ X VectorEngine {
     # Index Management — Create/Drop
     # ========================================================================
 
-    # Create new HNSW index: allocate meta page, register in catalog
+    ## Create new HNSW index: allocate meta page, register in catalog
     F create_index(
         config: HnswConfig,
         catalog: &~CatalogManager,
@@ -269,7 +277,7 @@ X VectorEngine {
         Ok(engine)
     }
 
-    # Drop index: mark as deleted, release pages
+    ## Drop index: mark as deleted, release pages
     F drop_index(~self, catalog: &~CatalogManager, txn_id: u64) -> Result<(), VaisError> {
         I !self.is_open {
             R Err(err_vector_engine_closed());
@@ -308,8 +316,8 @@ X VectorEngine {
     # Vector Operations — Insert/Delete
     # ========================================================================
 
-    # Insert vector: write to storage → insert into HNSW → WAL-log
-    # Returns node_id (unique identifier for this vector)
+    ## Insert vector: write to storage, insert into HNSW graph, WAL-log
+    ## Returns node_id (unique identifier for this vector)
     F insert(
         ~self,
         vector: &[f32],
@@ -332,22 +340,28 @@ X VectorEngine {
         ~write_guard = self.lock.write_lock(txn_id)?;
 
         # 1. Write vector to storage (allocate page space)
-        node_id := self.store.write_vector(vector, txn_id, cmd_id)?;
+        ~(vec_page_id, vec_offset) = self.store.write_vector(vector, txn_id, cmd_id)?;
 
-        # 2. Insert into HNSW graph
-        hnsw_insert(
-            node_id,
+        # 2. Allocate node ID and create HnswNode
+        ~node_id = self.node_store.allocate_node_id();
+        ~rng = LayerRng.new(node_id);  # Seed with node_id for determinism
+        ~random_layer = rng.random_layer(self.config.m);
+        ~new_node = HnswNode.new(node_id, vec_page_id, vec_offset, random_layer, txn_id, cmd_id);
+
+        # 3. Insert into HNSW graph
+        self.meta = hnsw_insert(
+            new_node,
             vector,
-            &~self.meta,
+            self.meta,
             &self.config,
-            &self.store,
-            &~self.layer_mgr,
-            &~self.cow_store,
-            self.pool,
+            &self.node_store,
+            &self.distance_computer,
+            self.gcm,
             txn_id,
+            cmd_id,
         )?;
 
-        # 3. WAL-log insert operation
+        # 4. WAL-log insert operation
         self.wal_mgr.log_insert(
             self.index_id,
             node_id,
@@ -356,14 +370,11 @@ X VectorEngine {
             cmd_id,
         )?;
 
-        # 4. Update meta (increment node count)
-        self.meta.total_nodes += 1;
-
         Ok(node_id)
     }
 
-    # Soft-delete vector: mark as deleted → WAL-log
-    # Actual removal happens during GC
+    ## Soft-delete vector: mark as deleted, WAL-log
+    ## Actual removal happens during GC
     F delete(
         ~self,
         node_id: u64,
@@ -377,18 +388,21 @@ X VectorEngine {
         # Acquire write lock
         ~write_guard = self.lock.write_lock(txn_id)?;
 
-        # Soft-delete in storage (set txn_id_expire)
-        self.store.delete_vector(node_id, txn_id, cmd_id)?;
+        # Look up node to get vector page location
+        ~node = self.node_store.load_node(node_id)?;
 
-        # HNSW delete (remove from neighbor lists)
+        # Soft-delete in storage (set txn_id_expire)
+        self.store.delete_vector(node.vector_page_id, node.vector_offset, txn_id, cmd_id)?;
+
+        # HNSW delete (mark as deleted, repair neighbor lists)
         hnsw_delete(
             node_id,
-            &~self.meta,
-            &self.store,
-            &~self.layer_mgr,
-            &~self.cow_store,
-            self.pool,
+            &self.meta,
+            &self.node_store,
             txn_id,
+            cmd_id,
+            FILE_ID_VECTORS,
+            node.vector_page_id,
         )?;
 
         # WAL-log delete operation
@@ -406,14 +420,15 @@ X VectorEngine {
     # Search Operations
     # ========================================================================
 
-    # MVCC-filtered k-NN search
-    # Returns top-k nearest neighbors visible to the snapshot
+    ## MVCC-filtered k-NN search
+    ## Returns top-k nearest neighbors visible to the snapshot
     F search(
         self,
         query: &[f32],
         k: u64,
         ef_search: Option<u32>,
         snapshot: &Snapshot,
+        clog: &Clog,
     ) -> Result<SearchResult, VaisError> {
         I !self.is_open {
             R Err(err_vector_engine_closed());
@@ -437,24 +452,22 @@ X VectorEngine {
         };
 
         # MVCC-filtered search
-        result := mvcc_filtered_search(
+        ~result = mvcc_filtered_search(
             query,
             k,
             ef,
             &self.meta,
-            &self.config,
-            &self.store,
-            &self.layer_mgr,
-            &self.cow_store,
-            self.pool,
+            &self.node_store,
+            &self.distance_computer,
             snapshot,
+            clog,
         )?;
 
         Ok(result)
     }
 
-    # Filtered search: combines vector search with SQL WHERE predicate
-    # Uses pre/post/hybrid filter strategy
+    ## Filtered search: combines vector search with SQL WHERE predicate
+    ## Uses pre/post/hybrid filter strategy
     F filtered_search(
         self,
         query: &[f32],
@@ -477,7 +490,7 @@ X VectorEngine {
         # If no predicate, use regular search
         M predicate {
             None => {
-                result := self.search(query, k, None, ctx.snapshot)?;
+                result := self.search(query, k, None, ctx.snapshot, ctx.clog)?;
                 # Convert SearchResult to VectorSearchRow
                 R self.materialize_search_result(result, ctx);
             },
@@ -498,8 +511,8 @@ X VectorEngine {
     # Bulk Loading
     # ========================================================================
 
-    # Bulk load vectors: efficient batch insertion
-    # Bypasses WAL if config.bypass_wal = true (requires checkpoint after)
+    ## Bulk load vectors: efficient batch insertion
+    ## Bypasses WAL if config.bypass_wal = true (requires checkpoint after)
     F bulk_load(
         ~self,
         vectors: &[&[f32]],
@@ -553,17 +566,17 @@ X VectorEngine {
     # Metadata Access
     # ========================================================================
 
-    # Get current metadata (snapshot)
+    ## Get current metadata (snapshot)
     F get_meta(self) -> &HnswMeta {
         &self.meta
     }
 
-    # Get current node count
+    ## Get current node count
     F node_count(self) -> u64 {
         self.meta.total_nodes
     }
 
-    # Check if engine is open
+    ## Check if engine is open
     F is_open(self) -> bool {
         self.is_open
     }

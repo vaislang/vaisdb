@@ -130,11 +130,11 @@ X MinHeap {
         # Insert in sorted order (ascending by distance)
         ~inserted = false;
         ~i: u64 = 0;
-        L while i < self.candidates.len() {
+        W i < self.candidates.len() && !inserted {
             I candidate.distance < self.candidates[i].distance {
                 self.candidates.insert(i, candidate);
                 inserted = true;
-                B            }
+            }
             i = i + 1;
         }
         I !inserted {
@@ -182,11 +182,11 @@ X MaxHeap {
         # Insert in sorted order (descending by distance)
         ~inserted = false;
         ~i: u64 = 0;
-        L while i < self.candidates.len() {
+        W i < self.candidates.len() && !inserted {
             I candidate.distance > self.candidates[i].distance {
                 self.candidates.insert(i, candidate);
                 inserted = true;
-                B            }
+            }
             i = i + 1;
         }
         I !inserted {
@@ -257,7 +257,7 @@ F search_layer_ef(
 
     # Initialize with entry points
     ~ep_idx: u64 = 0;
-    L while ep_idx < entry_points.len() {
+    W ep_idx < entry_points.len() {
         ~ep = &entry_points[ep_idx];
         visited.insert(ep.node_id);
         candidates.push(SearchCandidate.new(ep.node_id, ep.distance));
@@ -266,78 +266,81 @@ F search_layer_ef(
     }
 
     # Beam search loop
-    L while !candidates.is_empty() {
+    ~beam_done = false;
+    W !candidates.is_empty() && !beam_done {
         ~c_opt = candidates.pop_min();
         M c_opt {
-            Option.None => B,
+            Option.None => { beam_done = true; },
             Option.Some(c) => {
                 # Check if we can still improve result set
+                ~should_stop = false;
                 ~f_opt = result.peek_max();
                 M f_opt {
                     Option.Some(f) => {
                         I c.distance > f.distance {
-                            B                        }
+                            should_stop = true;
+                        }
                     },
                     Option.None => {},
                 }
 
-                # Get current node
-                ~node = store.get_node(c.node_id)?;
-                stats.increment_visited();
+                I !should_stop {
+                    # Get current node
+                    ~node = store.get_node(c.node_id)?;
+                    stats.increment_visited();
 
-                # Get neighbors at this layer
-                ~neighbors = node.get_neighbors(layer)?;
+                    # Get neighbors at this layer
+                    ~neighbors = node.get_neighbors(layer)?;
 
-                # Explore each neighbor
-                ~n_idx: u64 = 0;
-                L while n_idx < neighbors.len() {
-                    ~neighbor = &neighbors[n_idx];
-                    ~n_id = neighbor.node_id;
+                    # Explore each neighbor
+                    ~n_idx: u64 = 0;
+                    W n_idx < neighbors.len() {
+                        ~neighbor = &neighbors[n_idx];
+                        ~n_id = neighbor.node_id;
 
-                    # Skip if already visited
-                    I visited.contains(&n_id) {
-                        n_idx = n_idx + 1;
-                        C                    }
+                        # Skip if already visited
+                        I !visited.contains(&n_id) {
+                            visited.insert(n_id);
 
-                    visited.insert(n_id);
+                            # Get neighbor node and check if deleted
+                            ~n_node = store.get_node(n_id)?;
+                            I !n_node.is_deleted {
+                                # Compute distance to query
+                                ~n_vec = store.get_vector(n_id)?;
+                                ~dist_n = distance.compute(query, n_vec)?;
+                                stats.increment_computations();
 
-                    # Get neighbor node and check if deleted
-                    ~n_node = store.get_node(n_id)?;
-                    I n_node.is_deleted {
-                        n_idx = n_idx + 1;
-                        C                    }
+                                # Check if this neighbor should be added to result set
+                                ~should_add = false;
+                                ~f_dist_opt = result.peek_max();
+                                M f_dist_opt {
+                                    Option.Some(f_dist) => {
+                                        I dist_n < f_dist.distance || (result.len() as u32) < ef {
+                                            should_add = true;
+                                        }
+                                    },
+                                    Option.None => {
+                                        should_add = true;
+                                    },
+                                }
 
-                    # Compute distance to query
-                    ~n_vec = store.get_vector(n_id)?;
-                    ~dist_n = distance.compute(query, n_vec)?;
-                    stats.increment_computations();
+                                I should_add {
+                                    ~new_candidate = SearchCandidate.new(n_id, dist_n);
+                                    candidates.push(SearchCandidate.new(n_id, dist_n));
+                                    result.push(new_candidate);
 
-                    # Check if this neighbor should be added to result set
-                    ~should_add = false;
-                    ~f_dist_opt = result.peek_max();
-                    M f_dist_opt {
-                        Option.Some(f_dist) => {
-                            I dist_n < f_dist.distance || (result.len() as u32) < ef {
-                                should_add = true;
+                                    # Evict farthest if result set exceeds ef
+                                    I (result.len() as u32) > ef {
+                                        result.pop_max();
+                                    }
+                                }
                             }
-                        },
-                        Option.None => {
-                            should_add = true;
-                        },
-                    }
-
-                    I should_add {
-                        ~new_candidate = SearchCandidate.new(n_id, dist_n);
-                        candidates.push(SearchCandidate.new(n_id, dist_n));
-                        result.push(new_candidate);
-
-                        # Evict farthest if result set exceeds ef
-                        I (result.len() as u32) > ef {
-                            result.pop_max();
                         }
-                    }
 
-                    n_idx = n_idx + 1;
+                        n_idx = n_idx + 1;
+                    }
+                } E {
+                    beam_done = true;
                 }
             },
         }
@@ -416,7 +419,7 @@ F knn_search(
     # Phase 1: Greedy descent from max_layer down to layer 1
     # At each upper layer, use ef=1 to find single closest node
     ~lc = meta.max_layer;
-    L while lc >= 1 {
+    W lc >= 1 {
         ~layer_result = search_layer_ef(
             query,
             &current_candidates,
@@ -440,8 +443,6 @@ F knn_search(
         current_candidates.clear();
         current_candidates.push(layer_result[0]);
 
-        I lc == 0 {
-            B        }
         lc = lc - 1;
     }
 
@@ -459,7 +460,7 @@ F knn_search(
     # Sort candidates by distance (ascending) and take top K
     # Convert SearchCandidate to SearchResultEntry
     ~idx: u64 = 0;
-    L while idx < final_candidates.len() {
+    W idx < final_candidates.len() {
         ~candidate = &final_candidates[idx];
         result.add_result(SearchResultEntry.new(
             candidate.node_id,
@@ -496,7 +497,7 @@ F greedy_search_single(
     ~improved = true;
 
     # Greedy descent: keep moving to closer neighbor until local minimum
-    L while improved {
+    W improved {
         improved = false;
         ~node = store.get_node(current_id)?;
         stats.increment_visited();
@@ -504,24 +505,22 @@ F greedy_search_single(
         ~neighbors = node.get_neighbors(layer)?;
 
         ~n_idx: u64 = 0;
-        L while n_idx < neighbors.len() {
+        W n_idx < neighbors.len() {
             ~neighbor = &neighbors[n_idx];
             ~n_id = neighbor.node_id;
 
             # Skip deleted nodes
             ~n_node = store.get_node(n_id)?;
-            I n_node.is_deleted {
-                n_idx = n_idx + 1;
-                C            }
+            I !n_node.is_deleted {
+                ~n_vec = store.get_vector(n_id)?;
+                ~n_dist = distance.compute(query, n_vec)?;
+                stats.increment_computations();
 
-            ~n_vec = store.get_vector(n_id)?;
-            ~n_dist = distance.compute(query, n_vec)?;
-            stats.increment_computations();
-
-            I n_dist < current_dist {
-                current_dist = n_dist;
-                current_id = n_id;
-                improved = true;
+                I n_dist < current_dist {
+                    current_dist = n_dist;
+                    current_id = n_id;
+                    improved = true;
+                }
             }
 
             n_idx = n_idx + 1;

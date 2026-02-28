@@ -107,15 +107,17 @@ F decode_composite_key(data: &[u8]) -> Vec<Vec<u8>> {
     ~components = Vec.new();
     ~pos: u64 = 0;
 
-    L while pos + 2 <= data.len() {
+    ~valid = true;
+    W pos + 2 <= data.len() && valid {
         ~len = ((data[pos] as u16) << 8) | (data[pos + 1] as u16);
         pos += 2;
         I pos + len as u64 > data.len() {
-            B;
+            valid = false;
+        } E {
+            ~comp = data[pos..pos + len as u64].to_vec();
+            components.push(comp);
+            pos += len as u64;
         }
-        ~comp = data[pos..pos + len as u64].to_vec();
-        components.push(comp);
-        pos += len as u64;
     }
 
     components
@@ -125,11 +127,15 @@ F decode_composite_key(data: &[u8]) -> Vec<Vec<u8>> {
 F common_prefix_length(a: &[u8], b: &[u8]) -> u64 {
     ~min_len = I a.len() < b.len() { a.len() } E { b.len() };
     ~prefix_len: u64 = 0;
+    ~prefix_done = false;
     L i: 0..min_len {
-        I a[i] != b[i] {
-            B;
+        I !prefix_done {
+            I a[i] != b[i] {
+                prefix_done = true;
+            } E {
+                prefix_len += 1;
+            }
         }
-        prefix_len += 1;
     }
     prefix_len
 }

@@ -105,45 +105,52 @@ X TruncationManager {
 
         L &seg_num: &segments {
             # Check if segment is safe to remove
+            ~should_skip = false;
             I seg_num >= safe_segment {
-                C;  # Still needed
+                should_skip = true;  # Still needed
             }
 
             # Verify by reading segment header
-            ~seg_path = self.segment_path(seg_num);
-            M self.read_segment_last_lsn(&seg_path) {
-                Ok(last_lsn) => {
-                    I lsn_compare(last_lsn, safe_lsn) >= 0 {
-                        C;  # Segment contains records still needed
-                    }
-                },
-                Err(_) => C,  # Can't read header, skip
+            I !should_skip {
+                ~seg_path = self.segment_path(seg_num);
+                M self.read_segment_last_lsn(&seg_path) {
+                    Ok(last_lsn) => {
+                        I lsn_compare(last_lsn, safe_lsn) >= 0 {
+                            should_skip = true;  # Segment contains records still needed
+                        }
+                    },
+                    Err(_) => { should_skip = true; },  # Can't read header, skip
+                }
             }
 
-            # Archive before deletion if configured
-            M self.config.archive_mode {
-                ArchiveMode.On => {
-                    M &self.config.archive_path {
-                        Some(ref archive_dir) => {
-                            self.archive_segment(seg_num, archive_dir)?;
-                            segments_archived += 1;
-                        },
-                        None => {},
-                    }
-                },
-                ArchiveMode.Off => {},
-            }
+            I !should_skip {
+                # Archive before deletion if configured
+                ~seg_path = self.segment_path(seg_num);
+                M self.config.archive_mode {
+                    ArchiveMode.On => {
+                        M &self.config.archive_path {
+                            Some(ref archive_dir) => {
+                                self.archive_segment(seg_num, archive_dir)?;
+                                segments_archived += 1;
+                            },
+                            None => {},
+                        }
+                    },
+                    ArchiveMode.Off => {},
+                }
 
-            # Delete the segment file
-            remove_file(&seg_path)?;
-            segments_deleted += 1;
+                # Delete the segment file
+                remove_file(&seg_path)?;
+                segments_deleted += 1;
+            }
         }
 
         # Find oldest remaining segment
+        ~found_oldest = false;
         L &seg_num: &segments {
-            I seg_num >= safe_segment {
+            I !found_oldest && seg_num >= safe_segment {
                 oldest_remaining = seg_num;
-                B;
+                found_oldest = true;
             }
         }
 

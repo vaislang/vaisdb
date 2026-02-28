@@ -2,10 +2,11 @@
 # ARIES-style crash recovery with 3 phases: Analysis, Redo, Undo
 # Based on Stage 2 Section 7
 
-pub mod checkpoint;    # Fuzzy checkpoint manager + FPI tracking
-pub mod redo;          # Analysis + Redo phases, WAL record iterator
-pub mod undo;          # Undo phase with CLR support
-pub mod truncation;    # WAL segment truncation and archiving
+# Submodules (auto-discovered by filesystem)
+# checkpoint    — Fuzzy checkpoint manager + FPI tracking
+# redo          — Analysis + Redo phases, WAL record iterator
+# undo          — Undo phase with CLR support
+# truncation    — WAL segment truncation and archiving
 
 U storage/error.{VaisError};
 U storage/wal/writer.{WalWriter};

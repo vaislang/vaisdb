@@ -13,9 +13,9 @@ U storage/wal/record_vector.{
 };
 U storage/buffer/pool.{BufferPool};
 U vector/hnsw/types.{HnswNode, HnswNeighbor, HnswMeta};
-U vector/hnsw/node_store.{NodeStore};
-U core/result.{Result, Ok, Err};
-U core/error.{VaisError};
+U vector/hnsw/insert.{NodeStore};
+U std/result.{Result, Ok, Err};
+U storage/error.{VaisError};
 
 # WAL manager for HNSW operations
 # Coordinates WAL writes with GroupCommitManager for crash recovery
@@ -42,14 +42,12 @@ X HnswWalManager {
         # Build neighbor list from node
         L ~neighbors: Vec<(u64, f32)> = Vec.new();
         L i: u64 = 0;
-        L layer_count = node.neighbors.len();
-        L {
-            I i >= layer_count { B }
-            L layer_neighbors = &node.neighbors[i];
+        ~layer_count := node.neighbors.len();
+        W i < layer_count {
+            ~layer_neighbors := &node.neighbors[i];
             L j: u64 = 0;
-            L {
-                I j >= layer_neighbors.len() { B }
-                L nb = &layer_neighbors[j];
+            W j < layer_neighbors.len() {
+                ~nb := &layer_neighbors[j];
                 neighbors.push((nb.node_id, nb.distance));
                 j = j + 1;
             }
@@ -57,7 +55,7 @@ X HnswWalManager {
         }
 
         # Create payload
-        L payload = HnswInsertNodePayload {
+        ~payload := HnswInsertNodePayload {
             node_id: node.node_id,
             layer: node.max_layer,
             neighbors,
@@ -67,7 +65,7 @@ X HnswWalManager {
         };
 
         # Serialize and write
-        L payload_bytes = payload.serialize();
+        ~payload_bytes := payload.serialize();
         self.gcm.write_record(txn_id, HNSW_INSERT_NODE, 0, &payload_bytes)
     }
 
@@ -81,14 +79,14 @@ X HnswWalManager {
         file_id: u8,
         page_id: u32
     ) -> Result<u64, VaisError> {
-        L payload = HnswDeleteNodePayload {
+        ~payload := HnswDeleteNodePayload {
             node_id,
             layers_affected: layers.to_vec(),
             file_id,
             page_id
         };
 
-        L payload_bytes = payload.serialize();
+        ~payload_bytes := payload.serialize();
         self.gcm.write_record(txn_id, HNSW_DELETE_NODE, 0, &payload_bytes)
     }
 
@@ -104,7 +102,7 @@ X HnswWalManager {
         file_id: u8,
         page_id: u32
     ) -> Result<u64, VaisError> {
-        L payload = HnswUpdateEdgesPayload {
+        ~payload := HnswUpdateEdgesPayload {
             node_id,
             layer,
             old_neighbors: old_neighbors.to_vec(),
@@ -113,7 +111,7 @@ X HnswWalManager {
             page_id
         };
 
-        L payload_bytes = payload.serialize();
+        ~payload_bytes := payload.serialize();
         self.gcm.write_record(txn_id, HNSW_UPDATE_EDGES, 0, &payload_bytes)
     }
 
@@ -127,14 +125,14 @@ X HnswWalManager {
         file_id: u8,
         page_id: u32
     ) -> Result<u64, VaisError> {
-        L payload = HnswLayerPromotePayload {
+        ~payload := HnswLayerPromotePayload {
             node_id,
             new_max_layer,
             file_id,
             page_id
         };
 
-        L payload_bytes = payload.serialize();
+        ~payload_bytes := payload.serialize();
         self.gcm.write_record(txn_id, HNSW_LAYER_PROMOTE, 0, &payload_bytes)
     }
 
@@ -148,14 +146,14 @@ X HnswWalManager {
         offset: u16,
         data: &[u8]
     ) -> Result<u64, VaisError> {
-        L payload = VectorDataWritePayload {
+        ~payload := VectorDataWritePayload {
             file_id,
             page_id,
             offset,
             vector_data: data.to_vec()
         };
 
-        L payload_bytes = payload.serialize();
+        ~payload_bytes := payload.serialize();
         self.gcm.write_record(txn_id, VECTOR_DATA_WRITE, 0, &payload_bytes)
     }
 
@@ -167,12 +165,12 @@ X HnswWalManager {
         index_id: u32,
         codebook: &[u8]
     ) -> Result<u64, VaisError> {
-        L payload = QuantizationUpdatePayload {
+        ~payload := QuantizationUpdatePayload {
             index_id,
             codebook: codebook.to_vec()
         };
 
-        L payload_bytes = payload.serialize();
+        ~payload_bytes := payload.serialize();
         self.gcm.write_record(txn_id, QUANTIZATION_UPDATE, 0, &payload_bytes)
     }
 }
@@ -184,7 +182,7 @@ F redo_hnsw_insert(
     store: &~dyn NodeStore
 ) -> Result<(), VaisError> {
     # Reconstruct HnswNode from payload
-    L ~node = HnswNode {
+    ~node = HnswNode {
         node_id: payload.node_id,
         vector_page_id: payload.page_id,
         max_layer: payload.layer,
@@ -193,14 +191,12 @@ F redo_hnsw_insert(
 
     # Build neighbor layers
     L i: u64 = 0;
-    L {
-        I i > payload.layer as u64 { B }
+    W i <= payload.layer as u64 {
         L ~layer_neighbors: Vec<HnswNeighbor> = Vec.new();
 
         # Filter neighbors for this layer
         L j: u64 = 0;
-        L {
-            I j >= payload.neighbors.len() { B }
+        W j < payload.neighbors.len() {
             L (nid, dist) = payload.neighbors[j];
             layer_neighbors.push(HnswNeighbor { node_id: nid, distance: dist });
             j = j + 1;
@@ -231,7 +227,7 @@ F redo_hnsw_update_edges(
     store: &~dyn NodeStore
 ) -> Result<(), VaisError> {
     # Load node
-    L ~node = store.get_node(payload.node_id)?;
+    ~node = store.get_node(payload.node_id)?;
 
     # Update neighbors at layer
     I payload.layer as u64 >= node.neighbors.len() {
@@ -242,9 +238,8 @@ F redo_hnsw_update_edges(
     # Build new neighbor list
     L ~new_neighbors: Vec<HnswNeighbor> = Vec.new();
     L i: u64 = 0;
-    L {
-        I i >= payload.new_neighbors.len() { B }
-        L nid = payload.new_neighbors[i];
+    W i < payload.new_neighbors.len() {
+        ~nid := payload.new_neighbors[i];
         # Distance not stored in payload, use placeholder (will be recalculated)
         new_neighbors.push(HnswNeighbor { node_id: nid, distance: 0.0 });
         i = i + 1;
@@ -263,14 +258,13 @@ F redo_hnsw_layer_promote(
     store: &~dyn NodeStore
 ) -> Result<(), VaisError> {
     # Load node
-    L ~node = store.get_node(payload.node_id)?;
+    ~node = store.get_node(payload.node_id)?;
 
     # Update max_layer
     node.max_layer = payload.new_max_layer;
 
     # Ensure neighbors vector has enough layers
-    L {
-        I node.neighbors.len() > payload.new_max_layer as u64 { B }
+    W node.neighbors.len() <= payload.new_max_layer as u64 {
         node.neighbors.push(Vec.new());
     }
 
@@ -285,18 +279,17 @@ F redo_vector_data_write(
     pool: &~BufferPool
 ) -> Result<(), VaisError> {
     # Pin page
-    L ~frame = pool.pin_page(payload.file_id, payload.page_id)?;
+    ~frame = pool.pin_page(payload.file_id, payload.page_id)?;
 
     # Write data at offset
-    L page_data = frame.get_page_data_mut();
+    ~page_data := frame.get_page_data_mut();
     I payload.offset as u64 + payload.vector_data.len() > page_data.len() {
         pool.unpin_page(payload.file_id, payload.page_id, false);
         R Err(VaisError.new(0x020901, "REDO: vector data write out of bounds"));
     }
 
     L i: u64 = 0;
-    L {
-        I i >= payload.vector_data.len() { B }
+    W i < payload.vector_data.len() {
         page_data[payload.offset as u64 + i] = payload.vector_data[i];
         i = i + 1;
     }
@@ -341,23 +334,23 @@ F dispatch_vector_redo(
 ) -> Result<(), VaisError> {
     M record_type {
         HNSW_INSERT_NODE => {
-            L payload = HnswInsertNodePayload.deserialize(payload_data)?;
+            ~payload := HnswInsertNodePayload.deserialize(payload_data)?;
             redo_hnsw_insert(&payload, store)
         },
         HNSW_DELETE_NODE => {
-            L payload = HnswDeleteNodePayload.deserialize(payload_data)?;
+            ~payload := HnswDeleteNodePayload.deserialize(payload_data)?;
             redo_hnsw_delete(&payload, store)
         },
         HNSW_UPDATE_EDGES => {
-            L payload = HnswUpdateEdgesPayload.deserialize(payload_data)?;
+            ~payload := HnswUpdateEdgesPayload.deserialize(payload_data)?;
             redo_hnsw_update_edges(&payload, store)
         },
         HNSW_LAYER_PROMOTE => {
-            L payload = HnswLayerPromotePayload.deserialize(payload_data)?;
+            ~payload := HnswLayerPromotePayload.deserialize(payload_data)?;
             redo_hnsw_layer_promote(&payload, store)
         },
         VECTOR_DATA_WRITE => {
-            L payload = VectorDataWritePayload.deserialize(payload_data)?;
+            ~payload := VectorDataWritePayload.deserialize(payload_data)?;
             redo_vector_data_write(&payload, pool)
         },
         QUANTIZATION_UPDATE => {
@@ -380,19 +373,19 @@ F dispatch_vector_undo(
 ) -> Result<(), VaisError> {
     M record_type {
         HNSW_INSERT_NODE => {
-            L payload = HnswInsertNodePayload.deserialize(payload_data)?;
+            ~payload := HnswInsertNodePayload.deserialize(payload_data)?;
             undo_hnsw_insert(&payload, store)
         },
         HNSW_DELETE_NODE => {
-            L payload = HnswDeleteNodePayload.deserialize(payload_data)?;
+            ~payload := HnswDeleteNodePayload.deserialize(payload_data)?;
             undo_hnsw_delete(&payload, store)
         },
         HNSW_UPDATE_EDGES => {
             # Undo edge update: restore old neighbors
-            L payload = HnswUpdateEdgesPayload.deserialize(payload_data)?;
+            ~payload := HnswUpdateEdgesPayload.deserialize(payload_data)?;
 
             # Load node
-            L ~node = store.get_node(payload.node_id)?;
+            ~node = store.get_node(payload.node_id)?;
 
             I payload.layer as u64 >= node.neighbors.len() {
                 R Err(VaisError.new(0x020904, "UNDO: invalid layer for edge update"));
@@ -401,9 +394,8 @@ F dispatch_vector_undo(
             # Restore old neighbors
             L ~old_neighbors: Vec<HnswNeighbor> = Vec.new();
             L i: u64 = 0;
-            L {
-                I i >= payload.old_neighbors.len() { B }
-                L nid = payload.old_neighbors[i];
+            W i < payload.old_neighbors.len() {
+                ~nid := payload.old_neighbors[i];
                 old_neighbors.push(HnswNeighbor { node_id: nid, distance: 0.0 });
                 i = i + 1;
             }

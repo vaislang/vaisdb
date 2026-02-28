@@ -194,75 +194,77 @@ X MemorySearchExecutor {
             ~mem = memories.get(mi as u64);
 
             # Type filter
+            ~skip_entry = false;
             M self.params.memory_type_filter {
                 Some(t) => {
                     I mem.memory_type != t {
-                        mi = mi + 1;
-                        C;
+                        skip_entry = true;
                     }
                 },
                 None => {},
             }
 
             # Session filter
-            M self.params.session_id_filter {
-                Some(sid) => {
-                    I mem.session_id != sid {
-                        mi = mi + 1;
-                        C;
-                    }
-                },
-                None => {},
+            I !skip_entry {
+                M self.params.session_id_filter {
+                    Some(sid) => {
+                        I mem.session_id != sid {
+                            skip_entry = true;
+                        }
+                    },
+                    None => {},
+                }
             }
 
             # TTL filter
-            I !self.params.include_expired && mem.ttl_seconds > 0 {
+            I !skip_entry && !self.params.include_expired && mem.ttl_seconds > 0 {
                 ~expiry = mem.created_at + mem.ttl_seconds as i64;
                 I current_time > expiry {
-                    mi = mi + 1;
-                    C;
+                    skip_entry = true;
                 }
             }
 
-            # Step 2: Get similarity score
-            ~sim_score = find_similarity(mem.memory_id, similarity_scores);
+            I !skip_entry {
+                # Step 2: Get similarity score
+                ~sim_score = find_similarity(mem.memory_id, similarity_scores);
 
-            # Step 3: Get importance with decay
-            ~imp_score = mem.importance;
-            I current_time > mem.last_accessed {
-                ~age_seconds = (current_time - mem.last_accessed) as f64;
-                ~half_life: f64 = 604800.0;  # 7 days in seconds
-                ~decay = power_of_half(age_seconds / half_life);
-                imp_score = imp_score * decay;
-            }
-
-            # Step 4: Recency score (higher for more recent)
-            ~recency: f64 = 0.0;
-            I current_time > mem.created_at {
-                ~age = (current_time - mem.created_at) as f64;
-                ~max_age: f64 = 86400.0 * 30.0;  # 30 days
-                I age < max_age {
-                    recency = 1.0 - (age / max_age);
+                # Step 3: Get importance with decay
+                ~imp_score = mem.importance;
+                I current_time > mem.last_accessed {
+                    ~age_seconds = (current_time - mem.last_accessed) as f64;
+                    ~half_life: f64 = 604800.0;  # 7 days in seconds
+                    ~decay = power_of_half(age_seconds / half_life);
+                    imp_score = imp_score * decay;
                 }
-            } E {
-                recency = 1.0;
-            }
 
-            # Step 5: Fuse scores
-            ~fused = self.params.similarity_weight * sim_score
-                   + self.params.importance_weight * imp_score
-                   + self.params.recency_boost * recency;
+                # Step 4: Recency score (higher for more recent)
+                ~recency: f64 = 0.0;
+                I current_time > mem.created_at {
+                    ~age = (current_time - mem.created_at) as f64;
+                    ~max_age: f64 = 86400.0 * 30.0;  # 30 days
+                    I age < max_age {
+                        recency = 1.0 - (age / max_age);
+                    }
+                } E {
+                    recency = 1.0;
+                }
 
-            # Step 6: Apply min_importance threshold
-            I imp_score >= self.params.min_importance {
-                ~result = MemorySearchResult.new(
-                    mem.memory_id, mem.memory_type, mem.content.clone(), fused
-                );
-                result.similarity_score = sim_score;
-                result.importance_score = imp_score;
-                result.recency_score = recency;
-                result.session_id = mem.session_id;
-                candidates.push(result);
+                # Step 5: Fuse scores
+                ~fused = self.params.similarity_weight * sim_score
+                       + self.params.importance_weight * imp_score
+                       + self.params.recency_boost * recency;
+
+                # Step 6: Apply min_importance threshold
+                I imp_score >= self.params.min_importance {
+                    ~result = MemorySearchResult.new(
+                        mem.memory_id, mem.memory_type, mem.content.clone(), fused
+                    );
+                    result.similarity_score = sim_score;
+                    result.importance_score = imp_score;
+                    result.recency_score = recency;
+                    result.session_id = mem.session_id;
+                    candidates.push(result);
+                }
             }
 
             mi = mi + 1;

@@ -57,7 +57,7 @@ F bulk_load(
     ~current_level = leaf_pages;
     ~height: u32 = 1;
 
-    L while current_level.len() > 1 {
+    W current_level.len() > 1 {
         current_level = build_internal_level(&current_level, file_id, page_size, fill_factor, pool)?;
         height += 1;
     }
@@ -193,10 +193,9 @@ F build_internal_level(
             internal = BTreeInternalNode.new(current_page, page_size, false);
             internal.set_leftmost_child(children[i].page_id);
             first_key = children[i].first_key.clone();
-            C;
+        } E {
+            internal.insert_entry(&children[i].first_key, children[i].page_id)?;
         }
-
-        internal.insert_entry(&children[i].first_key, children[i].page_id)?;
     }
 
     # Finalize last internal node

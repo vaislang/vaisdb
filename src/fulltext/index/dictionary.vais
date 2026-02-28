@@ -61,7 +61,7 @@ X DictionaryIndex {
         pool: &~BufferPool,
     ) -> Result<DictEntry, VaisError> {
         ~term_hash = fnv1a_hash(term);
-        ~key = Self.encode_term_key(term_hash);
+        ~key = DictionaryIndex.encode_term_key(term_hash);
 
         # Insert into B+Tree (TID encodes posting_head_page)
         btree_insert(&self.tree, &key, posting_head_page, txn_id, gcm, pool)?;
@@ -83,19 +83,21 @@ X DictionaryIndex {
         pool: &~BufferPool,
     ) -> Result<(), VaisError> {
         ~term_hash = fnv1a_hash(term);
-        ~key = Self.encode_term_key(term_hash);
+        ~key = DictionaryIndex.encode_term_key(term_hash);
 
         # Delete from B+Tree
         btree_delete(&self.tree, &key, txn_id, gcm, pool)?;
 
         # Remove from cache
         ~i: u64 = 0;
-        L W i < self.entries.len() {
+        ~removed = false;
+        W i < self.entries.len() && !removed {
             I self.entries[i].term_hash == term_hash {
                 self.entries.remove(i);
-                B;
+                removed = true;
+            } E {
+                i += 1;
             }
-            i += 1;
         }
 
         Ok(())
@@ -111,7 +113,7 @@ X DictionaryIndex {
 
         # Check in-memory cache first
         ~i: u64 = 0;
-        L W i < self.entries.len() {
+        W i < self.entries.len() {
             I self.entries[i].term_hash == term_hash && self.entries[i].term == *term {
                 R Ok(Some(self.entries[i].clone()));
             }
@@ -119,7 +121,7 @@ X DictionaryIndex {
         }
 
         # Fall back to B+Tree lookup
-        ~key = Self.encode_term_key(term_hash);
+        ~key = DictionaryIndex.encode_term_key(term_hash);
         M self.tree.search(&key, pool)? {
             Some(~posting_head_page) => {
                 ~entry = DictEntry.new(term.clone(), term_hash, posting_head_page);
@@ -137,7 +139,7 @@ X DictionaryIndex {
     ) -> Result<Option<u32>, VaisError> {
         # Check cache
         ~i: u64 = 0;
-        L W i < self.entries.len() {
+        W i < self.entries.len() {
             I self.entries[i].term_hash == term_hash {
                 R Ok(Some(self.entries[i].posting_head_page));
             }
@@ -145,7 +147,7 @@ X DictionaryIndex {
         }
 
         # B+Tree lookup
-        ~key = Self.encode_term_key(term_hash);
+        ~key = DictionaryIndex.encode_term_key(term_hash);
         self.tree.search(&key, pool)
     }
 
@@ -158,7 +160,7 @@ X DictionaryIndex {
         gcm: &~GroupCommitManager,
         pool: &~BufferPool,
     ) -> Result<(), VaisError> {
-        ~key = Self.encode_term_key(term_hash);
+        ~key = DictionaryIndex.encode_term_key(term_hash);
 
         # Delete old entry and insert with new value
         btree_delete(&self.tree, &key, txn_id, gcm, pool)?;
@@ -166,12 +168,14 @@ X DictionaryIndex {
 
         # Update cache
         ~i: u64 = 0;
-        L W i < self.entries.len() {
+        ~updated = false;
+        W i < self.entries.len() && !updated {
             I self.entries[i].term_hash == term_hash {
                 self.entries[i].posting_head_page = new_posting_head;
-                B;
+                updated = true;
+            } E {
+                i += 1;
             }
-            i += 1;
         }
 
         Ok(())
@@ -185,7 +189,8 @@ X DictionaryIndex {
         delta_term_freq: i64,
     ) {
         ~i: u64 = 0;
-        L W i < self.entries.len() {
+        ~found = false;
+        W i < self.entries.len() && !found {
             I self.entries[i].term_hash == term_hash {
                 I delta_doc_freq > 0 {
                     self.entries[i].doc_freq += delta_doc_freq as u32;
@@ -207,9 +212,10 @@ X DictionaryIndex {
                         self.entries[i].total_term_freq = 0;
                     }
                 }
-                B;
+                found = true;
+            } E {
+                i += 1;
             }
-            i += 1;
         }
     }
 
@@ -226,8 +232,8 @@ X DictionaryIndex {
         ~results = Vec.new();
         ~entries = self.tree.full_scan(pool)?;
         ~i: u64 = 0;
-        L W i < entries.len() {
-            ~term_hash = Self.decode_term_key(&entries[i].0);
+        W i < entries.len() {
+            ~term_hash = DictionaryIndex.decode_term_key(&entries[i].0);
             ~posting_head = entries[i].1;
             results.push(DictEntry {
                 term: "",  # Term text not stored in B+Tree, only hash

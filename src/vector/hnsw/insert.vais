@@ -64,6 +64,7 @@ F err_insert_failed(node_id: u64, detail: Str) -> VaisError {
 # - store_node(): Persist node after modification
 # - allocate_node_id(): Generate unique node ID
 # - get_file_page(): Return (file_id, page_id) for a given node
+# - allocate_node_page(): Reserve a page for a node (for WAL-before-flush)
 #
 # This allows insert.vais to be storage-agnostic (e.g., in-memory for tests,
 # page manager for production).
@@ -73,6 +74,9 @@ T NodeStore {
     F store_node(&~self, node: HnswNode) -> Result<(), VaisError>;
     F allocate_node_id(&~self) -> u64;
     F get_file_page(self, node_id: u64) -> Result<(u8, u32), VaisError>;
+    # Allocate a page for a new node without writing data yet.
+    # Returns (file_id, page_id) for use in WAL records before store_node().
+    F allocate_node_page(&~self, node_id: u64) -> Result<(u8, u32), VaisError>;
 }
 
 # ============================================================================
@@ -96,23 +100,61 @@ X MinHeap {
 
     F push(~self, candidate: SearchCandidate) {
         self.items.push(candidate);
-        # Maintain sorted order (ascending by distance)
+        # Sift up: binary heap invariant (parent <= children)
         ~i = self.items.len() - 1;
-        L while i > 0 {
-            ~parent_idx = i - 1;
+        ~sifting = true;
+        W i > 0 && sifting {
+            ~parent_idx = (i - 1) / 2;
             I self.items[i].distance < self.items[parent_idx].distance {
-                # Swap
+                # Swap child with parent
                 ~tmp = self.items[i];
                 self.items[i] = self.items[parent_idx];
                 self.items[parent_idx] = tmp;
                 i = parent_idx;
             } E {
-                B            }
+                sifting = false;
+            }
         }
     }
 
     F pop(~self) -> SearchCandidate {
-        self.items.remove(0)
+        ~last_idx = self.items.len() - 1;
+        # Swap root with last element
+        ~tmp = self.items[0];
+        self.items[0] = self.items[last_idx];
+        self.items[last_idx] = tmp;
+
+        # Remove last (was root)
+        ~result = self.items.remove(last_idx);
+
+        # Sift down from root
+        I self.items.len() > 0 {
+            ~i: u64 = 0;
+            ~sifting = true;
+            W sifting {
+                ~smallest = i;
+                ~left = 2 * i + 1;
+                ~right = 2 * i + 2;
+
+                I left < self.items.len() && self.items[left].distance < self.items[smallest].distance {
+                    smallest = left;
+                }
+                I right < self.items.len() && self.items[right].distance < self.items[smallest].distance {
+                    smallest = right;
+                }
+
+                I smallest != i {
+                    ~swap_tmp = self.items[i];
+                    self.items[i] = self.items[smallest];
+                    self.items[smallest] = swap_tmp;
+                    i = smallest;
+                } E {
+                    sifting = false;
+                }
+            }
+        }
+
+        result
     }
 
     F is_empty(self) -> bool {
@@ -145,23 +187,61 @@ X MaxHeap {
 
     F push(~self, candidate: SearchCandidate) {
         self.items.push(candidate);
-        # Maintain sorted order (descending by distance)
+        # Sift up: binary heap invariant (parent >= children)
         ~i = self.items.len() - 1;
-        L while i > 0 {
-            ~parent_idx = i - 1;
+        ~sifting = true;
+        W i > 0 && sifting {
+            ~parent_idx = (i - 1) / 2;
             I self.items[i].distance > self.items[parent_idx].distance {
-                # Swap
+                # Swap child with parent
                 ~tmp = self.items[i];
                 self.items[i] = self.items[parent_idx];
                 self.items[parent_idx] = tmp;
                 i = parent_idx;
             } E {
-                B            }
+                sifting = false;
+            }
         }
     }
 
     F pop(~self) -> SearchCandidate {
-        self.items.remove(0)
+        ~last_idx = self.items.len() - 1;
+        # Swap root with last element
+        ~tmp = self.items[0];
+        self.items[0] = self.items[last_idx];
+        self.items[last_idx] = tmp;
+
+        # Remove last (was root)
+        ~result = self.items.remove(last_idx);
+
+        # Sift down from root
+        I self.items.len() > 0 {
+            ~i: u64 = 0;
+            ~sifting = true;
+            W sifting {
+                ~largest = i;
+                ~left = 2 * i + 1;
+                ~right = 2 * i + 2;
+
+                I left < self.items.len() && self.items[left].distance > self.items[largest].distance {
+                    largest = left;
+                }
+                I right < self.items.len() && self.items[right].distance > self.items[largest].distance {
+                    largest = right;
+                }
+
+                I largest != i {
+                    ~swap_tmp = self.items[i];
+                    self.items[i] = self.items[largest];
+                    self.items[largest] = swap_tmp;
+                    i = largest;
+                } E {
+                    sifting = false;
+                }
+            }
+        }
+
+        result
     }
 
     F is_empty(self) -> bool {
@@ -229,17 +309,24 @@ F search_layer<S: NodeStore>(
     results.push(SearchCandidate.new(entry_point, ep_dist));
 
     # Beam search loop
-    L while !candidates.is_empty() {
+    ~beam_done = false;
+    W !candidates.is_empty() && !beam_done {
         # Get closest candidate
         ~current_candidate = candidates.pop();
         ~current_dist = current_candidate.distance;
 
         # Check stopping condition: current is farther than worst result
+        ~should_stop = false;
         I results.len() >= ef as u64 {
             ~worst_result = results.peek();
             I current_dist > worst_result.distance {
-                B            }
+                should_stop = true;
+            }
         }
+
+        I should_stop {
+            beam_done = true;
+        } E {
 
         # Load current node to get neighbors
         ~current_node = store.load_node(current_candidate.node_id)?;
@@ -247,7 +334,7 @@ F search_layer<S: NodeStore>(
 
         # Explore neighbors
         ~i = 0;
-        L while i < neighbors.len() {
+        W i < neighbors.len() {
             ~neighbor = &neighbors[i];
             ~neighbor_id = neighbor.node_id;
 
@@ -278,11 +365,12 @@ F search_layer<S: NodeStore>(
 
             i += 1;
         }
+        }
     }
 
     # Convert max-heap to sorted vector (closest first)
     ~result_vec = Vec.with_capacity(results.len());
-    L while !results.is_empty() {
+    W !results.is_empty() {
         result_vec.push(results.pop());
     }
 
@@ -333,7 +421,7 @@ F select_neighbors_heuristic<S: NodeStore>(
         # All candidates fit within M, return all
         ~result = Vec.with_capacity(candidates.len());
         ~i = 0;
-        L while i < candidates.len() {
+        W i < candidates.len() {
             result.push(HnswNeighbor.new(
                 candidates[i].node_id,
                 candidates[i].distance
@@ -346,17 +434,17 @@ F select_neighbors_heuristic<S: NodeStore>(
     # Sort candidates by distance to query (ascending)
     ~sorted = Vec.with_capacity(candidates.len());
     ~i = 0;
-    L while i < candidates.len() {
+    W i < candidates.len() {
         sorted.push(candidates[i]);
         i += 1;
     }
 
     # Simple insertion sort (small m, fast for small arrays)
     ~j = 1;
-    L while j < sorted.len() {
+    W j < sorted.len() {
         ~key = sorted[j];
         ~k = j;
-        L while k > 0 && sorted[k - 1].distance > key.distance {
+        W k > 0 && sorted[k - 1].distance > key.distance {
             sorted[k] = sorted[k - 1];
             k -= 1;
         }
@@ -369,7 +457,7 @@ F select_neighbors_heuristic<S: NodeStore>(
     ~result_vecs = Vec.with_capacity(m as u64);
 
     ~idx = 0;
-    L while idx < sorted.len() && result.len() < m as u64 {
+    W idx < sorted.len() && result.len() < m as u64 {
         ~candidate = &sorted[idx];
         ~candidate_vec = store.load_vector(candidate.node_id)?;
         ~candidate_dist_to_query = candidate.distance;
@@ -377,7 +465,7 @@ F select_neighbors_heuristic<S: NodeStore>(
         # Check diversity: is candidate closer to query than to any selected neighbor?
         ~is_diverse = true;
         ~r_idx = 0;
-        L while r_idx < result.len() {
+        W r_idx < result.len() && is_diverse {
             ~selected_vec = &result_vecs[r_idx];
             ~dist_to_selected = distance_computer.compute(&candidate_vec, selected_vec)?;
 
@@ -385,7 +473,7 @@ F select_neighbors_heuristic<S: NodeStore>(
             # If candidate is closer to a selected neighbor than to query, reject
             I dist_to_selected < candidate_dist_to_query {
                 is_diverse = false;
-                B            }
+            }
             r_idx += 1;
         }
 
@@ -401,16 +489,16 @@ F select_neighbors_heuristic<S: NodeStore>(
     # Phase 2: If result not full, fill remaining from sorted list (without diversity check)
     I result.len() < m as u64 {
         ~idx2 = 0;
-        L while idx2 < sorted.len() && result.len() < m as u64 {
+        W idx2 < sorted.len() && result.len() < m as u64 {
             ~candidate2 = &sorted[idx2];
 
             # Check if already in result
             ~already_added = false;
             ~r_idx2 = 0;
-            L while r_idx2 < result.len() {
+            W r_idx2 < result.len() && !already_added {
                 I result[r_idx2].node_id == candidate2.node_id {
                     already_added = true;
-                    B                }
+                }
                 r_idx2 += 1;
             }
 
@@ -455,7 +543,7 @@ F prune_connections<S: NodeStore>(
         # Already within bounds, no pruning needed
         ~result = Vec.with_capacity(neighbors.len());
         ~i = 0;
-        L while i < neighbors.len() {
+        W i < neighbors.len() {
             result.push(neighbors[i]);
             i += 1;
         }
@@ -468,7 +556,7 @@ F prune_connections<S: NodeStore>(
     # Convert neighbors to SearchCandidates
     ~candidates = Vec.with_capacity(neighbors.len());
     ~i = 0;
-    L while i < neighbors.len() {
+    W i < neighbors.len() {
         candidates.push(SearchCandidate.new(
             neighbors[i].node_id,
             neighbors[i].distance
@@ -537,11 +625,9 @@ F hnsw_insert<S: NodeStore>(
         meta.update_entry_point(new_node_id, new_layer);
         meta.add_node();
 
-        # Store new node
-        store.store_node(new_node)?;
-
-        # Write WAL for insert
-        ~(file_id, page_id) = store.get_file_page(new_node_id)?;
+        # WAL-before-flush invariant: write WAL BEFORE storing node to pages.
+        # We allocate the page first (without flushing) to get file_id/page_id for the WAL record.
+        ~(file_id, page_id) = store.allocate_node_page(new_node_id)?;
         write_insert_wal(
             new_node_id,
             new_layer,
@@ -552,6 +638,9 @@ F hnsw_insert<S: NodeStore>(
             txn_id
         )?;
 
+        # Now safe to store node data to the page
+        store.store_node(new_node)?;
+
         R Ok(meta);
     }
 
@@ -560,7 +649,7 @@ F hnsw_insert<S: NodeStore>(
     ~current_nearest = entry_point;
 
     ~lc = meta.max_layer;
-    L while lc > new_layer {
+    W lc > new_layer {
         ~search_results = search_layer(
             query_vec,
             current_nearest,
@@ -580,7 +669,8 @@ F hnsw_insert<S: NodeStore>(
     # Phase 2: Insert into layers [min(new_layer, max_layer) .. 0]
     ~insert_layer = I new_layer < meta.max_layer { new_layer } E { meta.max_layer };
 
-    L while insert_layer >= 0 {
+    ~layers_done = false;
+    W !layers_done {
         # Beam search to find ef_construction neighbors
         ~candidates = search_layer(
             query_vec,
@@ -604,14 +694,14 @@ F hnsw_insert<S: NodeStore>(
 
         # Add selected neighbors to new node
         ~i = 0;
-        L while i < selected_neighbors.len() {
+        W i < selected_neighbors.len() {
             new_node.add_neighbor(insert_layer, selected_neighbors[i])?;
             i += 1;
         }
 
         # Prune neighbors' connections if they exceed M
         ~j = 0;
-        L while j < selected_neighbors.len() {
+        W j < selected_neighbors.len() {
             ~neighbor_id = selected_neighbors[j].node_id;
             ~neighbor_node = store.load_node(neighbor_id)?;
 
@@ -638,7 +728,7 @@ F hnsw_insert<S: NodeStore>(
                 ~new_neighbor_list = neighbor_node_mut.get_neighbors_mut(insert_layer)?;
                 new_neighbor_list.clear();
                 ~k = 0;
-                L while k < pruned_neighbors.len() {
+                W k < pruned_neighbors.len() {
                     new_neighbor_list.push(pruned_neighbors[k]);
                     k += 1;
                 }
@@ -668,10 +758,12 @@ F hnsw_insert<S: NodeStore>(
             current_nearest = candidates[0].node_id;
         }
 
-        # Break at layer 0 (u8 underflow prevention)
+        # Stop at layer 0 (u8 underflow prevention)
         I insert_layer == 0 {
-            B        }
-        insert_layer -= 1;
+            layers_done = true;
+        } E {
+            insert_layer -= 1;
+        }
     }
 
     # Phase 3: Update entry point if new layer exceeds current max
@@ -682,17 +774,15 @@ F hnsw_insert<S: NodeStore>(
     # Increment node count
     meta.add_node();
 
-    # Store new node
-    store.store_node(new_node)?;
-
-    # Write WAL for new node insert
-    ~(file_id, page_id) = store.get_file_page(new_node_id)?;
+    # WAL-before-flush invariant: write WAL BEFORE storing node to pages.
+    # Collect neighbor info from the in-memory node before persisting.
+    ~(file_id, page_id) = store.allocate_node_page(new_node_id)?;
     ~all_neighbors = Vec.new();
     ~layer_idx = 0;
-    L while layer_idx <= new_layer {
+    W layer_idx <= new_layer {
         ~layer_neighbors = new_node.get_neighbors(layer_idx)?;
         ~n_idx = 0;
-        L while n_idx < layer_neighbors.len() {
+        W n_idx < layer_neighbors.len() {
             all_neighbors.push((layer_neighbors[n_idx].node_id, layer_neighbors[n_idx].distance));
             n_idx += 1;
         }
@@ -708,6 +798,9 @@ F hnsw_insert<S: NodeStore>(
         gcm,
         txn_id
     )?;
+
+    # Now safe to store node data to the allocated page
+    store.store_node(new_node)?;
 
     Ok(meta)
 }
@@ -728,7 +821,7 @@ F write_insert_wal(
 ) -> Result<(), VaisError> {
     ~wal_neighbors = Vec.with_capacity(neighbors.len());
     ~i = 0;
-    L while i < neighbors.len() {
+    W i < neighbors.len() {
         wal_neighbors.push(neighbors[i]);
         i += 1;
     }
@@ -766,14 +859,14 @@ F write_edge_update_wal(
 ) -> Result<(), VaisError> {
     ~old_ids = Vec.with_capacity(old_neighbors.len());
     ~i = 0;
-    L while i < old_neighbors.len() {
+    W i < old_neighbors.len() {
         old_ids.push(old_neighbors[i].node_id);
         i += 1;
     }
 
     ~new_ids = Vec.with_capacity(new_neighbors.len());
     ~j = 0;
-    L while j < new_neighbors.len() {
+    W j < new_neighbors.len() {
         new_ids.push(new_neighbors[j].node_id);
         j += 1;
     }

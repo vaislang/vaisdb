@@ -153,16 +153,17 @@ F range_scan_bounded(
     };
 
     # Iterate through entries
-    L while cursor.valid() {
+    ~in_range = true;
+    W cursor.valid() && in_range {
         ~(key, tid) = cursor.current(pool)?;
 
         # Check if past end of range
         I range.is_past_end(&key) {
-            B;
+            in_range = false;
+        } E {
+            results.push((key, tid));
+            cursor.next(pool)?;
         }
-
-        results.push((key, tid));
-        cursor.next(pool)?;
     }
 
     cursor.close(pool);
@@ -239,15 +240,17 @@ F count_range(
         None => search_first(tree, pool)?,
     };
 
-    L while cursor.valid() {
+    ~in_range = true;
+    W cursor.valid() && in_range {
         ~(key, _) = cursor.current(pool)?;
         I range.is_past_end(&key) {
-            B;
+            in_range = false;
+        } E {
+            I range.contains(&key) {
+                count += 1;
+            }
+            cursor.next(pool)?;
         }
-        I range.contains(&key) {
-            count += 1;
-        }
-        cursor.next(pool)?;
     }
 
     cursor.close(pool);

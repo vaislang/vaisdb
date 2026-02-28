@@ -84,6 +84,9 @@ X BufferPool {
 
         ~key = make_page_key(file_id, page_id);
 
+        # Acquire pool lock for page table operations
+        ~guard = self.lock.lock();
+
         # Check if page is already in buffer pool
         I self.page_table.contains_key(&key) {
             ~frame_id = *self.page_table.get(&key)!;
@@ -294,34 +297,32 @@ X BufferPool {
             ~guard = self.lock.lock();
             ~already_loaded = self.page_table.contains_key(&key);
             drop(guard);
-            I already_loaded { C; }
-
-            # Best-effort: silently ignore prefetch failures
-            M self.page_manager.read_page(file_id, pg) {
-                Ok(page_data) => {
-                    ~guard2 = self.lock.lock();
-                    # Recheck (race)
-                    I self.page_table.contains_key(&key) {
+            I !already_loaded {
+                # Best-effort: silently ignore prefetch failures
+                M self.page_manager.read_page(file_id, pg) {
+                    Ok(page_data) => {
+                        ~guard2 = self.lock.lock();
+                        # Recheck (race)
+                        I !self.page_table.contains_key(&key) {
+                            M self.get_free_frame() {
+                                Ok(fid) => {
+                                    ~loc = PageLocation.new(file_id, pg);
+                                    self.frames[fid as u64].load(loc, &page_data);
+                                    self.page_table.insert(key, fid);
+                                    # Prefetched pages start unpinned
+                                    self.frames[fid as u64].unpin();
+                                },
+                                Err(_) => {
+                                    # No free frames — stop prefetching
+                                    drop(guard2);
+                                    R;
+                                },
+                            }
+                        }
                         drop(guard2);
-                        C;
-                    }
-                    M self.get_free_frame() {
-                        Ok(fid) => {
-                            ~loc = PageLocation.new(file_id, pg);
-                            self.frames[fid as u64].load(loc, &page_data);
-                            self.page_table.insert(key, fid);
-                            # Prefetched pages start unpinned
-                            self.frames[fid as u64].unpin();
-                        },
-                        Err(_) => {
-                            # No free frames — stop prefetching
-                            drop(guard2);
-                            return;
-                        },
-                    }
-                    drop(guard2);
-                },
-                Err(_) => { return; },  # Hit end of file or error — stop
+                    },
+                    Err(_) => { R; },  # Hit end of file or error — stop
+                }
             }
         }
     }
