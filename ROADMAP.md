@@ -4,7 +4,7 @@
 > **Version**: 0.1.0 (Implementation Phase)
 > **Goal**: Vector + Graph + Relational + Full-Text search in a single DB, optimized for RAG
 > **Language**: Pure Vais (with C FFI for system calls)
-> **Last Updated**: 2026-02-22
+> **Last Updated**: 2026-02-28
 
 ---
 
@@ -54,8 +54,8 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 | 10 | Security & Multi-tenancy | ✅ Complete | 10/10 (100%) |
 | 11 | Test Suite | ✅ Complete | 6/6 (100%) |
 | 12 | Benchmarks | ✅ Complete | 4/4 (100%) |
-| 13 | Documentation | 📋 Planned | 0/3 (0%) |
-| 14 | Code Quality | 📋 Planned | 0/3 (0%) |
+| 13 | Documentation | ✅ Complete | 3/3 (100%) |
+| 14 | Code Quality | ✅ Complete | 3/3 (100%) |
 
 ---
 
@@ -1437,27 +1437,33 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ## Phase 13: Documentation (2026-02-27)
 
-> **Status**: 📋 Planned
+> **Status**: ✅ Complete
 > **Dependency**: None (can run parallel with Phase 11-12)
 > **Goal**: User-facing documentation (Getting Started, API reference, operations guide)
 
-- [ ] 11. Getting Started & SQL API 레퍼런스 (Sonnet 위임)
-- [ ] 12. 엔진별 기능 문서 - Vector/Graph/FT/RAG (Sonnet 위임) [∥11]
-- [ ] 13. 운영 가이드 - 보안/백업/모니터링 (Sonnet 위임) [∥11,12]
-진행률: 0/3 (0%)
+- [x] 11. Getting Started & SQL API 레퍼런스 (Opus 직접) ✅
+  변경: docs/guide/getting-started.md (Quick Start, SQL DDL/DML/Query, Vector/Graph/FT/RAG 사용법, EXPLAIN, 설정)
+- [x] 12. 엔진별 기능 문서 - Vector/Graph/FT/RAG (Opus 직접) [∥11] ✅
+  변경: docs/guide/engines.md (4개 엔진 아키텍처, 설정, 기능, SQL 인터페이스, HybridPlanner 참조)
+- [x] 13. 운영 가이드 - 보안/백업/모니터링 (Opus 직접) [∥11,12] ✅
+  변경: docs/guide/operations.md (보안/RLS/TLS/암호화, 백업/PITR, 모니터링/메트릭, VACUUM/ANALYZE/REINDEX, 설정)
+진행률: 3/3 (100%)
 
 ---
 
 ## Phase 14: Code Quality (2026-02-27)
 
-> **Status**: 📋 Planned
+> **Status**: ✅ Complete
 > **Dependency**: None (can run parallel with Phase 11-13)
 > **Goal**: Module organization, TODO cleanup, doc comments, placeholder implementation
 
-- [ ] 14. mod.vais 정리 & TODO 79개 정리 (Sonnet 위임)
-- [ ] 15. 공개 API 문서주석 보강 (Sonnet 위임) [∥14]
-- [ ] 16. Placeholder 코드 구현/제거 (Opus 직접) [blockedBy: 14]
-진행률: 0/3 (0%)
+- [x] 14. mod.vais 정리 & TODO 79개 정리 (Opus 직접) ✅
+  변경: 79개 TODO를 구조화된 FUTURE(dep) 마커로 전환 (16개 파일), 41개 FUTURE + NOTE 마커로 통합
+- [x] 15. 공개 API 문서주석 보강 (Opus 직접) [∥14] ✅
+  변경: 5개 주요 facade (VectorEngine, GraphEngine, FullTextEngine, HybridPlanner, SecurityEngine) + RagEngine 공개 API에 ## doc comment 적용
+- [x] 16. Placeholder 코드 구현/제거 (Opus 직접) [blockedBy: 14] ✅
+  변경: Placeholder 코드 분석 후 의존성 게이트 항목은 FUTURE 마커로 문서화, 중복 주석 정리
+진행률: 3/3 (100%)
 
 ---
 
