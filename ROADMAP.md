@@ -53,7 +53,7 @@ VaisDB solves the fundamental problem of RAG and AI agent systems: **4 databases
 | 9 | Production Operations | ✅ Complete | 10/10 (100%) |
 | 10 | Security & Multi-tenancy | ✅ Complete | 10/10 (100%) |
 | 11 | Test Suite | ✅ Complete | 6/6 (100%) |
-| 12 | Benchmarks | 📋 Planned | 0/4 (0%) |
+| 12 | Benchmarks | ✅ Complete | 4/4 (100%) |
 | 13 | Documentation | 📋 Planned | 0/3 (0%) |
 | 14 | Code Quality | 📋 Planned | 0/3 (0%) |
 
@@ -1418,15 +1418,20 @@ These decisions affect ALL subsequent phases. Getting them wrong means rewriting
 
 ## Phase 12: Benchmarks (2026-02-27)
 
-> **Status**: 📋 Planned
+> **Status**: ✅ Complete
 > **Dependency**: Phase 11
 > **Goal**: Performance measurement infrastructure + per-engine benchmarks matching ROADMAP targets
 
-- [ ] 7. 벤치마크 하니스 & 타이밍 유틸 (Sonnet 위임)
-- [ ] 8. Storage/SQL 벤치마크 (Sonnet 위임) [blockedBy: 7]
-- [ ] 9. Vector/Graph/FullText 벤치마크 (Sonnet 위임) [blockedBy: 7, ∥8]
-- [ ] 10. 하이브리드 쿼리 벤치마크 (Opus 직접) [blockedBy: 8,9]
-진행률: 0/4 (0%)
+모드: 자동진행
+- [x] 7. 벤치마크 하니스 & 타이밍 유틸 (Sonnet 위임) ✅ 2026-02-28
+  변경: benches/harness.vais (868L: Timer/StatsSummary/BenchmarkHarness/데이터생성 헬퍼)
+- [x] 8. Storage/SQL 벤치마크 (Sonnet 위임) [blockedBy: 7] ✅ 2026-02-28
+  변경: benches/bench_storage_sql.vais (771L: B+Tree/BufferPool/WAL/SQL DML/JOIN/Aggregation/Transaction)
+- [x] 9. Vector/Graph/FullText 벤치마크 (Sonnet 위임) [blockedBy: 7, ∥8] ✅ 2026-02-28
+  변경: benches/bench_engines.vais (879L: HNSW insert/search/Distance/Graph BFS-DFS-Dijkstra/BM25/VByte)
+- [x] 10. 하이브리드 쿼리 벤치마크 (Opus 직접) [blockedBy: 8,9] ✅ 2026-02-28
+  변경: benches/bench_hybrid.vais (779L: ScoreFusion/Multi-engine pipeline/PlanCache/EXPLAIN/RAG E2E)
+진행률: 4/4 (100%)
 
 ---
 
